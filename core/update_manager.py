@@ -34,7 +34,7 @@ from core.config import USER_DATA_DIR
 # ─────────────────────────────────────────────────────────────────────────────
 
 #: Versión actual del binario. Bumpear en cada release.
-CURRENT_VERSION = "2.6.2"
+CURRENT_VERSION = "2.8.0"
 
 #: URL del ``version.json`` remoto.
 #: Servido desde Cloudflare R2 (bucket público vía custom domain).
