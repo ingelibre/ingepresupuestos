@@ -43,6 +43,13 @@ rsync -a \
   --exclude 'installer/flatpak/.flatpak-builder/' \
   "$REPO/" "$SRC_DIR/"
 
+# Distribución pública: el Flatpak debe llevar el seed LIMPIO (mismo que el repo
+# público), no el seed privado de desarrollo. Si existe, lo usamos.
+if [ -f "$REPO/presupuestos_seed_publico.db" ]; then
+  echo "▶ Usando seed público (presupuestos_seed_publico.db) en el bundle"
+  cp -f "$REPO/presupuestos_seed_publico.db" "$SRC_DIR/presupuestos_seed.db"
+fi
+
 echo "▶ Construyendo con flatpak-builder …"
 $BUILDER \
   --user --force-clean --install --disable-rofiles-fuse \

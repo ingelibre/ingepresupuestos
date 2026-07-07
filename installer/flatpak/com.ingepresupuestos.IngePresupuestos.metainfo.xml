@@ -42,6 +42,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="2.8.0" date="2026-07-06">
+      <description>
+        <p>IngePresupuestos ahora es software libre y gratuito (GPL-3.0): todas las funciones desbloqueadas, incluidos los reportes editables. Mejoras de interfaz.</p>
+      </description>
+    </release>
     <release version="2.6.2" date="2026-07-01">
       <description>
         <p>Módulo de Control de Obra, «Sugerir partidas» con IA y plantillas de estructura.</p>
