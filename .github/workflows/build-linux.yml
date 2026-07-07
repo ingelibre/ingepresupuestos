@@ -14,6 +14,10 @@ permissions:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    env:
+      # Se rellena solo si agregaste los secretos R2_* en el repo. Si no están,
+      # los pasos de R2 se saltan y el build sigue igual (GitHub Releases).
+      HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
 
     steps:
       - name: Checkout código
@@ -131,3 +135,73 @@ jobs:
             dist/ingepresupuestos-linux.tar.gz
             dist/IngePresupuestos-*-x86_64.AppImage
           generate_release_notes: true
+
+      # ── Subir a Cloudflare R2 (opcional: requiere los secretos R2_*) ───────
+      # Si no configuraste los secretos, este paso se salta y el release sigue
+      # publicándose en GitHub Releases igual que antes.
+      - name: Subir binarios Linux a R2
+        if: ${{ env.HAS_R2 == 'true' && startsWith(github.ref, 'refs/tags/') }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -e
+          V="${{ steps.ver.outputs.version }}"
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "dist/ingepresupuestos-linux.tar.gz" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
+          aws s3 cp "dist/IngePresupuestos-${V}-x86_64.AppImage" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
+          echo "✓ binarios Linux subidos a R2/v${V}/"
+
+      # Genera y sube version.json (lo que lee el auto-updater de la app).
+      # Espera a que los 4 binarios (Windows + Linux) estén en R2 para no
+      # publicar enlaces rotos, y PRESERVA el bloque `ingeconverter` del
+      # version.json existente. Solo el job de Linux lo escribe (un solo autor).
+      - name: Actualizar version.json en R2
+        if: ${{ env.HAS_R2 == 'true' && startsWith(github.ref, 'refs/tags/') }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -e
+          V="${{ steps.ver.outputs.version }}"
+          BASE="https://downloads.ingepresupuestos.com"
+          FILES="v${V}/ingepresupuestos-setup-v${V}.exe v${V}/ingepresupuestos-windows.zip v${V}/IngePresupuestos-${V}-x86_64.AppImage v${V}/ingepresupuestos-linux.tar.gz"
+          # Esperar hasta ~20 min a que los binarios de Windows (otro job) suban.
+          ok=0
+          for i in $(seq 1 40); do
+            ok=1
+            for f in $FILES; do curl -fsI "${BASE}/${f}" >/dev/null 2>&1 || ok=0; done
+            [ "$ok" = "1" ] && break
+            echo "esperando los 4 binarios en R2… (intento $i/40)"; sleep 30
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::warning::no todos los binarios están en R2 tras ~20 min — NO actualizo version.json (evita enlaces rotos)"
+            exit 0
+          fi
+          # Traer el version.json actual para preservar el bloque ingeconverter.
+          if ! curl -fsSL "${BASE}/version.json" -o cur.json; then
+            echo "::warning::no pude leer el version.json actual — omito para no perder el bloque ingeconverter"
+            exit 0
+          fi
+          # Changelog = mensaje del tag anotado; si no hay, uno genérico.
+          CL=$(git tag -l --format='%(contents)' "v${V}" 2>/dev/null | head -c 3000)
+          [ -z "$CL" ] && CL="Versión ${V} — software libre y gratuito. Novedades en ingepresupuestos.com"
+          ICONV=$(jq -c 'if .ingeconverter then .ingeconverter else null end' cur.json)
+          jq -n --arg v "$V" --arg date "$(date +%F)" --arg cl "$CL" --argjson ic "$ICONV" \
+            '{version:$v, release_date:$date, changelog:$cl, minimum_version:null,
+              downloads:{
+                windows_installer:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-setup-v"+$v+".exe"),
+                windows_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-windows.zip"),
+                linux_appimage:("https://downloads.ingepresupuestos.com/v"+$v+"/IngePresupuestos-"+$v+"-x86_64.AppImage"),
+                linux_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-linux.tar.gz")
+              },
+              download_url:"https://ingepresupuestos.com/#descargar"}
+             + (if $ic==null then {} else {ingeconverter:$ic} end)' > version.json
+          echo "── version.json generado ──"; cat version.json
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp version.json "s3://ingepresupuestos-downloads/version.json" --endpoint-url "$EP" --content-type application/json --cache-control "no-cache, max-age=0"
+          echo "✓ version.json actualizado en R2 → v${V}"

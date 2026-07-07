@@ -17,6 +17,10 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      # Se rellena solo si agregaste los secretos R2_* en el repo. Si no están,
+      # el paso de R2 se salta y el build sigue igual (GitHub Releases).
+      HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
 
     steps:
       - name: Checkout código
@@ -161,3 +165,22 @@ jobs:
             dist/ingepresupuestos-windows.zip
             dist/ingepresupuestos-setup-v*.exe
           generate_release_notes: true
+
+      # ── Subir a Cloudflare R2 (opcional: requiere los secretos R2_*) ───────
+      # Sube el instalador y el portable Windows. El job de Linux es el que
+      # arma y sube version.json (espera a que estos archivos existan en R2).
+      - name: Subir binarios Windows a R2
+        if: ${{ env.HAS_R2 == 'true' && startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -e
+          V="${{ steps.ver.outputs.version }}"
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "dist/ingepresupuestos-setup-v${V}.exe" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
+          aws s3 cp "dist/ingepresupuestos-windows.zip" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
+          echo "✓ binarios Windows subidos a R2/v${V}/"
