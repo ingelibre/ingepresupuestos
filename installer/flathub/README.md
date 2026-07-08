@@ -30,13 +30,20 @@ de código compartido.
 ## Regenerar las dependencias Python (si cambia requirements.txt)
 
 ```bash
-# reqs sin PySide6 (base-app), pyinstaller ni pyodbc (Windows) ni model2vec (Fase 2):
+# reqs sin PySide6 (base-app), pyinstaller ni pyodbc (Windows) ni model2vec (Fase 2).
+# --prefer-wheels es OBLIGATORIO para los paquetes compilados: sin él el generador
+# baja el sdist y el build offline falla al compilar (Pillow/cryptography/rapidfuzz/…).
 venv/bin/python flatpak-pip-generator.py \
   --runtime='org.freedesktop.Sdk//25.08' \
+  --prefer-wheels='pillow,cryptography,rapidfuzz,pydantic-core,cffi,jiter,lxml,markupsafe,pypdfium2' \
   --requirements-file reqs-flathub.txt \
   --yaml --output installer/flathub/python3-requirements
 ```
 (`flatpak-pip-generator.py` se baja de github.com/flatpak/flatpak-builder-tools)
+
+⚠ **odfpy** no tiene rueda (solo `.egg` + sdist) y el generador elige el `.egg`
+(pip no lo instala). Tras regenerar, corregir a mano su fuente en el yaml al
+`odfpy-1.4.1.tar.gz` (sdist, es Python puro y compila bien).
 
 ## Probar el build localmente (PENDIENTE — descarga varios GB)
 
@@ -73,5 +80,8 @@ flatpak run com.ingepresupuestos.IngePresupuestos
 ## Estado
 
 - ✅ Manifiesto + metainfo + launcher + desktop + deps offline (lint limpio).
-- ⏳ Build local de validación (multi-GB, iterativo).
-- ⏳ PR a flathub/flathub.
+- ✅ **Build local VALIDADO** (2026-07-07): compila limpio, lint OK (solo el aviso
+  esperado `appstream-external-screenshot-url`), la app arranca offscreen sin
+  errores, 14/14 imports OK (PySide6 del base-app, odfpy, rapidfuzz, cryptography,
+  AI SDKs), QtPdf/QtLocation OK, `mdb-export` en `/app/bin` (importar .prs OK).
+- ⏳ PR a `flathub/flathub` (rama `new-pr`) — pendiente de enviar.
