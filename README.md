@@ -13,6 +13,8 @@ Copyright (C) 2026 Marco Sumari / Sumari SAC
 
 ---
 
+![Pantalla de Proyectos de IngePresupuestos](docs/images/proyectos.png)
+
 ## ¿Qué hace?
 
 - **Presupuestos** con árbol jerárquico, sub-presupuestos, **ACU** (Análisis de Costos Unitarios) editable y precios por proyecto.
