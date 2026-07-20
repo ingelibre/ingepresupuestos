@@ -56,7 +56,16 @@ datas = [
     #     (los consume install-linux.sh desde _internal/resources/…).
     ('resources/icons/mimetypes/ingepresupuestos-db.ico', 'resources/icons/mimetypes'),
     ('resources/icons/mimetypes/ingepresupuestos-db.svg', 'resources/icons/mimetypes'),
-    ('resources/icons/hicolor', 'resources/icons'),
+    # Iconos del tema hicolor para la asociación .db en Linux. Se listan por
+    # tamaño con glob (una tupla de directorio NO los bundlea de forma fiable).
+    ('resources/icons/hicolor/16x16/mimetypes/*.png',    'resources/icons/hicolor/16x16/mimetypes'),
+    ('resources/icons/hicolor/24x24/mimetypes/*.png',    'resources/icons/hicolor/24x24/mimetypes'),
+    ('resources/icons/hicolor/32x32/mimetypes/*.png',    'resources/icons/hicolor/32x32/mimetypes'),
+    ('resources/icons/hicolor/48x48/mimetypes/*.png',    'resources/icons/hicolor/48x48/mimetypes'),
+    ('resources/icons/hicolor/64x64/mimetypes/*.png',    'resources/icons/hicolor/64x64/mimetypes'),
+    ('resources/icons/hicolor/128x128/mimetypes/*.png',  'resources/icons/hicolor/128x128/mimetypes'),
+    ('resources/icons/hicolor/256x256/mimetypes/*.png',  'resources/icons/hicolor/256x256/mimetypes'),
+    ('resources/icons/hicolor/scalable/mimetypes/*.svg', 'resources/icons/hicolor/scalable/mimetypes'),
     ('resources/mime/*.xml',    'resources/mime'),
 ]
 
