@@ -1,8 +1,8 @@
 ; Script Inno Setup para IngePresupuestos.
 ;
 ; Genera un instalador .exe profesional para Windows con wizard en español,
-; EULA, accesos directos, registro en "Agregar o quitar programas" y
-; desinstalador automático.
+; licencia (GNU GPL v3), accesos directos, registro en "Agregar o quitar
+; programas" y desinstalador automático.
 ;
 ; Compilar local (necesita Inno Setup 6+ instalado):
 ;     iscc /DMyAppVersion=2.2.0 installer\ingepresupuestos.iss
@@ -48,8 +48,8 @@ DefaultGroupName={#MyAppName}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
-; Archivo de licencia que el usuario debe aceptar.
-LicenseFile=EULA.txt
+; Archivo de licencia que el usuario debe aceptar (software libre, GNU GPL v3).
+LicenseFile=LICENCIA.txt
 
 ; Salida — donde queda el setup.exe compilado y cómo se llama.
 OutputDir=..\dist

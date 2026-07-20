@@ -1,0 +1,83 @@
+LICENCIA DE SOFTWARE LIBRE — IngePresupuestos
+
+ÚLTIMA ACTUALIZACIÓN: Julio 2026
+
+IngePresupuestos es SOFTWARE LIBRE. Se distribuye bajo los términos de la
+Licencia Pública General de GNU (GNU GPL), versión 3 o, a su elección,
+cualquier versión posterior, publicada por la Free Software Foundation.
+
+Al instalar y utilizar el Software usted acepta los términos de dicha
+licencia. El texto completo y legalmente vinculante de la GNU GPL v3 se
+incluye en el archivo LICENSE distribuido con el Software y está también
+disponible en: https://www.gnu.org/licenses/gpl-3.0.html
+
+
+1. SUS LIBERTADES
+
+La GNU GPL le garantiza cuatro libertades esenciales:
+
+   - Usar el Software con cualquier propósito.
+   - Estudiar cómo funciona el Software y adaptarlo a sus necesidades;
+     el acceso al código fuente es condición para ello.
+   - Redistribuir copias del Software para ayudar a otras personas.
+   - Mejorar el Software y publicar sus mejoras, de modo que toda la
+     comunidad se beneficie.
+
+El código fuente completo está disponible en:
+https://github.com/ingelibre/ingepresupuestos
+
+
+2. CONDICIÓN DE COPYLEFT
+
+Usted puede copiar, distribuir y modificar el Software libremente, siempre
+que cualquier obra derivada o copia que distribuya se publique también
+bajo la GNU GPL v3 (o posterior) y conserve los avisos de copyright y de
+licencia. Consulte el archivo LICENSE para conocer todas las condiciones.
+
+
+3. SIN RESTRICCIONES DE PAGO NI DE ACTIVACIÓN
+
+Todas las funcionalidades del Software están disponibles sin costo y sin
+restricción. El Software NO requiere períodos de prueba, claves de
+licencia, activación por hardware ni pagos de ningún tipo.
+
+
+4. AUSENCIA DE GARANTÍA
+
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO,
+EXPRESA O IMPLÍCITA, INCLUYENDO PERO NO LIMITÁNDOSE A LAS GARANTÍAS DE
+COMERCIABILIDAD E IDONEIDAD PARA UN PROPÓSITO PARTICULAR, CONFORME A LAS
+SECCIONES 15 Y 16 DE LA GNU GPL v3.
+
+ES RESPONSABILIDAD DEL USUARIO verificar la exactitud de los cálculos y
+resultados generados por el Software antes de su uso en obras,
+licitaciones o documentos oficiales. El Software es una herramienta de
+apoyo, no un sustituto del criterio profesional.
+
+
+5. PRIVACIDAD
+
+El Software almacena sus datos (proyectos, presupuestos, configuración)
+LOCALMENTE en su computador. No se transmiten al autor ni a terceros sin
+su consentimiento expreso. El Software puede consultar periódicamente si
+existen actualizaciones disponibles; esa comunicación no transmite
+información personal.
+
+
+6. CONTACTO
+
+Para consultas, soporte técnico o para contribuir al proyecto:
+
+  Autor:     Ing. Marco Sumari Tellez / Sumari SAC
+  Email:     ing.sumari@gmail.com
+  WhatsApp:  +51 998 839 090
+  Web:       https://ingepresupuestos.com
+  Código:    https://github.com/ingelibre/ingepresupuestos
+
+
+Copyright (C) 2026 Marco Sumari Tellez / Sumari SAC
+
+Este programa es software libre: usted puede redistribuirlo y/o
+modificarlo bajo los términos de la GNU General Public License publicada
+por la Free Software Foundation, ya sea la versión 3 de la Licencia o
+(a su elección) cualquier versión posterior. Véase el archivo LICENSE.
