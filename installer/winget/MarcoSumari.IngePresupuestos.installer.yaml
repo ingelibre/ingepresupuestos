@@ -1,7 +1,7 @@
 # Manifiesto de INSTALADOR — winget (schema 1.6.0)
 # Usa el INSTALADOR de Inno Setup (NO el .msix).
 PackageIdentifier: MarcoSumari.IngePresupuestos
-PackageVersion: 2.8.2
+PackageVersion: 2.8.4
 InstallerLocale: es-PE
 Platform:
   - Windows.Desktop
@@ -15,7 +15,7 @@ InstallModes:
 UpgradeBehavior: install
 Installers:
   - Architecture: x64
-    InstallerUrl: https://downloads.ingepresupuestos.com/v2.8.2/ingepresupuestos-setup-v2.8.2.exe
-    InstallerSha256: CABC5A77615F50E035DE7D5021D98B1572EBC4C697AF6574A4BDF0B78956ACA8
+    InstallerUrl: https://downloads.ingepresupuestos.com/v2.8.4/ingepresupuestos-setup-v2.8.4.exe
+    InstallerSha256: C06F9CCE29A9E8501D792C92381E6F1BB883B45454A186EDD21930A87FB2429B
 ManifestType: installer
 ManifestVersion: 1.6.0

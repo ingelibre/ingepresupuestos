@@ -1,6 +1,6 @@
 # Manifiesto de LOCALE por defecto — winget (schema 1.6.0)
 PackageIdentifier: MarcoSumari.IngePresupuestos
-PackageVersion: 2.8.2
+PackageVersion: 2.8.4
 PackageLocale: es-PE
 Publisher: Marco Sumari
 PublisherUrl: https://ingepresupuestos.com
@@ -30,7 +30,7 @@ ReleaseNotes: |-
   al cambiar de pestaña. Icono de documento propio para los archivos .db.
   Licencia GPL-3.0 en el instalador. Software libre y gratuito: todas las
   funciones incluidas.
-ReleaseNotesUrl: https://github.com/ingelibre/ingepresupuestos/releases/tag/v2.8.2
+ReleaseNotesUrl: https://github.com/ingelibre/ingepresupuestos/releases/tag/v2.8.4
 Tags:
   - presupuestos
   - construccion
