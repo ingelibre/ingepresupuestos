@@ -440,18 +440,11 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     pid_row = conn.execute(
-        "SELECT proyectos.portafolio_id, proyectos.color, "
-        "       pf.nombre AS portafolio_nombre, pf.color AS portafolio_color "
-        "FROM proyectos LEFT JOIN portafolios pf ON pf.id = proyectos.portafolio_id "
-        "WHERE proyectos.id=?", (pid,)
+        "SELECT portafolio_id, color FROM proyectos WHERE id=?", (pid,)
     ).fetchone()
     conn.close()
     portafolio_actual = pid_row['portafolio_id'] if pid_row else None
-    # Color efectivo + de quién se hereda (para marcar el ✓ y el pie del menú).
     color_propio = (pid_row['color'] or '').strip() if pid_row else ''
-    color_actual = color_postit(pid_row) if pid_row else ''
-    hereda_de = (pid_row['portafolio_nombre']
-                 if (pid_row and not color_propio and color_actual) else '')
     act_pf: dict = {}
     a_sin = sub_pf.addAction(
         tr("Sin clasificar") + ("  ✓" if portafolio_actual is None else "")
@@ -472,9 +465,6 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
     sub_col = menu.addMenu("  " + tr("Color"))
     act_col: dict = {}
     for _clave, etiqueta, hexc in POSTIT_COLORES:
-        # El ✓ marca lo que el usuario fijó explícitamente, no lo heredado —
-        # si no, «Sin color» nunca aparecería marcado en un proyecto que solo
-        # toma el color de su portafolio.
         lbl = tr(etiqueta) + ("  ✓" if color_propio.upper() == hexc.upper()
                               else "")
         a = sub_col.addAction(lbl)
@@ -482,10 +472,6 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
             a.setIcon(_swatch_icon(hexc))
         a.setEnabled(not invitado)
         act_col[a] = hexc
-    if hereda_de:
-        sub_col.addSeparator()
-        a_her = sub_col.addAction(tr("Heredado de") + f"  «{hereda_de}»")
-        a_her.setEnabled(False)
     menu.addSeparator()
 
     # ── Exportar (submenu) ─────────────────────────────────────────────────

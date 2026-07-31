@@ -97,14 +97,8 @@ POSTIT_COLORES = [
     ("lime",       "Verde",     GREEN_500),
     ("blueberry",  "Azul",      BLUE_700),
     ("grape",      "Morado",    PURPLE_500),
-    # OJO: NO usar SLATE_300 aquí — es exactamente PORTAFOLIO_COLOR_DEFAULT y
-    # un gris elegido a propósito se confundiría con «portafolio sin color».
     ("slate",      "Gris",      SILVER_700),
 ]
-
-# Default de `portafolios.color` al crear uno. Se trata como «sin color» para
-# heredar: si no, cada portafolio recién creado teñiría de gris sus proyectos.
-PORTAFOLIO_COLOR_DEFAULT = "#667885"
 
 # Mezcla del color con el fondo de la card. 0.14 mantiene el texto SLATE_700
 # muy por encima del mínimo de contraste AA y aun así se lee como papel.
@@ -132,17 +126,15 @@ def tinte(hex_color: str, factor: float, sobre: str = WHITE) -> str:
 
 
 def color_postit(proyecto_row) -> str:
-    """Color efectivo de un proyecto: el suyo, si no el de su portafolio.
+    """Color «post-it» de un proyecto — SOLO el que el usuario fijó a mano.
 
-    `proyecto_row` debe traer `color` y `portafolio_color` (la query del
-    dashboard ya hace el LEFT JOIN). Devuelve '' si no aplica ninguno."""
+    Deliberadamente NO hereda el color del portafolio: se probó así y las
+    cards teñidas en masa se confundían con la etiqueta de portafolio. El
+    portafolio ya se comunica con su chip; la card queda blanca salvo que el
+    usuario elija un color. Acepta dict o sqlite3.Row."""
     get = proyecto_row.get if hasattr(proyecto_row, 'get') else (
         lambda k, d=None: proyecto_row[k] if k in proyecto_row.keys() else d)
-    propio = (get('color', '') or '').strip()
-    if propio:
-        return propio
-    pf = (get('portafolio_color', '') or '').strip()
-    return '' if pf.upper() == PORTAFOLIO_COLOR_DEFAULT.upper() else pf
+    return (get('color', '') or '').strip()
 
 
 # ── TOKENS SEMÁNTICOS ────────────────────────────────────────────────────────
