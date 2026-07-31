@@ -2,7 +2,7 @@
 
 App de escritorio PySide6 (Qt 6) multiplataforma para la elaboración de **presupuestos de obra** (ingeniería y arquitectura): análisis de costos unitarios (ACU), cronograma Gantt valorizado con ruta crítica (CPM), metrados (incluido acero), fórmula polinómica e índices INEI, Control de Obra y 13 reportes profesionales.
 
-**Autor:** Ing. Marco Sumari · **Software libre — GPL-3.0-or-later** · Versión actual: **2.8.4**
+**Autor:** Ing. Marco Sumari · **Software libre — GPL-3.0-or-later** · Versión actual: **2.8.6**
 
 > Software libre y gratuito desde 2.8.0: todas las funciones incluidas. El sistema de licencia es **vestigial** (`core/licencia.py::puede_premium()` → `True`; queda como limpieza opcional). El changelog detallado vive en `git log`.
 

@@ -54,7 +54,7 @@ Deberías recibir el email en tu Gmail en <10 segundos, y al pulsar
 
 ## Campo `Email` (remitente) — requiere redesplegar
 
-Desde la 2.8.5 la app envía también `Email` con el correo de quien escribe, y
+Desde la 2.8.6 la app envía también `Email` con el correo de quien escribe, y
 el Worker lo pone en `reply_to`. **Ese `reply_to` solo funciona si vuelves a
 pegar `contacto.js` en el editor del Worker y pulsas Deploy**: si no, la
 versión antigua ignora el campo y los mensajes seguirán llegando sin remitente.
