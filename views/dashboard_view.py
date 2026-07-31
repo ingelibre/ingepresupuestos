@@ -118,7 +118,8 @@ class _NameLabel(QWidget):
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
 # Los nombres "BLUE_500" / "NARANJA" son alias históricos del naranja marca.
-from utils.theme import C
+from utils.theme import (C, POSTIT_ALPHA_BG, POSTIT_ALPHA_BORDE,
+                         POSTIT_COLORES, color_postit, tinte)
 
 BLUE_500   = C.brand
 BLUE_700   = C.brand_hover
@@ -152,17 +153,9 @@ ESTADO_COLOR = {
     "aprobado":    ("#9BDB4D", "#273445", "Aprobado"),        # Lime 300
     "ejecutado":   ("#FF8C82", "#273445", "En ejecución"),    # Strawberry 100
 }
-# Colores de borde izquierdo: paleta Elementary
-CARD_BORDER_COLORS = [
-    "#F37329",   # Blueberry
-    "#F37329",   # Orange
-    "#68B723",   # Lime
-    "#7A36B1",   # Grape
-    "#F9C440",   # Banana
-    "#C6262E",   # Strawberry
-    "#C0621A",   # Blueberry dark
-    "#CC3B02",   # Orange dark
-]
+# (CARD_BORDER_COLORS eliminado: repartía 8 colores por índice de card y el
+#  valor se pasaba al constructor sin que nadie lo usara. Ese parámetro ahora
+#  lleva el color «post-it» real — ver utils.theme.POSTIT_COLORES.)
 
 
 # ── Menú contextual compartido ───────────────────────────────────────────────
@@ -358,6 +351,20 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
 # necesita setStyleSheet local en cada menú.
 
 
+def _swatch_icon(hex_color: str, px: int = 12):
+    """Cuadradito de color para el submenú de colores (icono, no emoji)."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter as _QP
+    pm = QPixmap(px, px)
+    pm.fill(Qt.transparent)
+    p = _QP(pm)
+    p.setRenderHint(_QP.Antialiasing)
+    p.setBrush(QColor(hex_color))
+    p.setPen(QPen(QColor(tinte(hex_color, 0.75)), 1))
+    p.drawRoundedRect(0, 0, px - 1, px - 1, 3, 3)
+    p.end()
+    return QIcon(pm)
+
+
 def _mostrar_menu_proyecto(pid: int, pos, parent,
                            usuario, card_signals=None):
     """Muestra el menú contextual de proyecto y ejecuta la acción elegida.
@@ -433,10 +440,18 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     pid_row = conn.execute(
-        "SELECT portafolio_id FROM proyectos WHERE id=?", (pid,)
+        "SELECT proyectos.portafolio_id, proyectos.color, "
+        "       pf.nombre AS portafolio_nombre, pf.color AS portafolio_color "
+        "FROM proyectos LEFT JOIN portafolios pf ON pf.id = proyectos.portafolio_id "
+        "WHERE proyectos.id=?", (pid,)
     ).fetchone()
     conn.close()
     portafolio_actual = pid_row['portafolio_id'] if pid_row else None
+    # Color efectivo + de quién se hereda (para marcar el ✓ y el pie del menú).
+    color_propio = (pid_row['color'] or '').strip() if pid_row else ''
+    color_actual = color_postit(pid_row) if pid_row else ''
+    hereda_de = (pid_row['portafolio_nombre']
+                 if (pid_row and not color_propio and color_actual) else '')
     act_pf: dict = {}
     a_sin = sub_pf.addAction(
         tr("Sin clasificar") + ("  ✓" if portafolio_actual is None else "")
@@ -452,6 +467,25 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
             a = sub_pf.addAction(lbl)
             a.setEnabled(pf['id'] != portafolio_actual and not invitado)
             act_pf[a] = pf['id']
+
+    # ── Color «post-it» (submenu) ──────────────────────────────────────────
+    sub_col = menu.addMenu("  " + tr("Color"))
+    act_col: dict = {}
+    for _clave, etiqueta, hexc in POSTIT_COLORES:
+        # El ✓ marca lo que el usuario fijó explícitamente, no lo heredado —
+        # si no, «Sin color» nunca aparecería marcado en un proyecto que solo
+        # toma el color de su portafolio.
+        lbl = tr(etiqueta) + ("  ✓" if color_propio.upper() == hexc.upper()
+                              else "")
+        a = sub_col.addAction(lbl)
+        if hexc:
+            a.setIcon(_swatch_icon(hexc))
+        a.setEnabled(not invitado)
+        act_col[a] = hexc
+    if hereda_de:
+        sub_col.addSeparator()
+        a_her = sub_col.addAction(tr("Heredado de") + f"  «{hereda_de}»")
+        a_her.setEnabled(False)
     menu.addSeparator()
 
     # ── Exportar (submenu) ─────────────────────────────────────────────────
@@ -529,6 +563,17 @@ def _mostrar_menu_proyecto(pid: int, pos, parent,
             dash = dash.parent()
         if dash:
             dash._recargar_portafolios_bar()
+            dash.cargar_proyectos()
+        return
+
+    # Color «post-it»
+    if chosen in act_col:
+        from core.database import set_color_proyecto as _set_color
+        _set_color(pid, act_col[chosen])
+        dash = parent
+        while dash and not hasattr(dash, 'cargar_proyectos'):
+            dash = dash.parent()
+        if dash:
             dash.cargar_proyectos()
         return
 
@@ -624,6 +669,8 @@ class _ProjectCard(QWidget):
         self.usuario    = usuario
         self._es_fav    = bool(row.get('favorito'))
         self._es_ultimo = es_ultimo
+        # Color «post-it»: el del proyecto o, si no tiene, el de su portafolio.
+        self._postit    = color or ''
         self._selected  = False
         self._total_str = total_str
 
@@ -697,11 +744,22 @@ class _ProjectCard(QWidget):
         self._zonas = {}
 
         # Fondo + borde (selección > hover > normal)
+        #
+        # El color «post-it» ocupa el fondo — que es lo que lo hace leerse como
+        # papel. Antes ese canal lo usaba «Reciente» (#FFF9C4 a card completa);
+        # se le quitó y le quedó solo su chip etiquetado, que además es más
+        # claro y solo afecta a UNA card (el último proyecto abierto).
         if self._selected:
             bg, borde, bw = QColor('#FEF5EB'), QColor('#F37329'), 1.5
         else:
-            bg = QColor('#FFF9C4' if self._es_ultimo else CARD_BG)
-            borde = QColor('#B8C8E0' if self._hover else '#E0E2E6')
+            bg = QColor(tinte(self._postit, POSTIT_ALPHA_BG) if self._postit
+                        else CARD_BG)
+            if self._hover:
+                borde = QColor('#B8C8E0')
+            elif self._postit:
+                borde = QColor(tinte(self._postit, POSTIT_ALPHA_BORDE))
+            else:
+                borde = QColor('#E0E2E6')
             bw = 1.0
         path = QPainterPath()
         path.addRoundedRect(bw / 2, bw / 2, w - bw, h - bw, 8, 8)
@@ -753,8 +811,12 @@ class _ProjectCard(QWidget):
             x = r_pf.right() + 6
 
         if self._es_ultimo:
+            # Único portador de la señal «Reciente» desde que el fondo de la
+            # card pasó a ser el color del proyecto. Lleva borde para no
+            # desaparecer sobre un post-it amarillo.
             r_rec = QRect(x, y + 1, fm_chip.horizontalAdvance('Reciente') + 14, 17)
-            p.setPen(Qt.NoPen); p.setBrush(QColor('#FFF9C4'))
+            p.setBrush(QColor('#FFF9C4'))
+            p.setPen(QPen(QColor('#D9B44A'), 1))
             p.drawRoundedRect(r_rec, 8, 8)
             p.setPen(QColor('#854D0E'))
             p.drawText(r_rec, Qt.AlignCenter, 'Reciente')
@@ -1413,7 +1475,6 @@ class _ListView(QWidget):
                 tr("Estado"), "Total", tr("Partidas"), tr("Fecha"), ""]
     _COLS = ["", "", "Nombre", "Cliente", "Ubicación", "Portafolio", "Estado", "Total", "Partidas", "Fecha", ""]
 
-    _BG_ULTIMO  = QColor("#FFF9C4")
     _BG_SEL     = QColor("#FEF5EB")
     _BG_PAR   = QColor("#FFFFFF")    # filas pares   — blanco
     _BG_IMPAR = QColor("#F5F6F8")    # filas impares — gris claro sutil
@@ -1458,7 +1519,13 @@ class _ListView(QWidget):
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(2, QHeaderView.Stretch)   # Nombre absorbe el resto
         hh.setSectionResizeMode(10, QHeaderView.Fixed)    # Acciones
-        self.tbl.setColumnHidden(0, True)   # indicador de color: retirado
+        # Col 0 = barra del color «post-it» del proyecto. En lista NO se tiñe
+        # la fila entera: pelea con la zebra y con el resaltado de selección.
+        # minimumSectionSize por defecto ronda los 30 px y clampaba la barra
+        # a un bloque de color enorme — hay que bajarlo ANTES de fijar el ancho.
+        hh.setMinimumSectionSize(4)
+        hh.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tbl.setColumnWidth(0, 6)
         self.tbl.setColumnHidden(10, True)  # «⋯»: las acciones van por clic derecho
         self.tbl.setColumnWidth(1, 32)     # estrella
         self.tbl.setColumnWidth(3, 130)    # cliente
@@ -1576,12 +1643,18 @@ class _ListView(QWidget):
             if pid == selected_pid:
                 fila_seleccionada = r
                 bg_fila = self._BG_SEL
-            elif pid == ultimo_pid:
-                bg_fila = self._BG_ULTIMO
             else:
+                # «Reciente» ya no tiñe la fila (el sufijo del nombre lo dice):
+                # el color de fila quedó libre y no compite con la barra de
+                # color del proyecto en la col 0.
                 bg_fila = bg_base
 
             bg_str = bg_fila.name()
+
+            # Col 0 — barra del color «post-it» (vacía si el proyecto no tiene)
+            it_col = QTableWidgetItem("")
+            it_col.setBackground(QColor(color_postit(row) or bg_fila.name()))
+            self.tbl.setItem(r, 0, it_col)
 
             # Col 1 — estrella (item; el clic se maneja en _on_click_fila)
             it_fav = QTableWidgetItem("★" if es_fav else "☆")
@@ -2340,10 +2413,10 @@ class DashboardView(QWidget):
 
         # Guardar en caché para reusar al cambiar de modo sin re-consultar
         self._rows_cache   = [dict(r) for r in rows]
-        self._color_cache  = {
-            r['id']: CARD_BORDER_COLORS[i % len(CARD_BORDER_COLORS)]
-            for i, r in enumerate(self._rows_cache)
-        }
+        # Color «post-it» resuelto una vez por render (proyecto → portafolio).
+        # Antes esto repartía CARD_BORDER_COLORS por índice y el resultado se
+        # pasaba a la card sin que nadie lo usara: color rotativo sin sentido.
+        self._color_cache  = {r['id']: color_postit(r) for r in self._rows_cache}
 
         # Dashboard REALMENTE vacío (sin proyectos y sin filtros activos) →
         # hero de migración (índice 2). Si hay búsqueda/estado/portafolio sin
@@ -2375,9 +2448,12 @@ class DashboardView(QWidget):
         # El «último proyecto» NO entra en la huella del mosaico: abrir un
         # proyecto lo cambia siempre, y reconstruir 400 cards solo para mover
         # el resaltado amarillo congelaba el regreso a Inicio.
+        # El color entra en la huella: sin él, cambiarlo no repintaría nada
+        # (el portafolio también, porque el color se hereda de él).
         fp = (modo, ultimo if modo != 'mosaico' else None, tuple(
             (r['id'], r.get('modificado_en'), r.get('favorito'),
-             r.get('estado'), r.get('portafolio_id')) for r in rows))
+             r.get('estado'), r.get('portafolio_id'),
+             color_postit(r)) for r in rows))
         fp_attr = '_fp_mosaico' if modo == 'mosaico' else '_fp_lista'
         if rows and getattr(self, fp_attr, None) == fp:
             if modo == 'mosaico' and getattr(self, '_ultimo_render', None) != ultimo:
@@ -2428,7 +2504,7 @@ class DashboardView(QWidget):
 
                 def _mk_card(row):
                     card = _ProjectCard(
-                        row, self._color_cache.get(row['id'], BLUE_500),
+                        row, self._color_cache.get(row['id'], ''),
                         self.usuario,
                         es_ultimo=(row['id'] == ultimo), con_sombra=con_sombra,
                         total_str=totales.get(row['id'], '…'),

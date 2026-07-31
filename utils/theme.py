@@ -74,8 +74,75 @@ TIPO_MAT_BG = "#E6EFFB"; TIPO_MAT_FG = "#0D52BF"   # Azul
 TIPO_EQ_BG  = "#FFF1E0"; TIPO_EQ_FG  = "#A75900"   # Ámbar
 TIPO_SC_BG  = "#EFE6FB"; TIPO_SC_FG  = "#6A36B1"   # Morado (Sub-contratos/Servicios)
 
+PURPLE_500 = "#7A36B1"   # Grape (Elementary)
+
 # Blanco
 WHITE = "#FFFFFF"
+
+
+# ── COLOR DE PROYECTO («post-it») ────────────────────────────────────────────
+# Etiqueta visual libre para las cards del dashboard. Se guarda como hex en
+# `proyectos.color`; si está vacío se hereda de `portafolios.color`.
+#
+# OJO al elegir hexes: la card ya usa color para el estado (franja superior de
+# 4 px + badge, `ESTADO_COLOR`), el favorito (estrella amarilla) y el chip de
+# portafolio. Por eso el post-it se pinta SIEMPRE como tinte muy claro sobre
+# blanco (ver `tinte`), nunca a saturación plena — si no, compite con la
+# franja de estado y además mata el contraste del texto (SLATE_700).
+POSTIT_COLORES = [
+    ("",           "Sin color", ""),
+    ("banana",     "Amarillo",  YELLOW_500),
+    ("orange",     "Naranja",   ORANGE_500),
+    ("strawberry", "Rojo",      RED_500),
+    ("lime",       "Verde",     GREEN_500),
+    ("blueberry",  "Azul",      BLUE_700),
+    ("grape",      "Morado",    PURPLE_500),
+    # OJO: NO usar SLATE_300 aquí — es exactamente PORTAFOLIO_COLOR_DEFAULT y
+    # un gris elegido a propósito se confundiría con «portafolio sin color».
+    ("slate",      "Gris",      SILVER_700),
+]
+
+# Default de `portafolios.color` al crear uno. Se trata como «sin color» para
+# heredar: si no, cada portafolio recién creado teñiría de gris sus proyectos.
+PORTAFOLIO_COLOR_DEFAULT = "#667885"
+
+# Mezcla del color con el fondo de la card. 0.14 mantiene el texto SLATE_700
+# muy por encima del mínimo de contraste AA y aun así se lee como papel.
+POSTIT_ALPHA_BG    = 0.14
+POSTIT_ALPHA_BORDE = 0.55
+
+
+def tinte(hex_color: str, factor: float, sobre: str = WHITE) -> str:
+    """Mezcla `hex_color` con `sobre` — factor 0 = `sobre`, 1 = color puro.
+
+    Devuelve hex (no QColor) para poder usarlo igual en QPainter y en QSS.
+    Ante un valor inválido devuelve `sobre`, así una BD con basura no rompe
+    el pintado del dashboard."""
+    h = (hex_color or "").strip().lstrip("#")
+    b = (sobre or WHITE).strip().lstrip("#")
+    if len(h) != 6 or len(b) != 6:
+        return sobre
+    try:
+        c = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+        d = [int(b[i:i + 2], 16) for i in (0, 2, 4)]
+    except ValueError:
+        return sobre
+    f = max(0.0, min(1.0, factor))
+    return "#" + "".join(f"{round(d[i] + (c[i] - d[i]) * f):02X}" for i in range(3))
+
+
+def color_postit(proyecto_row) -> str:
+    """Color efectivo de un proyecto: el suyo, si no el de su portafolio.
+
+    `proyecto_row` debe traer `color` y `portafolio_color` (la query del
+    dashboard ya hace el LEFT JOIN). Devuelve '' si no aplica ninguno."""
+    get = proyecto_row.get if hasattr(proyecto_row, 'get') else (
+        lambda k, d=None: proyecto_row[k] if k in proyecto_row.keys() else d)
+    propio = (get('color', '') or '').strip()
+    if propio:
+        return propio
+    pf = (get('portafolio_color', '') or '').strip()
+    return '' if pf.upper() == PORTAFOLIO_COLOR_DEFAULT.upper() else pf
 
 
 # ── TOKENS SEMÁNTICOS ────────────────────────────────────────────────────────

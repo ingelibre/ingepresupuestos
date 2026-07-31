@@ -548,6 +548,9 @@ def init_db():
         ('curva_prog_ov', "ALTER TABLE curva_reprogramada ADD COLUMN pct_prog REAL"),
         ('curva_real_ov', "ALTER TABLE curva_reprogramada ADD COLUMN pct_real REAL"),
         ('curva_label_ov', "ALTER TABLE curva_reprogramada ADD COLUMN label TEXT"),
+        # Color «post-it» de la card del dashboard (hex). Vacío = hereda el
+        # color de su portafolio; ver utils.theme.color_postit.
+        ('proy_color',    "ALTER TABLE proyectos ADD COLUMN color TEXT DEFAULT ''"),
     ]:
         try:
             conn.execute(ddl)
@@ -1486,6 +1489,23 @@ def mover_proyecto_portafolio(proyecto_id: int,
             "UPDATE proyectos SET portafolio_id=? WHERE id=?",
             (portafolio_id, proyecto_id)
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_color_proyecto(proyecto_id: int, hex_color: str) -> None:
+    """Fija el color «post-it» del proyecto ('' = heredar el del portafolio).
+
+    Nota: `trg_proy_upd` bumpea `modificado_en` en CUALQUIER update, así que
+    cambiar el color invalida el caché de totales de esa card (se recalcula en
+    segundo plano) y la sube en el orden «Más recientes». No hay forma de
+    evitarlo sin tocar el trigger — el WHEN dispara también cuando se reescribe
+    el mismo valor."""
+    conn = get_db()
+    try:
+        conn.execute("UPDATE proyectos SET color=? WHERE id=?",
+                     ((hex_color or '').strip(), proyecto_id))
         conn.commit()
     finally:
         conn.close()
