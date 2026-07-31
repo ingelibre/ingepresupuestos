@@ -48,7 +48,7 @@ export default {
       });
     }
 
-    const { Nombre, Tipo, Mensaje, Fecha } = body;
+    const { Nombre, Email, Tipo, Mensaje, Fecha } = body;
     if (!Mensaje) {
       return new Response(JSON.stringify({ error: "Mensaje requerido" }), {
         status: 400,
@@ -56,9 +56,18 @@ export default {
       });
     }
 
-    // Enviar email vía Resend
+    // Correo del remitente. Se valida ANTES de usarlo como Reply-To: un valor
+    // basura hace que Resend devuelva 422 y se pierda el mensaje entero, y
+    // además el campo llega de fuera (nunca meterlo en una cabecera sin
+    // comprobar). Si no es válido, el mensaje se envía igual — solo se pierde
+    // la posibilidad de responder con un clic.
+    const remitente = typeof Email === "string" ? Email.trim() : "";
+    const remitenteOk =
+      remitente.length <= 254 && /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/.test(remitente);
+
     const emailBody = [
       `Nombre: ${Nombre || "(anónimo)"}`,
+      `Correo: ${remitente || "(no indicado)"}${remitente && !remitenteOk ? "  ⚠ formato no válido" : ""}`,
       `Tipo: ${Tipo || "General"}`,
       `Fecha: ${Fecha || new Date().toISOString()}`,
       ``,
@@ -66,18 +75,22 @@ export default {
       Mensaje,
     ].join("\n");
 
+    const payload = {
+      from: "IngePresupuestos <contacto@ingepresupuestos.com>",
+      to: [env.NOTIFY_EMAIL],
+      subject: `[IngePresupuestos] ${Tipo || "Contacto"} — ${Nombre || "Anónimo"}`,
+      text: emailBody,
+    };
+    // Con esto, «Responder» en el cliente de correo va directo al usuario.
+    if (remitenteOk) payload.reply_to = remitente;
+
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        from: "IngePresupuestos <contacto@ingepresupuestos.com>",
-        to: [env.NOTIFY_EMAIL],
-        subject: `[IngePresupuestos] ${Tipo || "Contacto"} — ${Nombre || "Anónimo"}`,
-        text: emailBody,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!resendRes.ok) {

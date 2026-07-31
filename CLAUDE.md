@@ -236,7 +236,7 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 - **IA (opcional, `core/ai_specs.py`):** 6 proveedores (clave del usuario). Specs/rendimiento por partida; validar_proyecto, memoria descriptiva. Override `done()` en diálogos IA.
 - **«Sugerir partidas» (RAG):** la IA arma la estructura, la biblioteca/proyectos ponen los costos. Fase 1 fuzzy + Fase 2 semántica (`core/biblioteca_embeddings.py`, model2vec int8, sin PyTorch), fusión RRF; el modelo se baja de R2 al build (si falta, degrada a fuzzy). Corre en QThread.
 - **i18n** (`utils/i18n.py`): `tr("texto español")`, importar dentro del método. Cobertura parcial.
-- **Contacto** (`worker/contacto.js`): POST → Cloudflare Worker → Resend. User-Agent `IngePresupuestos/X.Y.Z` obligatorio.
+- **Contacto** (`views/acerca_view.py` → `worker/contacto.js`): POST → Cloudflare Worker → Resend. User-Agent `IngePresupuestos/X.Y.Z` obligatorio. El payload lleva `Email` (remitente) y el Worker lo pone en `reply_to` — validado ANTES de usarlo como cabecera (llega de fuera, y un valor basura hace que Resend responda 422 y se pierda el mensaje). Es opcional: sin él se avisa una vez y se envía anónimo. **El Worker se despliega A MANO** (pegar en el editor de Cloudflare + Deploy): si no se redespliega, `Email` se ignora en silencio.
 
 ---
 

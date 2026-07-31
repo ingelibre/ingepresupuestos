@@ -46,10 +46,23 @@ Opción B — **Route** en el dominio existente:
 ```bash
 curl -X POST https://ingepresupuestos.com/api/contacto \
   -H "Content-Type: application/json" \
-  -d '{"Nombre":"Test","Tipo":"Prueba","Mensaje":"Hola desde curl","Fecha":"2026-05-25"}'
+  -d '{"Nombre":"Test","Email":"tu@correo.com","Tipo":"Prueba","Mensaje":"Hola desde curl","Fecha":"2026-05-25"}'
 ```
 
-Deberías recibir el email en tu Gmail en <10 segundos.
+Deberías recibir el email en tu Gmail en <10 segundos, y al pulsar
+**Responder** debería salir `tu@correo.com` como destinatario.
+
+## Campo `Email` (remitente) — requiere redesplegar
+
+Desde la 2.8.5 la app envía también `Email` con el correo de quien escribe, y
+el Worker lo pone en `reply_to`. **Ese `reply_to` solo funciona si vuelves a
+pegar `contacto.js` en el editor del Worker y pulsas Deploy**: si no, la
+versión antigua ignora el campo y los mensajes seguirán llegando sin remitente.
+
+El correo se valida en el Worker antes de usarlo como cabecera. Si no es
+válido (o viene vacío), el mensaje se envía igual, sin `reply_to`, y el valor
+crudo aparece en el cuerpo marcado con ⚠ para que puedas leerlo de todos modos.
+Las versiones antiguas de la app, que no mandan `Email`, siguen funcionando.
 
 ## Costos
 

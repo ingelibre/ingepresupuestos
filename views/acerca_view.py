@@ -50,6 +50,16 @@ GREEN_500    = "#68B723"
 BANANA_500   = "#F9C440"
 
 
+def _email_valido(s: str) -> bool:
+    """Validación deliberadamente laxa: solo descarta erratas obvias.
+
+    No se intenta cumplir el RFC — un patrón estricto rechaza direcciones
+    legítimas y aquí el coste de un falso negativo (bloquear a alguien que
+    quiere escribir) es mucho peor que el de un falso positivo."""
+    import re
+    return re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$', (s or '').strip()) is not None
+
+
 def _app_info() -> list[tuple[str, str]]:
     """Ficha técnica del programa. Función (no constante) para que la
     versión y licencia se lean siempre actualizadas."""
@@ -245,6 +255,7 @@ class AcercaView(QWidget):
         self._worker: _SendWorker | None = None
         self._build()
         self._cargar_config()
+        self._cargar_datos_contacto()
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -527,6 +538,21 @@ class AcercaView(QWidget):
         self.inp_nombre.setPlaceholderText("Tu nombre")
         fv.addWidget(self.inp_nombre)
 
+        # Sin remitente no hay forma de contestar: llegaban sugerencias y
+        # reportes de error a los que era imposible responder.
+        lbl_e = QLabel("Correo  <span style='color:#95A3AB;font-weight:normal'>"
+                       "(para poder responderte)</span>")
+        lbl_e.setTextFormat(Qt.RichText)
+        lbl_e.setStyleSheet(f"color:{SLATE_700}; font-weight:600; font-size:12px;")
+        fv.addWidget(lbl_e)
+        self.inp_email = QLineEdit()
+        self.inp_email.setPlaceholderText("tucorreo@ejemplo.com")
+        self.inp_email.setToolTip(
+            "Opcional, pero sin él no podremos contestarte.\n"
+            "Solo se usa para responder a este mensaje."
+        )
+        fv.addWidget(self.inp_email)
+
         lbl_t = QLabel("Tipo de mensaje")
         lbl_t.setStyleSheet(f"color:{SLATE_700}; font-weight:600; font-size:12px;")
         fv.addWidget(lbl_t)
@@ -643,6 +669,10 @@ class AcercaView(QWidget):
     _DEFAULT_FORM_URL = "https://ingepresupuestos.com/api/contacto"
 
     # ── Carga / guardado de configuración ──────────────────────────────────
+    def _cargar_datos_contacto(self):
+        self.inp_nombre.setText(get_config('contacto_nombre', '') or '')
+        self.inp_email.setText(get_config('contacto_email', '') or '')
+
     def _cargar_config(self):
         url = (get_config('form_url', '') or '').strip()
         if not url:
@@ -654,6 +684,22 @@ class AcercaView(QWidget):
         self.btn_enviar.setEnabled(self._worker is None)
 
     # ── Envío ──
+    def _aviso_sin_correo(self) -> bool:
+        """Confirma el envío anónimo. True = seguir adelante.
+
+        No se obliga a poner correo (hay quien prefiere reportar un bug sin
+        identificarse), pero sí se advierte una vez: el caso real fue gente
+        pidiendo mejoras a la que no se le pudo contestar."""
+        resp = QMessageBox.question(
+            self, "Enviar sin correo",
+            "No pusiste un correo, así que no habrá forma de responderte.\n\n"
+            "¿Enviar de todos modos?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if resp != QMessageBox.Yes:
+            self.inp_email.setFocus()
+            return False
+        return True
+
     def _enviar(self):
         if self._worker is not None:
             return
@@ -664,6 +710,16 @@ class AcercaView(QWidget):
             self.lbl_err.setVisible(True)
             self.txt_mensaje.setFocus()
             return
+
+        email = self.inp_email.text().strip()
+        if email and not _email_valido(email):
+            self.lbl_err.setText("Ese correo no parece válido. Revísalo o "
+                                 "déjalo en blanco.")
+            self.lbl_err.setVisible(True)
+            self.inp_email.setFocus()
+            return
+        if not email and not self._aviso_sin_correo():
+            return
         self.lbl_err.setVisible(False)
 
         nombre = self.inp_nombre.text().strip() or "(anónimo)"
@@ -671,9 +727,13 @@ class AcercaView(QWidget):
         self._last_payload = {
             "Fecha":   datetime.now().strftime("%d/%m/%Y %H:%M"),
             "Nombre":  nombre,
+            "Email":   email,
             "Tipo":    tipo,
             "Mensaje": mensaje,
         }
+        # Recordar nombre y correo para no reescribirlos en el siguiente envío.
+        set_config('contacto_nombre', self.inp_nombre.text().strip())
+        set_config('contacto_email', email)
         self.btn_enviar.setEnabled(False)
         self.btn_enviar.setText("Enviando…")
 
@@ -699,6 +759,7 @@ class AcercaView(QWidget):
         subject = f"[IngePresupuestos] {payload.get('Tipo', 'Contacto')}"
         body = (
             f"Nombre: {payload.get('Nombre', '')}\n"
+            f"Correo: {payload.get('Email', '') or '(no indicado)'}\n"
             f"Tipo: {payload.get('Tipo', '')}\n"
             f"Fecha: {payload.get('Fecha', '')}\n\n"
             f"{payload.get('Mensaje', '')}"
@@ -718,7 +779,8 @@ class AcercaView(QWidget):
             QDesktopServices.openUrl(QUrl(mailto))
 
     def _reset_form(self):
-        self.inp_nombre.clear()
+        # Nombre y correo NO se limpian: son datos del usuario, no del
+        # mensaje, y volver a escribirlos en cada envío es fricción inútil.
         self.txt_mensaje.clear()
         self.cmb_tipo.setCurrentIndex(0)
         self.lbl_err.setVisible(False)
