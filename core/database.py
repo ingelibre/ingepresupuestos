@@ -557,6 +557,39 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # columna ya existe
+    # ── Unificación de los datos de empresa (una sola vez) ───────────────
+    # «Configuración → Datos de empresa» guardaba `empresa_*` y los reportes
+    # leen `rep_*`: dos verdades, y borrar el logo en una no lo quitaba de la
+    # otra. Se copia lo configurado a `rep_*` (sin pisar lo que ya hubiera) y
+    # se BORRAN las viejas — dejarlas como fallback resucitaría el logo al
+    # quitarlo.
+    try:
+        ya = conn.execute(
+            "SELECT 1 FROM configuracion WHERE clave='empresa_unificada'"
+        ).fetchone()
+        if not ya:
+            from core.pdf_reports import LEGACY_EMPRESA
+            for nuevo, viejo in LEGACY_EMPRESA.items():
+                r_old = conn.execute(
+                    "SELECT valor FROM configuracion WHERE clave=?", (viejo,)
+                ).fetchone()
+                val = (r_old['valor'] or '').strip() if r_old else ''
+                if val:
+                    r_new = conn.execute(
+                        "SELECT valor FROM configuracion WHERE clave=?", (nuevo,)
+                    ).fetchone()
+                    if not (r_new and (r_new['valor'] or '').strip()):
+                        conn.execute(
+                            "INSERT OR REPLACE INTO configuracion (clave, valor)"
+                            " VALUES (?, ?)", (nuevo, val))
+                conn.execute("DELETE FROM configuracion WHERE clave=?", (viejo,))
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion (clave, valor)"
+                " VALUES ('empresa_unificada', '1')")
+            conn.commit()
+    except Exception:
+        pass
+
     try:
         conn.execute("UPDATE proyectos SET modificado_en = creado_en WHERE modificado_en IS NULL")
         conn.commit()

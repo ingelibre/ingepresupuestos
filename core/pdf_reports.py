@@ -44,6 +44,9 @@ from utils.formatting import fmt as _fmt_money
 FORMATO_CLAVES = {
     'rep_empresa_nombre':   'ingePresupuestos',
     'rep_empresa_subtitulo':'Sistema de Presupuestos de Obra Pública',
+    'rep_empresa_ruc':      '',         # aparecen en la portada, bajo la firma
+    'rep_empresa_direccion':'',
+    'rep_empresa_telefono': '',
     'rep_color_marca':      '#F37329',
     'rep_color_marca_dk':   '#C0621A',
     'rep_logo_b64':         '',         # PNG en base64 (sin prefijo data:)
@@ -54,12 +57,42 @@ FORMATO_CLAVES = {
 }
 
 
+# Claves antiguas de «Configuración → Datos de empresa». Esa tarjeta guardaba
+# su propio juego `empresa_*` y solo copiaba DOS campos a `rep_*` al pulsar
+# Guardar, así que había dos verdades y el usuario no sabía cuál mandaba. Los
+# valores se migran UNA vez en `database.init_db` y las claves viejas se
+# borran; NO leerlas como fallback aquí — si no, «quitar el logo» lo
+# resucitaría desde la clave antigua en el siguiente arranque.
+LEGACY_EMPRESA = {
+    'rep_empresa_nombre':    'empresa_nombre',
+    'rep_empresa_ruc':       'empresa_ruc',
+    'rep_empresa_direccion': 'empresa_direccion',
+    'rep_empresa_telefono':  'empresa_telefono',
+    'rep_logo_b64':          'empresa_logo_b64',
+}
+
+
 def get_formato() -> dict:
     """Lee la configuración de formato — devuelve dict con todos los campos."""
     out = {}
     for k, default in FORMATO_CLAVES.items():
         out[k] = get_config(k, default) or default
     return out
+
+
+def empresa_info() -> dict:
+    """Datos de la empresa ya resueltos: ``{nombre, subtitulo, ruc, direccion,
+    telefono, logo_b64}``. Punto único para quien necesite la razón social
+    fuera de los reportes (TDR, Control de Obra…)."""
+    f = get_formato()
+    return {
+        'nombre':    f.get('rep_empresa_nombre') or '',
+        'subtitulo': f.get('rep_empresa_subtitulo') or '',
+        'ruc':       f.get('rep_empresa_ruc') or '',
+        'direccion': f.get('rep_empresa_direccion') or '',
+        'telefono':  f.get('rep_empresa_telefono') or '',
+        'logo_b64':  f.get('rep_logo_b64') or '',
+    }
 
 
 def set_formato(formato: dict):
@@ -111,6 +144,22 @@ def _rect_logo(img, box_w: float, box_h: float) -> tuple[float, float]:
         w = box_w
         h = ih * w / iw
     return w, h
+
+
+def cargar_logo(formato: dict):
+    """QImage del logo configurado, o None. Centraliza el decode base64."""
+    b64 = (formato.get('rep_logo_b64') or '').strip()
+    if not b64:
+        return None
+    try:
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtGui import QImage
+        img = QImage()
+        if img.loadFromData(QByteArray.fromBase64(b64.encode('ascii'))):
+            return img
+    except Exception:
+        pass
+    return None
 
 
 # ── Paleta Elementary OS ──────────────────────────────────────────────────────
@@ -3353,29 +3402,26 @@ class _PdfRenderer:
         # Línea superior delgada color marca (en vez de banda llena de 60px)
         painter.fillRect(0, 0, self.page_w, 4, color_marca)
 
-        # Logo opcional a la izquierda en lugar del texto
-        logo_drawn = False
-        logo_b64 = self.formato.get('rep_logo_b64') or ''
-        if logo_b64:
-            try:
-                from PySide6.QtCore import QByteArray
-                from PySide6.QtGui import QImage
-                ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
-                img = QImage()
-                if img.loadFromData(ba):
-                    esc = logo_escala(self.formato)
-                    w, h = _rect_logo(img, 240 * esc, 36 * esc)
-                    painter.drawImage(QRectF(self.margin_x, 18, w, h), img)
-                    logo_drawn = True
-            except Exception:
-                pass
+        # Logo Y razón social (antes el logo REEMPLAZABA al texto).
+        txt_x = self.margin_x
+        img = cargar_logo(self.formato)
+        if img is not None:
+            esc = logo_escala(self.formato)
+            w, h = _rect_logo(img, 240 * esc, 36 * esc)
+            painter.drawImage(QRectF(self.margin_x, 18, w, h), img)
+            txt_x = self.margin_x + w + 12
 
-        if not logo_drawn:
-            _o2, _od2, _os2 = _brand_colors()
+        _o2, _od2, _os2 = _brand_colors()
+        color_marca_dk = QColor(self.formato.get('rep_color_marca_dk') or _od2)
+        # La fecha ocupa la derecha; dejar holgura para no pisarla.
+        txt_w = self.page_w - self.margin_x - txt_x - 150
+        if txt_w >= 90:
             f = QFont('Inter', 14); f.setBold(True)
-            painter.setFont(f); painter.setPen(color_marca_dk := QColor(self.formato.get('rep_color_marca_dk') or _od2))
-            painter.drawText(QRectF(self.margin_x, 18, 300, 30),
-                             Qt.AlignVCenter | Qt.AlignLeft, empresa)
+            painter.setFont(f); painter.setPen(color_marca_dk)
+            painter.drawText(QRectF(txt_x, 18, txt_w, 30),
+                             Qt.AlignVCenter | Qt.AlignLeft,
+                             QFontMetrics(f).elidedText(empresa, Qt.ElideRight,
+                                                        int(txt_w)))
 
         f2 = QFont('Inter', 9)
         painter.setFont(f2); painter.setPen(QColor(SLATE_300))
@@ -3511,6 +3557,22 @@ class _PdfRenderer:
                          Qt.AlignCenter,
                          f"{empresa} · {sub}")
 
+        # Datos fiscales/contacto. La tarjeta de Configuración prometía que
+        # aparecían en los reportes y no se pintaban en ningún sitio; este es
+        # el único lugar con espacio real para ellos.
+        _datos = [t for t in (
+            (f"RUC: {self.formato.get('rep_empresa_ruc')}"
+             if self.formato.get('rep_empresa_ruc') else ''),
+            self.formato.get('rep_empresa_direccion') or '',
+            (f"Tel. {self.formato.get('rep_empresa_telefono')}"
+             if self.formato.get('rep_empresa_telefono') else ''),
+        ) if t]
+        if _datos:
+            f_foot3 = QFont('Inter', 8)
+            painter.setFont(f_foot3); painter.setPen(QColor(SLATE_300))
+            painter.drawText(QRectF(0, self.page_h - 46, self.page_w, 14),
+                             Qt.AlignCenter, "  ·  ".join(_datos))
+
         # Línea inferior delgada color marca
         painter.fillRect(0, self.page_h - 4, self.page_w, 4, color_marca)
 
@@ -3533,39 +3595,46 @@ class _PdfRenderer:
         left_w  = 175
         right_w = 165
 
-        # Logo opcional o nombre de empresa a la izquierda
-        logo_b64 = self.formato.get('rep_logo_b64') or ''
-        logo_drawn = False
-        if logo_b64:
-            try:
-                from PySide6.QtCore import QByteArray
-                from PySide6.QtGui import QImage
-                ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
-                img = QImage()
-                if img.loadFromData(ba):
-                    # Tope de alto: la banda del header (menos el margen
-                    # superior `y`), para que no invada el cuerpo del reporte.
-                    esc = logo_escala(self.formato)
-                    box_h = min(30 * esc, self.header_h - y - 2)
-                    w, h = _rect_logo(img, left_w * esc, box_h)
-                    painter.drawImage(QRectF(self.margin_x, y, w, h), img)
-                    logo_drawn = True
-            except Exception:
-                pass
+        # Logo Y nombre de empresa. Antes eran EXCLUYENTES (`if not
+        # logo_drawn`): poner un logo hacía desaparecer la razón social, que
+        # no es lo que espera nadie. El logo va a la izquierda y el texto
+        # ocupa lo que quede de la columna; si el logo se la come entera, el
+        # texto se omite (el logo ya identifica).
+        txt_x, txt_w = self.margin_x, left_w
+        pt_emp = 11
+        img = cargar_logo(self.formato)
+        if img is not None:
+            # Con logo la columna se ensancha y el nombre baja un punto: si no,
+            # una razón social normal («CONSTRUCTORA … S.A.C.») se cortaba a
+            # media palabra en el hueco que dejaba el logo.
+            left_w = 245
+            pt_emp = 9
+            # Tope de alto: la banda del header (menos el margen superior `y`),
+            # para que no invada el cuerpo del reporte.
+            esc = logo_escala(self.formato)
+            box_h = min(30 * esc, self.header_h - y - 2)
+            w, h = _rect_logo(img, left_w * esc, box_h)
+            painter.drawImage(QRectF(self.margin_x, y, w, h), img)
+            txt_x = self.margin_x + w + 10
+            txt_w = left_w - w - 10
 
-        if not logo_drawn:
-            painter.setPen(color_marca_dk)
-            f = QFont('Inter', 11)
+        if txt_w >= 70:      # menos que esto no cabe ni el nombre elidido
+            f = QFont('Inter', pt_emp)
             f.setBold(True)
+            fm_e = QFontMetrics(f)
+            painter.setPen(color_marca_dk)
             painter.setFont(f)
-            painter.drawText(QRectF(self.margin_x, y, left_w, 18),
-                             Qt.AlignLeft | Qt.AlignVCenter, empresa)
+            painter.drawText(QRectF(txt_x, y, txt_w, 18),
+                             Qt.AlignLeft | Qt.AlignVCenter,
+                             fm_e.elidedText(empresa, Qt.ElideRight, int(txt_w)))
 
             f2 = QFont('Inter', 7)
             painter.setFont(f2)
             painter.setPen(QColor(SLATE_300))
-            painter.drawText(QRectF(self.margin_x, y + 18, left_w, 14),
-                             Qt.AlignLeft | Qt.AlignVCenter, sub_emp)
+            painter.drawText(QRectF(txt_x, y + 18, txt_w, 14),
+                             Qt.AlignLeft | Qt.AlignVCenter,
+                             QFontMetrics(f2).elidedText(sub_emp, Qt.ElideRight,
+                                                         int(txt_w)))
 
         # Centro: título reporte (en banda visual)
         center_x = self.margin_x + left_w + 12

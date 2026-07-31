@@ -59,6 +59,24 @@ _NOTE_SS = (
 _BTN_SAVE = BTN_PRIMARY_SS  # alias retro-compatible
 
 
+def _fmt_rep() -> dict:
+    """Formato de reportes (claves `rep_*`) — fuente única de los datos de
+    empresa. `get_formato` cae a las claves antiguas `empresa_*` si la `rep_*`
+    está vacía, así que no se pierde lo ya configurado."""
+    from core import pdf_reports
+    return pdf_reports.get_formato()
+
+
+def _set_logo_rep(b64: str):
+    """Fija/borra el logo en `rep_logo_b64` al instante (sin esperar a
+    «Guardar»): es lo que hacía la versión anterior con su clave propia y
+    mantener ese comportamiento evita sorpresas."""
+    from core import pdf_reports
+    fmt = pdf_reports.get_formato()
+    fmt['rep_logo_b64'] = b64 or ''
+    pdf_reports.set_formato(fmt)
+
+
 class ConfiguracionView(QWidget):
 
     def __init__(self, *args, **kwargs):
@@ -374,7 +392,10 @@ class ConfiguracionView(QWidget):
         vl.addWidget(sep)
 
         nota = QLabel(
-            tr("Estos datos aparecen en el encabezado de los reportes (PDF, Excel, Word).")
+            tr("Nombre y logo van en el encabezado de todos los reportes; "
+               "RUC, dirección y teléfono, al pie de la portada del PDF. "
+               "Es la misma configuración que «Editar formato» del Centro de "
+               "Reportes, donde además puedes cambiar subtítulo, color y pies.")
         )
         nota.setWordWrap(True)
         nota.setStyleSheet(_NOTE_SS)
@@ -394,25 +415,25 @@ class ConfiguracionView(QWidget):
         self._inp_emp_nombre = QLineEdit()
         self._inp_emp_nombre.setStyleSheet(_INP)
         self._inp_emp_nombre.setPlaceholderText(tr("Nombre de empresa o profesional"))
-        self._inp_emp_nombre.setText(get_config('empresa_nombre', ''))
+        self._inp_emp_nombre.setText(_fmt_rep().get('rep_empresa_nombre', ''))
         form.addRow(tr("Nombre:"), self._inp_emp_nombre)
 
         self._inp_emp_ruc = QLineEdit()
         self._inp_emp_ruc.setStyleSheet(_INP)
         self._inp_emp_ruc.setPlaceholderText(tr("RUC / DNI"))
-        self._inp_emp_ruc.setText(get_config('empresa_ruc', ''))
+        self._inp_emp_ruc.setText(_fmt_rep().get('rep_empresa_ruc', ''))
         form.addRow(tr("RUC:"), self._inp_emp_ruc)
 
         self._inp_emp_direccion = QLineEdit()
         self._inp_emp_direccion.setStyleSheet(_INP)
         self._inp_emp_direccion.setPlaceholderText(tr("Dirección"))
-        self._inp_emp_direccion.setText(get_config('empresa_direccion', ''))
+        self._inp_emp_direccion.setText(_fmt_rep().get('rep_empresa_direccion', ''))
         form.addRow(tr("Dirección:"), self._inp_emp_direccion)
 
         self._inp_emp_telefono = QLineEdit()
         self._inp_emp_telefono.setStyleSheet(_INP)
         self._inp_emp_telefono.setPlaceholderText(tr("Teléfono / celular"))
-        self._inp_emp_telefono.setText(get_config('empresa_telefono', ''))
+        self._inp_emp_telefono.setText(_fmt_rep().get('rep_empresa_telefono', ''))
         form.addRow(tr("Teléfono:"), self._inp_emp_telefono)
 
         vl.addLayout(form)
@@ -474,8 +495,13 @@ class ConfiguracionView(QWidget):
         vl.addWidget(self._lbl_emp_estado)
         return card
 
+    # ── Puente a la configuración de reportes ────────────────────────────
+    # Nombre, RUC, dirección, teléfono y logo viven en las claves `rep_*` de
+    # `core.pdf_reports` — las mismas que edita «Editar formato». Esta tarjeta
+    # y aquel diálogo son dos puertas al MISMO dato.
+
     def _cargar_logo_preview(self):
-        logo_b64 = get_config('empresa_logo_b64', '')
+        logo_b64 = _fmt_rep().get('rep_logo_b64', '')
         if logo_b64:
             ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
             pm = QPixmap()
@@ -502,11 +528,11 @@ class ConfiguracionView(QWidget):
         with open(path, 'rb') as f:
             data = f.read()
         b64 = base64.b64encode(data).decode('ascii')
-        set_config('empresa_logo_b64', b64)
+        _set_logo_rep(b64)
         self._cargar_logo_preview()
 
     def _emp_quitar_logo(self):
-        set_config('empresa_logo_b64', '')
+        _set_logo_rep('')
         self._lbl_logo_preview.setPixmap(QPixmap())
         self._lbl_logo_preview.setText("Sin logo")
         self._lbl_logo_preview.setStyleSheet(
@@ -515,19 +541,19 @@ class ConfiguracionView(QWidget):
         )
 
     def _guardar_empresa(self):
-        set_config('empresa_nombre', self._inp_emp_nombre.text().strip())
-        set_config('empresa_ruc', self._inp_emp_ruc.text().strip())
-        set_config('empresa_direccion', self._inp_emp_direccion.text().strip())
-        set_config('empresa_telefono', self._inp_emp_telefono.text().strip())
-        # Sincronizar con formato de reportes
+        """Guarda en las claves `rep_*` — la ÚNICA fuente de verdad.
+
+        Antes esta tarjeta guardaba su propio juego `empresa_*` y solo copiaba
+        nombre y logo a `rep_*`, y solo si no estaban vacíos: había dos
+        verdades, no se sabía cuál mandaba y borrar el logo aquí no lo quitaba
+        de los reportes. Ahora edita exactamente lo mismo que «Editar
+        formato»."""
         from core import pdf_reports
         fmt = pdf_reports.get_formato()
-        nombre = self._inp_emp_nombre.text().strip()
-        if nombre:
-            fmt['rep_empresa_nombre'] = nombre
-        logo_b64 = get_config('empresa_logo_b64', '')
-        if logo_b64:
-            fmt['rep_logo_b64'] = logo_b64
+        fmt['rep_empresa_nombre']    = self._inp_emp_nombre.text().strip()
+        fmt['rep_empresa_ruc']       = self._inp_emp_ruc.text().strip()
+        fmt['rep_empresa_direccion'] = self._inp_emp_direccion.text().strip()
+        fmt['rep_empresa_telefono']  = self._inp_emp_telefono.text().strip()
         pdf_reports.set_formato(fmt)
         self._lbl_emp_estado.setText("✓  Datos de empresa guardados")
 

@@ -300,7 +300,29 @@ def _add_header_marca(doc: Document, proy: dict, titulo: str):
     _dk_rgb = RGBColor(int(_dk_hex[0:2], 16), int(_dk_hex[2:4], 16), int(_dk_hex[4:6], 16))
 
     cell_l.text = ''
-    p_emp = cell_l.paragraphs[0]
+    # Logo encima del nombre (el .docx no tenía logo: solo el PDF y el Gantt
+    # lo pintaban). Va en su propio párrafo para no descuadrar la línea de
+    # texto; alto ~10 mm, que es lo que admite la banda del encabezado.
+    _logo_b64 = (_fmt.get('rep_logo_b64') or '').strip()
+    if _logo_b64:
+        try:
+            import base64 as _b64
+            from io import BytesIO as _BIO
+            from docx.shared import Mm as _Mm
+            from core.pdf_reports import logo_escala as _logo_escala
+            p_logo = cell_l.paragraphs[0]
+            p_logo.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p_logo.paragraph_format.space_after = Pt(0)
+            _alto = max(4.0, min(14.0, 8.0 * _logo_escala(_fmt)))
+            p_logo.add_run().add_picture(_BIO(_b64.b64decode(_logo_b64)),
+                                         height=_Mm(_alto))
+            p_emp = cell_l.add_paragraph()
+        except Exception:
+            # Imagen corrupta o formato no soportado por python-docx: seguir
+            # sin logo antes que romper la exportación entera.
+            p_emp = cell_l.paragraphs[0]
+    else:
+        p_emp = cell_l.paragraphs[0]
     p_emp.alignment = WD_ALIGN_PARAGRAPH.LEFT
     p_emp.paragraph_format.space_after = Pt(0)
     r_emp = p_emp.add_run(_empresa)

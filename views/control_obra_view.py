@@ -5353,7 +5353,8 @@ class _DatosTDRDialog(QDialog):
                f" border-radius:6px; padding:4px 8px; font-size:12px; background:white; }}")
         self._inp = {}
         q = REQ.get_requerimiento(req_id)
-        empresa = get_config('empresa_nombre', '')
+        from core.pdf_reports import empresa_info
+        empresa = empresa_info()['nombre']
         for clave, etiqueta, ph in self._CAMPOS:
             le = QLineEdit(); le.setPlaceholderText(ph); le.setStyleSheet(_ss)
             prev = get_config(f'req_tdr_{clave}', '')

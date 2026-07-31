@@ -45,12 +45,11 @@ def _moneda_simbolo(proyecto_id: int) -> tuple[str, str]:
 
 
 def _entidad_config() -> dict:
-    return {
-        'nombre': (get_config('empresa_nombre', '') or '').strip(),
-        'ruc': (get_config('empresa_ruc', '') or '').strip(),
-        'direccion': (get_config('empresa_direccion', '') or '').strip(),
-        'telefono': (get_config('empresa_telefono', '') or '').strip(),
-    }
+    # Fuente única: las claves `rep_*` del formato de reportes (las antiguas
+    # `empresa_*` se migran y borran en `database.init_db`).
+    from core.pdf_reports import empresa_info
+    e = empresa_info()
+    return {k: e[k] for k in ('nombre', 'ruc', 'direccion', 'telefono')}
 
 
 def _tabla_items(filas: list, precios: dict, simbolo: str) -> tuple[str, float]:

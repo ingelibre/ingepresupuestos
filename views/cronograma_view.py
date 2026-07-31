@@ -40,6 +40,7 @@ from core.pdf_reports import (
     get_formato as _get_formato_reportes,
     escala_papel as _escala_papel_rep,
     logo_escala as _logo_escala_rep,
+    cargar_logo as _cargar_logo_rep,
     _rect_logo,
 )
 from utils.formatting import fmt
@@ -3360,50 +3361,50 @@ class GanttWidget(QWidget):
         margin = mm(2)
         col_top  = y + mm(2)
         col_h    = h - mm(2.5)
-        # La columna del logo se ensancha con `esc` — si no, un logo apaisado
-        # seguiría topando contra mm(50) por más que se suba la escala.
-        left_w   = mm(50) * max(1.0, esc)
+        # La columna izquierda se ensancha con `esc` (si no, un logo apaisado
+        # topa contra el ancho base por más que se suba la escala) y también
+        # cuando HAY logo: el logo y la razón social comparten la columna, y
+        # con mm(50) el nombre se cortaba a media palabra.
+        img = _cargar_logo_rep(fmt_)
+        left_w   = mm(72 if img is not None else 50) * max(1.0, esc)
         right_w  = mm(55)
         center_x = x + margin + left_w + mm(3)
         center_w = max(mm(20), w - 2 * margin - left_w - right_w - mm(6))
 
-        # ── Columna izquierda: logo (si hay) o empresa + subtitulo ──────
-        logo_b64 = (fmt_.get('rep_logo_b64') or '').strip()
-        drew_logo = False
-        if logo_b64:
-            try:
-                from PySide6.QtCore import QByteArray
-                from PySide6.QtGui import QImage
-                ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
-                img = QImage()
-                if img.loadFromData(ba):
-                    # Con esc >= 1 la banda ya creció (HEADER_H), así que el
-                    # logo llena col_h; con esc < 1 se achica dentro de ella.
-                    box_h = col_h if esc >= 1.0 else col_h * esc
-                    img_w, img_h = _rect_logo(img, left_w, box_h)
-                    logo_y = col_top + (col_h - img_h) / 2
-                    p.drawImage(QRectF(x + margin, logo_y, img_w, img_h), img)
-                    drew_logo = True
-            except Exception:
-                drew_logo = False
+        # ── Columna izquierda: logo Y empresa + subtitulo ───────────────
+        # Antes eran excluyentes y poner logo borraba la razón social. Con
+        # logo, el texto ocupa lo que quede de la columna; si no cabe (logo
+        # apaisado que la llena), se omite.
+        txt_x, txt_w = x + margin, left_w
+        pt_emp, pt_sub = 11.5, 7.0
+        if img is not None:
+            pt_emp, pt_sub = 8.5, 6.2
+            # Con esc >= 1 la banda ya creció (HEADER_H), así que el logo
+            # llena col_h; con esc < 1 se achica dentro de ella.
+            box_h = col_h if esc >= 1.0 else col_h * esc
+            img_w, img_h = _rect_logo(img, left_w, box_h)
+            logo_y = col_top + (col_h - img_h) / 2
+            p.drawImage(QRectF(x + margin, logo_y, img_w, img_h), img)
+            txt_x = x + margin + img_w + mm(2)
+            txt_w = left_w - img_w - mm(2)
 
-        if not drew_logo:
+        if txt_w >= mm(22):
             # Empresa
-            f1 = p.font(); f1.setPointSizeF(11.5 * k); f1.setBold(True); p.setFont(f1)
+            f1 = p.font(); f1.setPointSizeF(pt_emp * k); f1.setBold(True); p.setFont(f1)
             p.setPen(color_marca_dk)
-            p.drawText(QRectF(x + margin, col_top, left_w, col_h * 0.42),
+            p.drawText(QRectF(txt_x, col_top, txt_w, col_h * 0.42),
                         Qt.AlignLeft | Qt.AlignVCenter, empresa)
             # Sub-empresa
-            f2 = p.font(); f2.setPointSizeF(7.0 * k); f2.setBold(False); p.setFont(f2)
+            f2 = p.font(); f2.setPointSizeF(pt_sub * k); f2.setBold(False); p.setFont(f2)
             p.setPen(QColor(SLATE_300))
-            p.drawText(QRectF(x + margin, col_top + col_h * 0.42, left_w, col_h * 0.30),
+            p.drawText(QRectF(txt_x, col_top + col_h * 0.42, txt_w, col_h * 0.30),
                         Qt.AlignLeft | Qt.AlignVCenter, sub_empresa)
             # Línea cliente (si existe)
             cliente = (proy.get('cliente') or '').strip()
             if cliente:
                 f2b = p.font(); f2b.setPointSizeF(6.8 * k); f2b.setItalic(True); p.setFont(f2b)
                 p.setPen(QColor(SLATE_500))
-                p.drawText(QRectF(x + margin, col_top + col_h * 0.70, left_w, col_h * 0.28),
+                p.drawText(QRectF(txt_x, col_top + col_h * 0.70, txt_w, col_h * 0.28),
                             Qt.AlignLeft | Qt.AlignVCenter, cliente)
                 f2b.setItalic(False); p.setFont(f2b)
 

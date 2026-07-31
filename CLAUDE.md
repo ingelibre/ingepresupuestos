@@ -107,6 +107,12 @@ Tokens centralizados. **NO hardcodear hex.**
 - **Excel:** openpyxl; pie tripartito `oddFooter`; **Excel = PDF visible, no PDF CSS**.
 - **ODT/ODS:** se genera el `.docx`/`.xlsx` nativo y se convierte con **LibreOffice headless** (`core/soffice.py`). Sin LibreOffice → aviso, sin crash.
 
+### Datos de empresa y logo — UNA sola fuente: las claves `rep_*`
+`FORMATO_CLAVES` en `core/pdf_reports.py` (nombre, subtítulo, **RUC/dirección/teléfono**, color, logo, escala, pies). Las editan **dos puertas al mismo dato**: «Editar formato» (Centro de Reportes / Gantt) y Configuración → «Datos de empresa». Antes esa tarjeta guardaba su propio juego `empresa_*` y solo copiaba nombre y logo —y solo si no estaban vacíos—, así que había dos verdades y quitar el logo allí no lo quitaba del PDF. Los valores viejos se migran y **se borran** una vez en `init_db` (flag `empresa_unificada`); NO reintroducir un fallback de lectura a `empresa_*` — resucitaría el logo al borrarlo. Fuera de reportes usar `pdf_reports.empresa_info()`.
+- **Logo y razón social conviven** (antes eran excluyentes: poner logo borraba el nombre). Con logo, la columna izquierda se ensancha (175→245 px en reportes, mm(50)→mm(72) en el Gantt) y el cuerpo baja un punto, o el nombre se corta a media palabra.
+- **RUC/dirección/teléfono** salen al pie de la **portada** del PDF. No caben en el encabezado.
+- **Logo en Word/Excel** (antes solo PDF y Gantt): Word lo pone encima del nombre en la celda izquierda del header 1×3; Excel lo ancla en `A1` y **mueve la razón social a la fila 2** — el bloque izquierdo son ~28 unidades y una celda COMBINADA recorta en su borde (no desborda), así que logo y nombre no caben en la misma línea. El cuerpo del nombre se calcula por longitud (~8.1 caracteres·punto por unidad de columna): a 12 pt fijos ya se cortaba desde ~19 caracteres, con o sin logo.
+
 ### QTextDocument — gotchas
 - `<table width="100%">` como **atributo HTML** (CSS solo no basta). NO soporta SVG (generar PNG con QPainter). NO centra `<table align=center>` (dibujar con QPainter).
 - Selectores Qt CSS no aceptan `_` → usar `#objectName`. `QPainter.setRenderHint`: atributo de la CLASE.

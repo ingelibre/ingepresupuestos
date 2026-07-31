@@ -476,10 +476,52 @@ def _xlsx_header_pdf_style(ws, proyecto, titulo, n_cols, *, cols_partition=None)
     _o_acc, _od_acc, _ = accent_reportes()
     _hdr_dk = (_fmt.get('rep_color_marca_dk') or _od_acc).lstrip('#').upper()
 
+    # ── Logo flotante sobre A1 ────────────────────────────────────────────
+    # El .xlsx nunca llevó logo (solo el PDF y el Gantt lo pintaban). Va como
+    # imagen anclada en A1; el texto de empresa/subtítulo se aparta con
+    # `indent` porque una imagen flotante NO desplaza el contenido de la celda.
+    _logo_indent = 0
+    _logo_b64 = (_fmt.get('rep_logo_b64') or '').strip()
+    if _logo_b64:
+        try:
+            import base64 as _b64
+            from io import BytesIO as _BIO
+            from openpyxl.drawing.image import Image as _XLImage
+            from PIL import Image as _PILImage
+            from core.pdf_reports import logo_escala as _logo_escala
+            _raw = _BIO(_b64.b64decode(_logo_b64))
+            _pil = _PILImage.open(_raw)
+            _alto = max(12, min(36, int(24 * _logo_escala(_fmt))))
+            _ancho = max(1, int(_pil.width * _alto / max(1, _pil.height)))
+            # PNG normalizado: openpyxl no admite todos los formatos que sí
+            # acepta el selector de logo (jpg, bmp…).
+            _png = _BIO()
+            _pil.convert('RGBA').save(_png, format='PNG')
+            _png.seek(0)
+            _im = _XLImage(_png)
+            _im.width, _im.height = _ancho, _alto
+            _im.anchor = 'A1'
+            ws.add_image(_im)
+            _logo_indent = 1   # marca «hay logo», ver reparto de filas abajo
+        except Exception:
+            _logo_indent = 0   # imagen ilegible → hoja sin logo, no reventar
+
     # ── Fila 1: empresa | título | costo al ───────────────────────────────
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=L_END)
-    c_emp = ws.cell(1, 1, _empresa)
-    c_emp.font      = Font(name='Inter', bold=True, size=12, color=_hdr_dk)
+    # El bloque izquierdo es estrecho (A1:B1 ≈ 28 unidades en Presupuesto) y
+    # una celda COMBINADA recorta en su borde, no desborda: logo y razón
+    # social NO caben en la misma línea sin cortar el nombre a media palabra.
+    # Con logo se reparten en vertical — logo en la fila 1, empresa+subtítulo
+    # en la fila 2 — que es lo único que entra sin truncar nada.
+    c_emp = ws.cell(1, 1, '' if _logo_indent else _empresa)
+    # Cuerpo adaptado al ancho real del bloque: a 12 pt fijos una razón social
+    # de más de ~19 caracteres ya salía cortada (la celda combinada recorta en
+    # su borde, no desborda). ~8.1 caracteres·punto por unidad de columna,
+    # medido sobre el render de LibreOffice.
+    _u_izq = sum((ws.column_dimensions[get_column_letter(c)].width or 8)
+                 for c in range(1, L_END + 1))
+    _pt_emp = max(7, min(12, int(_u_izq * 8.1 / max(1, len(_empresa)))))
+    c_emp.font      = Font(name='Inter', bold=True, size=_pt_emp, color=_hdr_dk)
     c_emp.alignment = Alignment(horizontal='left', vertical='center')
 
     ws.merge_cells(start_row=1, start_column=C_START, end_row=1, end_column=C_END)
@@ -501,8 +543,12 @@ def _xlsx_header_pdf_style(ws, proyecto, titulo, n_cols, *, cols_partition=None)
     # cortos quedan flotando al medio. Top los pega contra empresa/costo de
     # la fila 1, mismo look que el PDF.
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=L_END)
-    c_sub = ws.cell(2, 1, _subtitulo)
-    c_sub.font      = Font(name='Inter', size=8, color='667885')
+    # Con logo, la fila 2 lleva SOLO la razón social: añadirle el subtítulo
+    # desbordaba las ~28 unidades y quedaba cortado a media palabra. El
+    # subtítulo sigue saliendo en PDF y Word, donde sí hay sitio.
+    c_sub = ws.cell(2, 1, _empresa if _logo_indent else _subtitulo)
+    c_sub.font      = Font(name='Inter', size=8, bold=bool(_logo_indent),
+                           color=_hdr_dk if _logo_indent else '667885')
     c_sub.alignment = Alignment(horizontal='left', vertical='top')
 
     # Nombre del proyecto en el centro — espejo del PDF (justo debajo del

@@ -98,6 +98,23 @@ class FormatoReporteDialog(QDialog):
         self.inp_subtitulo.setStyleSheet(self._le_ss())
         form1.addRow("Subtítulo / lema:", self.inp_subtitulo)
 
+        # Datos fiscales — van al pie de la portada del PDF. Son los mismos
+        # campos de «Configuración → Datos de empresa»: una sola verdad.
+        self.inp_ruc = QLineEdit()
+        self.inp_ruc.setPlaceholderText("RUC / DNI")
+        self.inp_ruc.setStyleSheet(self._le_ss())
+        form1.addRow("RUC:", self.inp_ruc)
+
+        self.inp_direccion = QLineEdit()
+        self.inp_direccion.setPlaceholderText("Dirección")
+        self.inp_direccion.setStyleSheet(self._le_ss())
+        form1.addRow("Dirección:", self.inp_direccion)
+
+        self.inp_telefono = QLineEdit()
+        self.inp_telefono.setPlaceholderText("Teléfono / celular")
+        self.inp_telefono.setStyleSheet(self._le_ss())
+        form1.addRow("Teléfono:", self.inp_telefono)
+
         body_l.addLayout(form1)
 
         # ── Logo ──
@@ -296,6 +313,9 @@ class FormatoReporteDialog(QDialog):
         self.inp_pie_izq.setText(f.get('rep_pie_izquierdo') or '')
         self.inp_pie_cen.setText(f.get('rep_pie_central') or '')
         self.inp_pie_der.setText(f.get('rep_pie_derecho') or '')
+        self.inp_ruc.setText(f.get('rep_empresa_ruc') or '')
+        self.inp_direccion.setText(f.get('rep_empresa_direccion') or '')
+        self.inp_telefono.setText(f.get('rep_empresa_telefono') or '')
         self._update_color_swatch(self.inp_color.text())
         try:
             _esc = int(float(str(f.get('rep_logo_escala') or 100)))
@@ -405,6 +425,9 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_central']       = self.inp_pie_cen.text().strip()
         self._formato['rep_pie_derecho']       = self.inp_pie_der.text().strip()
         self._formato['rep_logo_escala']       = str(self.sld_logo.value())
+        self._formato['rep_empresa_ruc']       = self.inp_ruc.text().strip()
+        self._formato['rep_empresa_direccion'] = self.inp_direccion.text().strip()
+        self._formato['rep_empresa_telefono']  = self.inp_telefono.text().strip()
 
         pdf_reports.set_formato(self._formato)
         self.accept()
