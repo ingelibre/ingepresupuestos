@@ -351,16 +351,21 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
 # necesita setStyleSheet local en cada menú.
 
 
-def _swatch_icon(hex_color: str, px: int = 12):
-    """Cuadradito de color para el submenú de colores (icono, no emoji)."""
+def _swatch_icon(hex_color: str, px: int = 14):
+    """Muestra de color del submenú — pinta la card EN MINIATURA.
+
+    Debe usar el mismo tinte que `_ProjectCard.paintEvent`, no el color puro:
+    con la muestra a saturación plena el menú prometía un color intenso y la
+    card salía pastel. El borde (tinte más fuerte) es el que da a entender de
+    qué color se trata a este tamaño."""
     from PySide6.QtGui import QIcon, QPixmap, QPainter as _QP
     pm = QPixmap(px, px)
     pm.fill(Qt.transparent)
     p = _QP(pm)
     p.setRenderHint(_QP.Antialiasing)
-    p.setBrush(QColor(hex_color))
-    p.setPen(QPen(QColor(tinte(hex_color, 0.75)), 1))
-    p.drawRoundedRect(0, 0, px - 1, px - 1, 3, 3)
+    p.setBrush(QColor(tinte(hex_color, POSTIT_ALPHA_BG)))
+    p.setPen(QPen(QColor(tinte(hex_color, POSTIT_ALPHA_BORDE)), 1.2))
+    p.drawRoundedRect(1, 1, px - 2, px - 2, 3, 3)
     p.end()
     return QIcon(pm)
 
