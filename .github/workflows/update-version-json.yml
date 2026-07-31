@@ -1,0 +1,50 @@
+# Regenera y sube `version.json` a R2 SIN reconstruir los binarios.
+#
+# Para qué sirve: el changelog de version.json es lo que la app muestra en el
+# aviso de actualización. Si sale mal (o quieres reescribirlo después de
+# publicar), reconstruir toda la release son ~13 min y arriesga duplicar el PR
+# de winget. Esto tarda segundos y solo toca el JSON.
+#
+#   gh workflow run update-version-json.yml -f version=2.8.6 -f notas="Lo nuevo…"
+#
+# Los binarios de esa versión DEBEN estar ya en R2 — el script aborta si falta
+# alguno, para no publicar enlaces rotos.
+name: Actualizar version.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión sin la v (ej. 2.8.6)'
+        required: true
+        type: string
+      notas:
+        description: 'Changelog para el usuario. Vacío = leer del tag anotado.'
+        required: false
+        type: string
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'ingelibre/ingepresupuestos' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Necesario para leer el mensaje del tag anotado cuando no se pasan
+          # notas: el clon superficial por defecto no trae los objetos de tag.
+          fetch-depth: 0
+
+      - name: Generar y subir version.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -e
+          bash scripts/gen_version_json.sh "${{ inputs.version }}" "${{ inputs.notas }}"
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp version.json "s3://ingepresupuestos-downloads/version.json" \
+            --endpoint-url "$EP" --content-type application/json \
+            --cache-control "no-cache, max-age=0"
+          echo "✓ version.json actualizado en R2 → v${{ inputs.version }}"

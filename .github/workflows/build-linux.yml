@@ -182,34 +182,10 @@ jobs:
             echo "::warning::no todos los binarios están en R2 tras ~20 min — NO actualizo version.json (evita enlaces rotos)"
             exit 0
           fi
-          # Traer el version.json actual para preservar el bloque ingeconverter.
-          if ! curl -fsSL "${BASE}/version.json" -o cur.json; then
-            echo "::warning::no pude leer el version.json actual — omito para no perder el bloque ingeconverter"
-            exit 0
-          fi
-          # Changelog = mensaje del tag anotado. `actions/checkout` clona en
-          # superficial y NO trae el objeto del tag, así que `%(contents)` caía
-          # al mensaje del commit y el aviso de actualización mostraba
-          # «chore: bump version to X.Y.Z» (pasó en la v2.8.6). Hay que traerlo
-          # explícitamente.
-          git fetch --force origin "refs/tags/v${V}:refs/tags/v${V}" 2>/dev/null || true
-          CL=$(git for-each-ref "refs/tags/v${V}" --format='%(contents)' 2>/dev/null | head -c 3000)
-          # `%(contents)` de un tag ligero devuelve el mensaje del commit: si
-          # huele a commit de bump, es que no hay notas reales → genérico.
-          case "$CL" in chore:*|"Release v${V}") CL="" ;; esac
-          [ -z "$CL" ] && CL="Versión ${V} — software libre y gratuito. Novedades en ingepresupuestos.com"
-          ICONV=$(jq -c 'if .ingeconverter then .ingeconverter else null end' cur.json)
-          jq -n --arg v "$V" --arg date "$(date +%F)" --arg cl "$CL" --argjson ic "$ICONV" \
-            '{version:$v, release_date:$date, changelog:$cl, minimum_version:null,
-              downloads:{
-                windows_installer:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-setup-v"+$v+".exe"),
-                windows_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-windows.zip"),
-                linux_appimage:("https://downloads.ingepresupuestos.com/v"+$v+"/IngePresupuestos-"+$v+"-x86_64.AppImage"),
-                linux_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-linux.tar.gz")
-              },
-              download_url:"https://ingepresupuestos.com/#descargar"}
-             + (if $ic==null then {} else {ingeconverter:$ic} end)' > version.json
-          echo "── version.json generado ──"; cat version.json
+          # Generación delegada al script para no mantener dos copias
+          # de la lógica (la otra la usa update-version-json.yml, que
+          # permite reescribir el changelog sin reconstruir binarios).
+          bash scripts/gen_version_json.sh "$V"
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp version.json "s3://ingepresupuestos-downloads/version.json" --endpoint-url "$EP" --content-type application/json --cache-control "no-cache, max-age=0"
           echo "✓ version.json actualizado en R2 → v${V}"
