@@ -195,3 +195,16 @@ jobs:
           # El .msix NO se sube a R2 ni al Release: es solo para Partner Center
           # (Microsoft Store). Queda como artifact de la corrida (ver retención).
           echo "✓ binarios Windows subidos a R2/v${V}/"
+
+  # ── Publicar en winget ──────────────────────────────────────────────────
+  # Encadenado AQUÍ y no vía `on: release` en publish-winget.yml: el Release lo
+  # crea el paso de arriba con el GITHUB_TOKEN por defecto, y GitHub no dispara
+  # workflows nuevos desde eventos generados con ese token, así que el evento
+  # `release: released` no llegaba nunca (0 ejecuciones hasta la v2.8.6).
+  winget:
+    needs: build-windows
+    if: ${{ startsWith(github.ref, 'refs/tags/') && github.repository == 'ingelibre/ingepresupuestos' }}
+    uses: ./.github/workflows/publish-winget.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

@@ -187,8 +187,16 @@ jobs:
             echo "::warning::no pude leer el version.json actual — omito para no perder el bloque ingeconverter"
             exit 0
           fi
-          # Changelog = mensaje del tag anotado; si no hay, uno genérico.
-          CL=$(git tag -l --format='%(contents)' "v${V}" 2>/dev/null | head -c 3000)
+          # Changelog = mensaje del tag anotado. `actions/checkout` clona en
+          # superficial y NO trae el objeto del tag, así que `%(contents)` caía
+          # al mensaje del commit y el aviso de actualización mostraba
+          # «chore: bump version to X.Y.Z» (pasó en la v2.8.6). Hay que traerlo
+          # explícitamente.
+          git fetch --force origin "refs/tags/v${V}:refs/tags/v${V}" 2>/dev/null || true
+          CL=$(git for-each-ref "refs/tags/v${V}" --format='%(contents)' 2>/dev/null | head -c 3000)
+          # `%(contents)` de un tag ligero devuelve el mensaje del commit: si
+          # huele a commit de bump, es que no hay notas reales → genérico.
+          case "$CL" in chore:*|"Release v${V}") CL="" ;; esac
           [ -z "$CL" ] && CL="Versión ${V} — software libre y gratuito. Novedades en ingepresupuestos.com"
           ICONV=$(jq -c 'if .ingeconverter then .ingeconverter else null end' cur.json)
           jq -n --arg v "$V" --arg date "$(date +%F)" --arg cl "$CL" --argjson ic "$ICONV" \

@@ -1,8 +1,8 @@
-# Publica automáticamente cada nueva versión en winget (microsoft/winget-pkgs).
+# Publica cada nueva versión en winget (microsoft/winget-pkgs).
 #
-# Al publicarse un Release (tag vX.Y.Z), winget-releaser toma el instalador
-# .exe adjunto al Release, actualiza el manifiesto de MarcoSumari.IngePresupuestos
-# (versión + InstallerUrl + InstallerSha256) y abre el PR a microsoft/winget-pkgs.
+# winget-releaser toma el instalador .exe adjunto al Release, actualiza el
+# manifiesto de MarcoSumari.IngePresupuestos (versión + InstallerUrl +
+# InstallerSha256) y abre el PR a microsoft/winget-pkgs.
 #
 # REQUISITO (una sola vez): agregar el secret WINGET_TOKEN en
 #   Settings → Secrets and variables → Actions
@@ -10,24 +10,60 @@
 # que tenga (o pueda crear) un fork de microsoft/winget-pkgs. Sin ese secret el
 # job se salta (no rompe el release).
 #
-# Nota: solo funciona a partir de la 2ª versión (la 1ª — 2.8.4 — se envió a mano
-# como paquete nuevo; winget-releaser hace "update" sobre un paquete ya existente).
+# POR QUÉ NO SE DISPARA CON `on: release` (aprendido en la v2.8.6):
+# el Release lo crea `softprops/action-gh-release` con el GITHUB_TOKEN por
+# defecto, y GitHub NO dispara workflows nuevos desde eventos generados con ese
+# token (salvaguarda anti-recursión). El evento `release: released` no llegaba
+# nunca y este workflow acumuló 0 ejecuciones. Por eso ahora:
+#   · `workflow_dispatch` — lanzarlo a mano indicando el tag;
+#   · `workflow_call`     — lo invoca build-windows.yml al terminar el Release,
+#                           dentro de la misma ejecución (sin depender de eventos).
+# Se conserva `on: release` por si algún día el Release se publica a mano desde
+# la web (ese sí es un evento de usuario y dispararía el workflow).
+#
+# Nota: winget-releaser hace "update" sobre un paquete YA existente en
+# winget-pkgs. La 1ª versión (2.8.4) se envió a mano como paquete nuevo.
 name: Publicar en winget
 
 on:
   release:
     types: [released]
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag del Release a publicar (ej. v2.8.6)'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag del Release a publicar (ej. v2.8.6)'
+        required: true
+        type: string
 
 jobs:
   winget:
     runs-on: ubuntu-latest
-    # Solo si el token está configurado (evita fallos en forks/sin secret).
-    if: ${{ github.repository == 'ingelibre/ingepresupuestos' }}
+    # El `if` DEBE mirar el secret, no solo el repo: sin WINGET_TOKEN la acción
+    # falla en vez de saltarse, y un release verde acabaría marcado en rojo.
+    # Los secrets no se pueden usar en `if` a nivel de job → se pasan por env.
+    env:
+      HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
     steps:
+      - name: Avisar si falta el token
+        if: ${{ env.HAS_WINGET_TOKEN != 'true' }}
+        run: |
+          echo "::warning::Falta el secret WINGET_TOKEN — no se publica en winget."
+          echo "Créalo en Settings → Secrets and variables → Actions"
+          echo "(PAT clásico con scope public_repo, de una cuenta con fork de microsoft/winget-pkgs)."
+
       - name: Actualizar manifiesto y abrir PR en winget-pkgs
+        if: ${{ env.HAS_WINGET_TOKEN == 'true' }}
         uses: winget-releaser/winget-releaser@v2
         with:
           identifier: MarcoSumari.IngePresupuestos
+          # En `release` el tag sale del evento; en dispatch/call, del input.
+          release-tag: ${{ inputs.tag || github.event.release.tag_name }}
           # El instalador .exe adjunto al Release (Inno Setup).
           installers-regex: 'ingepresupuestos-setup-v.*\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}

@@ -2,8 +2,14 @@
 # Script de release — bumpea versión, commit, tag y push.
 #
 # Uso:
-#   ./release.sh 0.5.0       → crea release v0.5.0
-#   ./release.sh             → modo interactivo (pregunta versión)
+#   ./release.sh 0.5.0                    → crea release v0.5.0
+#   ./release.sh 0.5.0 "Notas de la…"     → con notas para los usuarios
+#   ./release.sh 0.5.0 -F notas.md        → notas desde un archivo
+#   ./release.sh                          → modo interactivo (pregunta versión)
+#
+# IMPORTANTE: el mensaje del tag ES el changelog que la app muestra en el aviso
+# de actualización (build-linux.yml lo copia a version.json). Sin notas sale un
+# texto genérico — nunca el mensaje del commit.
 #
 # Lo que hace, en orden:
 #   1. Verifica que estás en la rama main y sin cambios pendientes.
@@ -41,6 +47,21 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 TAG="v${VERSION}"
+
+# ── 1b. Notas de la versión (= changelog visible para el usuario) ──────────
+NOTAS="${2:-}"
+if [ "$NOTAS" = "-F" ]; then
+    if [ ! -f "${3:-}" ]; then
+        echo -e "${R}Error:${N} no encuentro el archivo de notas '${3:-}'"
+        exit 1
+    fi
+    NOTAS="$(cat "$3")"
+fi
+if [ -z "$NOTAS" ]; then
+    NOTAS="Versión ${VERSION} — software libre y gratuito. Novedades en ingepresupuestos.com"
+    echo -e "${Y}Aviso:${N} sin notas de versión; se usará el texto genérico."
+    echo "       Para notas propias: ./release.sh ${VERSION} \"Lo nuevo…\"  |  -F notas.md"
+fi
 
 # ── 2. Checks de git ──────────────────────────────────────────────────────
 rama=$(git rev-parse --abbrev-ref HEAD)
@@ -80,6 +101,8 @@ fi
 echo
 echo -e "${Y}Listo para crear release ${TAG}:${N}"
 echo "  • Commit: 'chore: bump version to ${VERSION}'"
+echo "  • Notas (changelog que verá el usuario al actualizar):"
+echo "$NOTAS" | sed 's/^/      /'
 echo "  • Tag:    ${TAG}"
 echo "  • Push:   origin main + tag"
 echo "  • Trigger: GitHub Actions compila Linux+Windows automáticamente."
@@ -94,7 +117,7 @@ fi
 # ── 5. Commit + tag + push ────────────────────────────────────────────────
 git add core/update_manager.py
 git commit -m "chore: bump version to ${VERSION}"
-git tag -a "$TAG" -m "Release ${TAG}"
+git tag -a "$TAG" -m "$NOTAS"
 git push origin main
 git push origin "$TAG"
 
