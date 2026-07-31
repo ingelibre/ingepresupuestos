@@ -59,11 +59,16 @@ jobs:
 
       - name: Actualizar manifiesto y abrir PR en winget-pkgs
         if: ${{ env.HAS_WINGET_TOKEN == 'true' }}
-        uses: winget-releaser/winget-releaser@v2
+        # OJO: la acción es `vedantmgoyal9/winget-releaser`. `winget-releaser/
+        # winget-releaser` NO existe y el job moría con "repository not found".
+        uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: MarcoSumari.IngePresupuestos
           # En `release` el tag sale del evento; en dispatch/call, del input.
           release-tag: ${{ inputs.tag || github.event.release.tag_name }}
           # El instalador .exe adjunto al Release (Inno Setup).
           installers-regex: 'ingepresupuestos-setup-v.*\.exe$'
+          # Imprescindible: por defecto es `github.repository_owner` (ingelibre),
+          # que NO tiene fork de winget-pkgs. El fork está en la cuenta personal.
+          fork-user: tuxiasumari
           token: ${{ secrets.WINGET_TOKEN }}
