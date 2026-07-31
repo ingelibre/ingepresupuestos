@@ -17,7 +17,7 @@ from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy,
-    QSpacerItem, QToolButton, QVBoxLayout, QWidget,
+    QSlider, QSpacerItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from core import pdf_reports
@@ -130,8 +130,33 @@ class FormatoReporteDialog(QDialog):
         logo_row.addStretch(1)
         body_l.addLayout(logo_row)
 
+        # Tamaño del logo — el encabezado ya escala solo con el papel
+        # (A3/A1/A0); esto es el ajuste fino sobre ese tamaño base.
+        esc_row = QHBoxLayout()
+        esc_row.setSpacing(10)
+        esc_row.addWidget(QLabel("Tamaño del logo:"))
+        self.sld_logo = QSlider(Qt.Horizontal)
+        self.sld_logo.setRange(50, 200)
+        self.sld_logo.setSingleStep(5)
+        self.sld_logo.setPageStep(10)
+        self.sld_logo.setFixedWidth(180)
+        self.sld_logo.valueChanged.connect(self._on_logo_escala)
+        esc_row.addWidget(self.sld_logo)
+        self.lbl_logo_esc = QLabel("100 %")
+        self.lbl_logo_esc.setFixedWidth(48)
+        esc_row.addWidget(self.lbl_logo_esc)
+        self.btn_logo_reset = QToolButton()
+        self.btn_logo_reset.setText("Restablecer")
+        self.btn_logo_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_logo_reset.clicked.connect(lambda: self.sld_logo.setValue(100))
+        esc_row.addWidget(self.btn_logo_reset)
+        esc_row.addStretch(1)
+        body_l.addLayout(esc_row)
+
         body_l.addWidget(self._hint(
-            "Recomendado: PNG con fondo transparente, máx. ~240×60 px."
+            "Recomendado: PNG con fondo transparente, máx. ~240×60 px. "
+            "En A3/A1/A0 el encabezado se agranda solo — el tamaño del logo "
+            "es solo para ajustarlo a gusto."
         ))
 
         # ── Color de marca ──
@@ -272,6 +297,12 @@ class FormatoReporteDialog(QDialog):
         self.inp_pie_cen.setText(f.get('rep_pie_central') or '')
         self.inp_pie_der.setText(f.get('rep_pie_derecho') or '')
         self._update_color_swatch(self.inp_color.text())
+        try:
+            _esc = int(float(str(f.get('rep_logo_escala') or 100)))
+        except (TypeError, ValueError):
+            _esc = 100
+        self.sld_logo.setValue(max(50, min(200, _esc)))
+        self._on_logo_escala(self.sld_logo.value())
         self._update_logo_preview(f.get('rep_logo_b64') or '')
 
     # ─── Logo ────────────────────────────────────────────────────────────────
@@ -301,6 +332,10 @@ class FormatoReporteDialog(QDialog):
             self._update_logo_preview(b64)
         except Exception as e:
             QMessageBox.critical(self, "Logo", f"No se pudo cargar la imagen:\n{e}")
+
+    def _on_logo_escala(self, val: int):
+        self.lbl_logo_esc.setText(f"{int(val)} %")
+        self.btn_logo_reset.setEnabled(int(val) != 100)
 
     def _clear_logo(self):
         self._formato['rep_logo_b64'] = ''
@@ -369,6 +404,7 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_izquierdo']     = self.inp_pie_izq.text().strip()
         self._formato['rep_pie_central']       = self.inp_pie_cen.text().strip()
         self._formato['rep_pie_derecho']       = self.inp_pie_der.text().strip()
+        self._formato['rep_logo_escala']       = str(self.sld_logo.value())
 
         pdf_reports.set_formato(self._formato)
         self.accept()

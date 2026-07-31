@@ -36,7 +36,12 @@ from core.cronograma import (
     auto_programar, auto_programar_local, auto_programar_ia,
     calcular_duraciones_desde_metrado, cargar_feriados_ia,
 )
-from core.pdf_reports import get_formato as _get_formato_reportes
+from core.pdf_reports import (
+    get_formato as _get_formato_reportes,
+    escala_papel as _escala_papel_rep,
+    logo_escala as _logo_escala_rep,
+    _rect_logo,
+)
 from utils.formatting import fmt
 
 
@@ -1832,7 +1837,10 @@ class GanttWidget(QWidget):
                 "  5CF       → CF: termina cuando 5 inicia (raro)\n"
                 "  5+50%     → arranca cuando 5 lleva 50% completado\n"
                 "  3, 4CC    → varias separadas por coma\n"
-                "  (también se aceptan FS/SS/SF en inglés)"
+                "  (también se aceptan FS/SS/SF en inglés)\n"
+                "\n"
+                "¿No sabes el # de la fila? Clic derecho sobre la tarea →\n"
+                "«Predecesoras…» para buscarlas por descripción."
             )
         th = self.tbl.horizontalHeader()
         # Todas las columnas redimensionables a mano (como MS Project). La
@@ -2542,6 +2550,7 @@ class GanttWidget(QWidget):
         elif col == 7:
             self._push_undo_dep()   # predecesoras editadas a mano → deshacible
             cmap[pid]['predecesoras'] = val
+            self._avisar_preds_invalidas(pid, val)
         # Recalcular CPM y refrescar Gantt + tabla
         self._cv._calcular_cpm()
         # Repintar barras y la fila editada para mostrar el nuevo ES/EF
@@ -2610,6 +2619,12 @@ class GanttWidget(QWidget):
 
         menu = QMenu(parent or self)
 
+        n_preds = len(self._parse_preds(cd.get('predecesoras', '') or ''))
+        act_pred = menu.addAction(
+            f"🔗 Predecesoras…{f' ({n_preds})' if n_preds else ''}")
+        act_pred.triggered.connect(lambda: self._editar_predecesoras(pid))
+        menu.addSeparator()
+
         act_div = menu.addAction("✂ Dividir tarea")
         act_div.triggered.connect(lambda: self._dividir_tarea(pid))
         if has_segs:
@@ -2634,6 +2649,56 @@ class GanttWidget(QWidget):
             act_clr = menu.addAction("✕ Quitar color personalizado")
             act_clr.triggered.connect(lambda: self._set_color_barra(pid, ''))
         menu.exec(global_pos)
+
+    def _avisar_preds_invalidas(self, pid: int, texto: str):
+        """Avisa si un token escrito a mano no apunta a ninguna fila.
+
+        `core.cronograma.parse_predecesoras` descarta en silencio los «#» que
+        no existen, así que el usuario creía haber creado la dependencia. Solo
+        avisa — no revierte: la cadena queda como la escribió."""
+        malos = []
+        for base, _t, _l, _p, _tp, raw in self._parse_preds(texto):
+            base = str(base).strip()
+            if not base:
+                continue
+            try:
+                ok = self._pid_for_rownum(int(base)) is not None
+            except (TypeError, ValueError):
+                # Referencia por ítem (ej. «02.01.03») — válida si existe.
+                ok = any((p.get('item') or '').strip() == base
+                         for p in (self._cv._partidas or []))
+            if not ok:
+                malos.append(raw)
+        if not malos:
+            return
+        QMessageBox.warning(
+            self, "Predecesoras no encontradas",
+            "No existe ninguna fila para: " + ", ".join(f"«{m}»" for m in malos) +
+            ".\n\nEsas dependencias se van a ignorar. Usa clic derecho sobre la "
+            "tarea → «Predecesoras…» para elegirlas por descripción.")
+
+    def _editar_predecesoras(self, pid: int):
+        """Abre el selector de predecesoras (busca por descripción en vez de
+        obligar a rastrear el «#» de la fila a mano)."""
+        from views.predecesoras_dialog import PredecesorasDialog
+        cmap = self._cv._cron_map
+        antes = (cmap.get(pid, {}).get('predecesoras', '') or '')
+        dlg = PredecesorasDialog(self, pid, parent=self)
+        if not dlg.exec():
+            return
+        nueva = dlg.cadena()
+        if nueva == antes:
+            return
+        self._push_undo_dep()
+        if pid not in cmap:
+            cmap[pid] = {'partida_id': pid, 'duracion': 1, 'inicio_dia': 1,
+                          'predecesoras': '', 'es_hito': 0, 'segmentos': '',
+                          'color': ''}
+        cmap[pid]['predecesoras'] = nueva
+        self._cv._calcular_cpm()
+        self._cv._guardar_a_db()
+        self._llenar_tabla()
+        self._render_gantt()
 
     def _elegir_color_barra(self, pid: int):
         from PySide6.QtWidgets import QColorDialog
@@ -3053,7 +3118,13 @@ class GanttWidget(QWidget):
             PG_H = vp.height()
 
             # ── Layout vertical ──────────────────────────────────────────
-            HEADER_H   = mm(18) if incluir_header else mm(0)
+            # La banda del header escala con el ancho de papel (en A1/A0 un
+            # header de 18 mm fijos deja el logo diminuto) y crece si el
+            # usuario subió el tamaño del logo por encima del 100 %.
+            _k_hdr  = _escala_papel_rep(PG_W, dpi)
+            _esc_lg = _logo_escala_rep()
+            HEADER_H   = (mm(18) * _k_hdr * max(1.0, _esc_lg)
+                          if incluir_header else mm(0))
             # El footer puede contener: textos del formato (row 1) y/o
             # leyenda (row 2). Si solo uno de los dos está activo, lo
             # comprimimos a mm(5.5); si están ambos, mm(10).
@@ -3248,7 +3319,10 @@ class GanttWidget(QWidget):
         (empresa/logo · título + nombre proyecto · costo al + modalidad)."""
         p.save()
         dpi = p.device().logicalDpiX()
-        mm = lambda v: v * dpi / 25.4
+        # Todo el header está cotado en mm físicos: sin este factor el logo y
+        # los textos se ven diminutos en A3/A1/A0 (la hoja crece, ellos no).
+        k  = _escala_papel_rep(w, dpi)
+        mm = lambda v: v * dpi / 25.4 * k
 
         # Paleta unificada con pdf_reports
         ORANGE     = "#F37329"
@@ -3276,6 +3350,7 @@ class GanttWidget(QWidget):
         color_marca_dk = QColor(fmt_.get('rep_color_marca_dk') or _od_def)
         empresa        = fmt_.get('rep_empresa_nombre') or 'ingePresupuestos'
         sub_empresa    = fmt_.get('rep_empresa_subtitulo') or 'Presupuestos de Obra Pública'
+        esc            = _logo_escala_rep(fmt_)
 
         # Sin línea de marca arriba (eliminada por consistencia con
         # pdf_reports y para ahorrar tinta — el usuario reportó que la
@@ -3285,10 +3360,12 @@ class GanttWidget(QWidget):
         margin = mm(2)
         col_top  = y + mm(2)
         col_h    = h - mm(2.5)
-        left_w   = mm(50)
+        # La columna del logo se ensancha con `esc` — si no, un logo apaisado
+        # seguiría topando contra mm(50) por más que se suba la escala.
+        left_w   = mm(50) * max(1.0, esc)
         right_w  = mm(55)
         center_x = x + margin + left_w + mm(3)
-        center_w = w - 2 * margin - left_w - right_w - mm(6)
+        center_w = max(mm(20), w - 2 * margin - left_w - right_w - mm(6))
 
         # ── Columna izquierda: logo (si hay) o empresa + subtitulo ──────
         logo_b64 = (fmt_.get('rep_logo_b64') or '').strip()
@@ -3300,29 +3377,31 @@ class GanttWidget(QWidget):
                 ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
                 img = QImage()
                 if img.loadFromData(ba):
-                    img_h = col_h
-                    img_w = img.width() * img_h / max(1, img.height())
-                    img_w = min(img_w, left_w)
-                    p.drawImage(QRectF(x + margin, col_top, img_w, img_h), img)
+                    # Con esc >= 1 la banda ya creció (HEADER_H), así que el
+                    # logo llena col_h; con esc < 1 se achica dentro de ella.
+                    box_h = col_h if esc >= 1.0 else col_h * esc
+                    img_w, img_h = _rect_logo(img, left_w, box_h)
+                    logo_y = col_top + (col_h - img_h) / 2
+                    p.drawImage(QRectF(x + margin, logo_y, img_w, img_h), img)
                     drew_logo = True
             except Exception:
                 drew_logo = False
 
         if not drew_logo:
             # Empresa
-            f1 = p.font(); f1.setPointSizeF(11.5); f1.setBold(True); p.setFont(f1)
+            f1 = p.font(); f1.setPointSizeF(11.5 * k); f1.setBold(True); p.setFont(f1)
             p.setPen(color_marca_dk)
             p.drawText(QRectF(x + margin, col_top, left_w, col_h * 0.42),
                         Qt.AlignLeft | Qt.AlignVCenter, empresa)
             # Sub-empresa
-            f2 = p.font(); f2.setPointSizeF(7.0); f2.setBold(False); p.setFont(f2)
+            f2 = p.font(); f2.setPointSizeF(7.0 * k); f2.setBold(False); p.setFont(f2)
             p.setPen(QColor(SLATE_300))
             p.drawText(QRectF(x + margin, col_top + col_h * 0.42, left_w, col_h * 0.30),
                         Qt.AlignLeft | Qt.AlignVCenter, sub_empresa)
             # Línea cliente (si existe)
             cliente = (proy.get('cliente') or '').strip()
             if cliente:
-                f2b = p.font(); f2b.setPointSizeF(6.8); f2b.setItalic(True); p.setFont(f2b)
+                f2b = p.font(); f2b.setPointSizeF(6.8 * k); f2b.setItalic(True); p.setFont(f2b)
                 p.setPen(QColor(SLATE_500))
                 p.drawText(QRectF(x + margin, col_top + col_h * 0.70, left_w, col_h * 0.28),
                             Qt.AlignLeft | Qt.AlignVCenter, cliente)
@@ -3330,7 +3409,7 @@ class GanttWidget(QWidget):
 
         # ── Columna central: "Diagrama de Gantt" + nombre proyecto (3 líneas) ──
         # Título del reporte
-        f3 = p.font(); f3.setPointSizeF(11.0); f3.setBold(True); f3.setItalic(False); p.setFont(f3)
+        f3 = p.font(); f3.setPointSizeF(11.0 * k); f3.setBold(True); f3.setItalic(False); p.setFont(f3)
         p.setPen(QColor(SLATE_900))
         rect_titulo = QRectF(center_x, col_top, center_w, col_h * 0.34)
         p.drawText(rect_titulo, Qt.AlignCenter | Qt.AlignVCenter, "Diagrama de Gantt")
@@ -3338,7 +3417,7 @@ class GanttWidget(QWidget):
         # Nombre proyecto — wrap greedy hasta 3 líneas
         from PySide6.QtGui import QFontMetrics
         nom = (proy.get('nombre') or 'Proyecto sin nombre').strip()
-        f4 = p.font(); f4.setPointSizeF(7.8); f4.setItalic(True); f4.setBold(False); p.setFont(f4)
+        f4 = p.font(); f4.setPointSizeF(7.8 * k); f4.setItalic(True); f4.setBold(False); p.setFont(f4)
         p.setPen(QColor(SLATE_500))
         fm = QFontMetrics(f4)
         MAX_LINES = 3
@@ -3365,7 +3444,7 @@ class GanttWidget(QWidget):
         # ── Columna derecha: costo al, plazo, tramo, modalidad, hojas ──
         from datetime import timedelta
         right_x = x + w - margin - right_w
-        f5 = p.font(); f5.setPointSizeF(8.0); f5.setBold(True); p.setFont(f5)
+        f5 = p.font(); f5.setPointSizeF(8.0 * k); f5.setBold(True); p.setFont(f5)
         p.setPen(QColor(SLATE_700))
         plazo = proy.get('plazo') or 0
         from core.pdf_reports import _clean_costo_al
@@ -3375,7 +3454,7 @@ class GanttWidget(QWidget):
                     f"Costo al: {costo_al}")
 
         # Detalles secundarios
-        f6 = p.font(); f6.setPointSizeF(7.0); f6.setBold(False); f6.setItalic(False); p.setFont(f6)
+        f6 = p.font(); f6.setPointSizeF(7.0 * k); f6.setBold(False); f6.setItalic(False); p.setFont(f6)
         p.setPen(QColor(SLATE_500))
         det = [f"Plazo: {plazo} días"]
         if f_ini:

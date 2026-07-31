@@ -133,6 +133,7 @@ Topbar (← Inicio · pestañas · Total) + toolbar + `QSplitter` H/V. Panel der
 
 - **CPM** forward+backward+ruta crítica; dependencias FS/FF/SS/SF con lag y pct; hitos.
 - **Numeración "#" y filas virtuales (estilo MS Project)** — el "#" numera TODAS las filas posicionalmente (`core/cronograma.py`); DEBE coincidir con las predecesoras. `_partidas` se carga AGRUPADO por subpresupuesto; cambiar orden/inserción rompe la numeración (prever migración).
+- **Predecesoras:** la celda (col 7) sigue siendo texto libre («3, 7CC+2»), pero además hay selector por descripción — clic derecho sobre la tarea → «Predecesoras…» (`views/predecesoras_dialog.py`). Reusa `_build_pred_token`/`_evita_ciclo`/`_parse_preds` del arrastre entre barras, así ambas vías generan el MISMO texto. Los tokens que el diálogo no representa (lag en %, `TN%`, referencia por ítem) se conservan crudos como «avanzado» — NO destruirlos al editar. `parse_predecesoras` descarta en silencio los `#` inexistentes ⇒ `_avisar_preds_invalidas` avisa al escribir a mano (solo avisa, no revierte).
 - **Fórmula Polinómica:** `calcular_desde_acu(pid)` auto-deriva J/M/E. NO aplica en admin. directa. Validaciones D.S. 011-79-VC.
 - **INEI:** 72 códigos × 6 áreas, auto-detección por HEAD requests.
 - **Export MS Project (MSPDI XML):** formato abierto (abre en ProjectLibre/GanttProject). Reglas críticas: `Manual=0` (sin esto → duración 0), NO emitir `Finish`/`ManualFinish`; tareas sin predecesora → SNET; `id` incrustado en Text29 «IngeID».
@@ -194,6 +195,8 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 
 **Stylesheet:** `QWidget { background: X }` afecta a TODOS los descendientes → `setObjectName` + `#foo` + `Qt.WA_StyledBackground`. `QLabel` con `setStyleSheet` parcial → siempre `background:transparent; border:none;`. Botones circulares: subclasear + `paintEvent` (el QSS cascade pisa `border-radius` tras hide/show). `::indicator` con QSS propio: usar `border`+`background` sólidos (no SVG semitransparente, invisible en Linux/Win).
 
+**Papel grande (A3/A1/A0):** el header del Gantt está cotado en **mm físicos**, así que la hoja crece y el logo/textos NO → en A1 se veían ~2.8× más chicos (bug reportado). `pdf_reports.escala_papel(PG_W, dpi)` da el factor (A4 apaisado = 1, ley de potencia 0.7 para no llegar a 4× en A0); se aplica al `mm` local del header Y a los `setPointSizeF`. Al pintar un logo usar **`pdf_reports._rect_logo(img, box_w, box_h)`**: recortar el ancho sin recalcular el alto deformaba los wordmarks (4:1 salían a 3.2:1). Tamaño manual del logo: `rep_logo_escala` (%, 50–200) en Formato de reporte.
+
 **Layouts:** `layout.takeAt(0)` solo desconecta → `item.widget().setParent(None); deleteLater()`.
 
 **Wayland:** `self.move()` no funciona → `startSystemMove()` diferido a mouseMoveEvent. Fractional scaling Qt 6.11: `INGEPPTO_FORCE_XCB=1`.
@@ -226,3 +229,41 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 - **«Sugerir partidas» (RAG):** la IA arma la estructura, la biblioteca/proyectos ponen los costos. Fase 1 fuzzy + Fase 2 semántica (`core/biblioteca_embeddings.py`, model2vec int8, sin PyTorch), fusión RRF; el modelo se baja de R2 al build (si falta, degrada a fuzzy). Corre en QThread.
 - **i18n** (`utils/i18n.py`): `tr("texto español")`, importar dentro del método. Cobertura parcial.
 - **Contacto** (`worker/contacto.js`): POST → Cloudflare Worker → Resend. User-Agent `IngePresupuestos/X.Y.Z` obligatorio.
+
+---
+
+## Trabajo futuro — «Partida como sub-análisis» (NO implementado)
+
+**Estado actual:** NO existe el concepto. `SC` es solo un tipo de recurso más (`recursos.tipo='SC'`, etiqueta «Sub-contratos / Servicios») con **precio fijo tecleado a mano**. El importador `.prs` resuelve los sub-análisis de PowerCost recursivamente **en tiempo de importación** (`powercost_prs_importer.py:512-616`, `_cu_analisis` con anti-ciclos `_stack`) y **aplana** el resultado a un precio literal — el vínculo se pierde. Pedido recurrente de usuarios que vienen de S10/PowerCost/Delphin, donde una partida aparece dentro del ACU de otra con su propio desglose y CU recalculable.
+
+### Modelo de datos elegido (opción A, estilo S10)
+`partidas.es_subanalisis INTEGER DEFAULT 0` + `acu_items.sub_partida_id INTEGER NULL REFERENCES partidas(id)` (migración estilo `database.py:526`; relajar `recurso_id` a nullable). Default `0` ⇒ proyectos existentes intactos y **sin migración de numeración del cronograma**.
+Descartadas: (B) reusar `biblioteca_cu` — es global, rompe precios por proyecto (`ai.precio`); (C) referenciar cualquier partida sin flag — doble conteo garantizado.
+
+### Decisiones de negocio PENDIENTES (preguntar al autor antes de codificar)
+1. ¿La base de `%MO`/`%MAT` del padre incluye la MO que vive dentro de la sub-partida? (criterio S10 = **no**, entra como bloque).
+2. ¿Un solo nivel de anidamiento o multinivel? (un nivel simplifica UI+reportes; multinivel es donde aparecen los ciclos reales).
+
+### Los 4 problemas difíciles
+- **Ciclos** A→B→A: stack de visitados en el recálculo. Precedente: `powercost_prs_importer.py:512-542`.
+- **Cascada:** `_recalcular_pu` (`database.py:966`) se llama desde ~15 sitios y recalcula UNA partida. Meter la cascada (subir por `sub_partida_id`) **dentro** de `_recalcular_pu` ⇒ los 15 call-sites siguen sin tocarse.
+- **Explosión de insumos:** `get_insumos_para_partidas` (`database.py:1077`) es JOIN plano de 1 nivel (`:1117`). Debe dar `cant_hoja × cant_sub_en_padre × metrado_padre`. El invariante `sum(insumos) == CD` (distribución proporcional, `:1120-1122`) **se conserva** si los ratios se encadenan multiplicativamente — testear.
+- **Doble conteo:** `calcular_totales` (`:838`) suma TODA partida con `es_titulo=0`. Sin el filtro de exclusión contamina CD, Insumos, Gantt, Curva S y valorizaciones.
+
+### Radio de impacto medido
+- **129** `FROM partidas` en `core/` + `views/`, de los cuales **62** son listados `WHERE proyecto_id=?` que necesitan `AND es_subanalisis=0`. Concentrados en `proyecto_view.py` (42), `ai_specs.py` (17), `exporter.py` (11).
+- **9** escritores de `acu_items`. `ingepresupuestos_db_importer.py` usa columnas dinámicas (OK); `exporter.py` usa `INSERT INTO acu_items VALUES (?)` **posicional** — revisar.
+- **UI:** el `QTableWidget` plano ALCANZA, NO migrar a `QTreeWidget` (rompería los 4 delegates, `_instalar_nav` y el contrato `_acu_row_ids`). Extender el sentinel `-1` con un array paralelo de «kind»; indentación por delegate; expandir/colapsar con `setRowHidden`. Los 4 puntos que comparan `== -1`: `proyecto_view.py:674, :7183, :7203, :7277`. **Ojo:** `_aplicar_cambio_acu` (`:7208-7271`) propaga el precio editado a TODO el proyecto por `recurso_id` → debe saltar filas sub-análisis (precio derivado, solo lectura). `recurso_selector_dialog.py` necesita pestaña nueva para elegir partida.
+- **Reportes:** 3 críticos (`pdf_reports.py:613` `_html_acus`, `exporter.py:936` `exportar_acus`, hoja ACUs `exporter.py:2349`) + **2 legacy con SQL crudo** (`exporter.py:2362`, `:2816`) que divergirían en silencio. Indentación ya disponible: `_ind()` (`pdf_reports.py:477`) y `Alignment(indent=N)`. **Riesgo:** el Excel reordena filas por tipo (`exporter.py:1114-1130`) → rompe el anidamiento.
+- **Fórmula polinómica:** `formula_polinomica.py:55-88` agrupa por `r.tipo` con SQL plano y SC cae en MAT (`:70`) → sin explosión recursiva la MO interna desaparece de **J** y los coeficientes salen sesgados.
+- **Requerimientos:** 4 sitios de SQL plano (`requerimientos.py:225-235, :290, :297, :326-337`) — la sub-partida saldría como «insumo comprable».
+- **Cronograma:** `cronograma.py` filtra solo por `es_titulo` → una sub-partida ocuparía fila y **rompería la numeración «#»** de las predecesoras. Excluir en `filas_slots`/`numerar_filas`.
+- **Sin impacto directo:** `valorizacion.py`, `almacen.py`, `curva_s.py` (leen `metrado × precio_unitario`, no el ACU) — pero heredan el doble conteo si falla la exclusión.
+- **`partidas_pu_inconsistente`** (`database.py:980`): con precio derivado, `COALESCE(ai.precio, r.precio, 0)` deja de ser la fuente de verdad → resolver el CU del hijo antes de comparar, o toda partida padre saldrá inconsistente.
+
+### Plan por fases
+1. **Núcleo + tests, sin UI:** migración, explosión recursiva con anti-ciclos, cascada en `_recalcular_pu`, exclusión en `calcular_totales`/`get_insumos_proyecto`. Tests nuevos en `test_reglas_negocio.py`: ciclo detectado, `sum(insumos) == CD` con anidamiento, CD sin doble conteo.
+2. **UI panel ACU:** fila expandible + selector de sub-partida + precio derivado solo lectura.
+3. **Reportes:** los 3 críticos; migrar los 2 de SQL crudo a `get_acu_items`.
+4. **Periféricos:** fórmula polinómica, requerimientos, cronograma.
+5. **Bonus:** el importador `.prs` deja de aplanar y preserva el vínculo real.

@@ -47,6 +47,7 @@ FORMATO_CLAVES = {
     'rep_color_marca':      '#F37329',
     'rep_color_marca_dk':   '#C0621A',
     'rep_logo_b64':         '',         # PNG en base64 (sin prefijo data:)
+    'rep_logo_escala':      '100',      # % del tamaño base del logo (50–200)
     'rep_pie_izquierdo':    '',         # texto opcional adicional en pie
     'rep_pie_central':      '',         # si vacío, usa fecha
     'rep_pie_derecho':      '',         # si vacío, usa "Página X de N"
@@ -66,6 +67,51 @@ def set_formato(formato: dict):
     for k in FORMATO_CLAVES:
         if k in formato:
             set_config(k, formato[k] or '')
+
+
+def logo_escala(formato: dict | None = None) -> float:
+    """Factor manual del tamaño del logo (1.0 = tamaño base de la banda).
+
+    Clave `rep_logo_escala`, en %. Se acota a 50–200: por encima de eso el
+    logo invadiría las columnas central/derecha del encabezado."""
+    fmt = formato if formato is not None else get_formato()
+    try:
+        pct = float(str(fmt.get('rep_logo_escala') or 100).replace(',', '.'))
+    except (TypeError, ValueError):
+        pct = 100.0
+    return max(50.0, min(200.0, pct)) / 100.0
+
+
+def escala_papel(page_w_px: float, dpi: float) -> float:
+    """Factor de escala del encabezado según el ancho de papel (A4 apaisado = 1).
+
+    El header del Gantt está cotado en milímetros FÍSICOS, así que la hoja
+    crece con el formato pero el logo y los textos no: en A1 quedan ~2.8×
+    más chicos en proporción (reportado por usuarios al exportar en A1/A3).
+    Se amortigua con exponente 0.7 en vez de escalar linealmente — lineal
+    daría 4× en A0 y un encabezado desproporcionado. Nunca reduce: en
+    retrato o papeles menores que A4 se deja tal cual."""
+    if page_w_px <= 0 or dpi <= 0:
+        return 1.0
+    w_a4_landscape = 297.0 * dpi / 25.4
+    return max(1.0, (page_w_px / w_a4_landscape) ** 0.7)
+
+
+def _rect_logo(img, box_w: float, box_h: float) -> tuple[float, float]:
+    """Tamaño (w, h) del logo para que entre en `box_w × box_h` SIN deformarse.
+
+    El código anterior recortaba el ancho a la caja pero dejaba el alto sin
+    recalcular, y `drawImage` estiraba el rect: los logos apaisados (wordmarks
+    de 4:1 o más) salían achatados."""
+    iw = max(1, img.width())
+    ih = max(1, img.height())
+    h = box_h
+    w = iw * h / ih
+    if w > box_w:
+        w = box_w
+        h = ih * w / iw
+    return w, h
+
 
 # ── Paleta Elementary OS ──────────────────────────────────────────────────────
 ORANGE       = "#F37329"
@@ -3317,9 +3363,8 @@ class _PdfRenderer:
                 ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
                 img = QImage()
                 if img.loadFromData(ba):
-                    h = 36
-                    w = int(img.width() * h / max(1, img.height()))
-                    w = min(w, 240)
+                    esc = logo_escala(self.formato)
+                    w, h = _rect_logo(img, 240 * esc, 36 * esc)
                     painter.drawImage(QRectF(self.margin_x, 18, w, h), img)
                     logo_drawn = True
             except Exception:
@@ -3498,9 +3543,11 @@ class _PdfRenderer:
                 ba = QByteArray.fromBase64(logo_b64.encode('ascii'))
                 img = QImage()
                 if img.loadFromData(ba):
-                    h = 30
-                    w = int(img.width() * h / max(1, img.height()))
-                    w = min(w, left_w)
+                    # Tope de alto: la banda del header (menos el margen
+                    # superior `y`), para que no invada el cuerpo del reporte.
+                    esc = logo_escala(self.formato)
+                    box_h = min(30 * esc, self.header_h - y - 2)
+                    w, h = _rect_logo(img, left_w * esc, box_h)
                     painter.drawImage(QRectF(self.margin_x, y, w, h), img)
                     logo_drawn = True
             except Exception:
