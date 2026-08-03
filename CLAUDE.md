@@ -14,7 +14,7 @@ Repo: `github.com/ingelibre/ingepresupuestos` · Web: `ingepresupuestos.com` · 
 
 ```bash
 # Python 3.12+ · PySide6 6.x
-cd /home/sumaritux/ingepresupuestos
+cd /home/sumaritux/Proyectos/ingepresupuestos/app
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python3 main.py          # o ./iniciar.sh   (Wayland: INGEPPTO_FORCE_XCB=1 fuerza xcb)

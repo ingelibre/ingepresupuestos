@@ -83,7 +83,7 @@ cantidad_MO = (cuadrilla / rendimiento) * jornada_laboral
 ## Dependencias nuevas a instalar
 
 ```bash
-cd /home/sumaritux/ingepresupuestos-pyside6
+cd /home/sumaritux/Proyectos/ingepresupuestos/app-pyside6
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
