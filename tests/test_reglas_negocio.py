@@ -299,6 +299,68 @@ def test_importador_prs_reconcilia():
                 f"{os.path.basename(prs)} {p['item']}: PU={p['precio_unitario']} vs ACU={cu}"
 
 
+def test_importador_prs_pie_de_presupuesto():
+    """El pie del .prs (PiePpto + EstGGs) se importa FIEL: rubros con sus
+    porcentajes, desagregado de costos indirectos y total al céntimo.
+
+    Antes se sembraba un pie genérico inactivo y el total no cuadraba con
+    PowerCost. Contrastado con «Desagregado CI.xlsx» del propio PowerCost.
+    """
+    import shutil as _sh
+    prs = os.path.expanduser('~/Descargas/yanque/Plaza Yanque.prs')
+    if not os.path.isfile(prs) or not _sh.which('mdb-export'):
+        print("      (saltado: sin el .prs de prueba o sin mdbtools)")
+        return
+    from core.powercost_prs_importer import import_powercost_prs
+    from core.exporter import _calcular_rubros_pie
+    from core import importer
+
+    info, partidas, acus, rec, met = import_powercost_prs(prs)
+    assert info.get('pie_rubros'), "no se leyó el pie del .prs"
+
+    conn = _db_seed()
+    d.init_db()
+    pid = importer.guardar_importacion(info, partidas, acus, rec, met)
+    _items, tot = d.calcular_totales(pid)
+    conn = d.get_db()
+    rubros, total = _calcular_rubros_pie(conn, pid, tot['cd'])
+    conn.close()
+
+    # Valores del reporte «Desagregado de Costo Indirecto» de PowerCost.
+    esperado = {
+        'Gastos Generales':          58590.00,
+        'Utilidad':                  15098.33,
+        'Sub Total':                451146.60,
+        'IGV':                       81206.39,
+        'Valor Referencial De Obra':532352.99,
+        'Supervision De Obra':       25560.00,
+        'Expediente Tecnico':        35000.00,
+        'Liquidación De Obra':        6000.00,
+        'Costo Total Del Proyecto': 598912.99,
+    }
+    assert abs(tot['cd'] - 377458.27) <= 0.02, f"CD={tot['cd']}"
+    vistos = {}
+    for r in rubros or []:
+        vistos[r['nombre']] = r['valor']
+    for nombre, val in esperado.items():
+        assert nombre in vistos, f"falta el rubro «{nombre}» en el pie"
+        assert abs(vistos[nombre] - val) <= 0.02, \
+            f"{nombre}: app={vistos[nombre]:.2f} vs PowerCost={val:.2f}"
+    assert abs(total - 598912.99) <= 0.02, f"total={total:.2f}"
+
+    # El desagregado también, no solo los totales.
+    conn = d.get_db()
+    gg = sum((g['cantidad'] or 0) * (g['precio'] or 0) for g in conn.execute(
+        "SELECT * FROM gastos_generales WHERE proyecto_id=? AND rubro='GG'"
+        " AND tipo='item'", (pid,)))
+    n_tit = conn.execute(
+        "SELECT COUNT(*) FROM gastos_generales WHERE proyecto_id=? AND tipo='titulo'",
+        (pid,)).fetchone()[0]
+    conn.close()
+    assert abs(gg - 58590.00) <= 0.02, f"desagregado GG = {gg:.2f}"
+    assert n_tit > 0, "no se importaron los títulos del desagregado"
+
+
 def test_importador_prs_subpresupuestos_dentro_del_proyecto():
     """Un proyecto .prs con varios sub-presupuestos se importa COMPLETO como
     UN solo proyecto: el primer sub es el Principal y los demás viajan en

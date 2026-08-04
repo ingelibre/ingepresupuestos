@@ -1136,7 +1136,29 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
     #   - PowerCost  → activo (sus reportes incluyen CD+GG+Util+IGV)
     #   - Delphin    → inactivo por default (adicionales suelen ser solo CD)
     # Los porcentajes reales se preservan en cualquier caso.
-    if pcts_explicitos:
+    # Pie REAL del archivo origen (PowerCost .prs): rubros con sus
+    # porcentajes y el desagregado de costos indirectos, tal cual venían.
+    # Tiene prioridad sobre el pie genérico de `rubros_default`.
+    _pie_rubros = info.get('pie_rubros') or []
+    if _pie_rubros:
+        for codigo, nombre, pct, activo, orden, tipo, mostrar_pct in _pie_rubros:
+            conn.execute(
+                "INSERT INTO pie_rubros"
+                " (proyecto_id, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (pid, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)
+            )
+        for d in (info.get('pie_detalle') or []):
+            conn.execute(
+                "INSERT INTO gastos_generales"
+                " (proyecto_id, rubro, tipo, descripcion, unidad, n_personas,"
+                "  tiempo, pct_participacion, precio, orden, cantidad)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, d['rubro'], d['tipo'], d['descripcion'], d['unidad'],
+                 d['n_personas'], d['tiempo'], d['pct_participacion'],
+                 d['precio'], d['orden'], d['cantidad'])
+            )
+    elif pcts_explicitos:
         gf   = float(info.get('gf_pct')       or 0)
         util = float(info.get('utilidad_pct') or 0)
         igv  = float(info.get('igv_pct')      or 0)

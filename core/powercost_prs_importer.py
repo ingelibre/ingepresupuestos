@@ -306,6 +306,172 @@ def _int(v, default: int = 0) -> int:
         return default
 
 
+def _leer_pie(q, id_ppto: int, cd: float) -> tuple[list, list]:
+    """Lee el pie de presupuesto de PowerCost y lo traduce al modelo de la app.
+
+    PowerCost guarda el pie en dos tablas:
+      - ``PiePpto``   — una fila por renglón, con ``Expresion`` (la fórmula:
+        ``U= CD*4/100``, ``IGV = ST*18/100``, ``GG= <<Detalle>>``…),
+        ``Orden`` de impresión y ``TipoPie`` (5/6 = separador visual).
+      - ``EstGGs``    — el desagregado de los renglones «<<Detalle>>»,
+        agrupado por ``IdPos``, con NoPersonas/NoUnidades/Participacion.
+    ``ValoresPieP`` (los montos ya calculados) suele venir VACÍA: PowerCost
+    recalcula del árbol al abrir, así que hay que resolver las fórmulas.
+
+    Devuelve ``(rubros, detalle)`` listos para `guardar_importacion`:
+      rubros  → [(codigo, nombre, pct, activo, orden, tipo, mostrar_pct)]
+      detalle → [{'rubro','tipo','descripcion','unidad','n_personas',
+                  'tiempo','pct_participacion','precio','cantidad','orden'}]
+    Con `[], []` si el archivo no trae pie (el llamador cae al default).
+    """
+    filas = [r for r in q('PiePpto') if _int(r.get('IdPpto')) == id_ppto]
+    if not filas:
+        return [], []
+    filas.sort(key=lambda r: _int(r.get('Orden')))
+
+    # ── Desagregado por IdPos (los renglones «<<Detalle>>») ────────────────
+    ins_by_id = {_int(r['IdInsumo']): r for r in q('Insumos')}
+    tit_by_id = {_int(r['IdTitulo']): _str(r['NomTitulo']) for r in q('Titulos')}
+    precio_de = {_int(r['IdInsumo']): _num(r['Precio'])
+                 for r in q('PreciosIns') if _int(r.get('IdPpto')) == id_ppto}
+    gg_por_pos: dict[int, list[dict]] = {}
+    for r in q('EstGGs'):
+        if _int(r.get('IdPpto')) != id_ppto:
+            continue
+        gg_por_pos.setdefault(_int(r['IdPos']), []).append(r)
+    for lst in gg_por_pos.values():
+        lst.sort(key=lambda r: _int(r.get('Orden')))
+
+    def _detalle_de(idpos: int, codigo: str) -> tuple[list, float]:
+        """Convierte las filas de EstGGs de un rubro y devuelve (filas, total)."""
+        out, total = [], 0.0
+        for i, r in enumerate(gg_por_pos.get(idpos, [])):
+            if _int(r.get('TipoDetalle')) == 1:      # fila de TÍTULO
+                out.append({
+                    'rubro': codigo, 'tipo': 'titulo',
+                    'descripcion': tit_by_id.get(_int(r['IdTitulo']), '') or '',
+                    'unidad': '', 'n_personas': 0, 'tiempo': 0,
+                    'pct_participacion': 100, 'precio': 0, 'cantidad': 0,
+                    'orden': i,
+                })
+                continue
+            ins = ins_by_id.get(_int(r['IdInsumo']))
+            if not ins:
+                continue
+            # `Cantidad` ya viene resuelta por PowerCost (NoPersonas ×
+            # NoUnidades × Participacion cuando aplica); si viniera en 0 se
+            # reconstruye. `Participacion` es fracción (1 = 100%).
+            part = _num(r.get('Participacion'), 1.0)
+            cant = _num(r.get('Cantidad'))
+            if not cant:
+                cant = (_num(r.get('NoPersonas')) * _num(r.get('NoUnidades'))
+                        * (part or 1.0))
+            precio = precio_de.get(_int(r['IdInsumo']), 0.0)
+            total += cant * precio
+            out.append({
+                'rubro': codigo, 'tipo': 'item',
+                'descripcion': _str(ins.get('NomInsumo')),
+                'unidad': _str(ins.get('Unidad')),
+                'n_personas': _num(r.get('NoPersonas')),
+                'tiempo': _num(r.get('NoUnidades')),
+                # La app multiplica por pct/100, y PowerCost ya metió la
+                # participación dentro de `Cantidad` → aquí va 100 para no
+                # aplicarla dos veces.
+                'pct_participacion': 100.0,
+                'precio': precio, 'cantidad': cant, 'orden': i,
+            })
+        return out, total
+
+    # ── Traducir cada renglón ──────────────────────────────────────────────
+    # Códigos de la app (mismos que `rubros_default` en core/importer.py).
+    _POR_NOMBRE = [
+        ('SUPERVIS',  'SUP',  'rubro'),
+        ('EXPEDIENTE','ET',   'rubro'),
+        ('LIQUIDAC',  'LQ',   'rubro'),
+        ('GASTOS GENERALES', 'GG', 'rubro'),
+        ('UTILIDAD',  'UTIL', 'pct_cd'),
+        ('IGV',       'IGV',  'pct_sub'),
+        # Acumulados conocidos: código corto y legible en vez del que
+        # saldría de destripar el nombre («VALORREFER», «COSTOTOTAL»).
+        ('SUB TOTAL', 'SUB',  'subtotal'),
+        ('VALOR REFERENCIAL', 'VR', 'subtotal'),
+        ('COSTO TOTAL', 'CT', 'subtotal'),
+        ('PRESUPUESTO TOTAL', 'CT', 'subtotal'),
+    ]
+    import re as _re
+    rubros, detalle, orden = [], [], 0
+    usados: set = set()
+    for f in filas:
+        tipo_pie = _int(f.get('TipoPie'))
+        nombre = _str(f.get('Descripcion'))
+        expr = _str(f.get('Expresion'))
+        if tipo_pie in (5, 6) or not nombre:
+            continue                      # separador visual, sin contenido
+        up = nombre.upper()
+        if up.startswith('COSTO DIRECTO'):
+            continue                      # el CD es la base, no un rubro
+        idpos = _int(f.get('IdPos'))
+
+        codigo = tipo = None
+        for clave, cod, tp in _POR_NOMBRE:
+            if clave in up:
+                codigo, tipo = cod, tp
+                break
+        if codigo is None:
+            # SUB TOTAL / VALOR REFERENCIAL / COSTO TOTAL → acumulados.
+            # Se reconocen por la fórmula: suman términos ya calculados y no
+            # llevan ni porcentaje ni desagregado.
+            codigo = _re.sub(r'[^A-Z0-9]', '', up)[:10] or f'POS{idpos}'
+            tipo = 'subtotal'
+        while codigo in usados:            # nombres repetidos → código único
+            codigo += 'X'
+        usados.add(codigo)
+
+        # Porcentaje: de `txPor` («4 %», «18 %») o de la propia fórmula
+        # (`CD*4/100`). Si el rubro trae desagregado, manda el desagregado.
+        pct = 0.0
+        m = _re.search(r'([\d.,]+)\s*%', _str(f.get('txPor')))
+        if m:
+            pct = _num(m.group(1).replace(',', '.'))
+        if not pct:
+            m = _re.search(r'\*\s*([\d.,]+)\s*/\s*100', expr)
+            if m:
+                pct = _num(m.group(1).replace(',', '.'))
+
+        filas_det, total_det = ([], 0.0)
+        if tipo == 'rubro':
+            filas_det, total_det = _detalle_de(idpos, codigo)
+            if filas_det:
+                detalle.extend(filas_det)
+                if cd:
+                    pct = total_det / cd * 100
+            else:
+                # Renglón sin desagregado: monto fijo en la fórmula
+                # (`GL=  6000`) → se guarda como fila 'manual' del rubro.
+                m = _re.search(r'=\s*([\d.,]+)\s*$', expr.replace(' ', ''))
+                if m:
+                    val = _num(m.group(1).replace(',', '.'))
+                    if val:
+                        detalle.append({
+                            'rubro': codigo, 'tipo': 'manual',
+                            'descripcion': nombre, 'unidad': '',
+                            'n_personas': 0, 'tiempo': 0,
+                            'pct_participacion': 100, 'precio': val,
+                            'cantidad': 1, 'orden': 0,
+                        })
+                        if cd:
+                            pct = val / cd * 100
+
+        # PowerCost escribe todo en MAYÚSCULAS; se pasa a Capitalizado para
+        # que case con el resto de la app, pero respetando siglas (IGV, CD…).
+        _SIGLAS = {'IGV', 'CD', 'CT', 'ST', 'GG', 'IVA'}
+        _bonito = ' '.join(w if w in _SIGLAS else w.capitalize()
+                           for w in nombre.split()) if nombre.isupper() else nombre
+        rubros.append((codigo, _bonito, round(pct, 6), 1, orden, tipo, 1))
+        orden += 1
+    return rubros, detalle
+
+
 def _codigo_recurso(id_iu: int, id_tipo: int, id_insumo: int) -> str:
     """Construye un código de 7 dígitos: 2 INEI + 5 correlativo.
 
@@ -437,12 +603,32 @@ def import_powercost_prs(filepath: str,
         # El primer sub-presupuesto es el «Principal» del proyecto; los
         # demás los crea guardar_importacion() a partir de sub_ref.
         'sub_presupuesto': nombres_subs[0],
-        # Pie de presupuesto: por ahora se siembra inactivo (igual que
-        # Delphin). PowerCost tiene tablas PiePpto/ValoresPieP con la
-        # estructura real del pie, pero parsearlas se aplazó a v2.
-        # Ref: [[project-pie-import-v2]]
         'costo_al':        _str(proy.get('Fecha')),
     }
+
+    # ── Pie de presupuesto REAL del archivo (PiePpto + EstGGs) ──────────
+    # Antes se sembraba un pie genérico inactivo; ahora se replica el del
+    # .prs con sus rubros, porcentajes y desagregado de costos indirectos.
+    try:
+        _cd_arch = _num(proy.get('CD'))
+        _pie_rubros, _pie_detalle = _leer_pie(q, id_ppto, _cd_arch)
+        if _pie_rubros:
+            info['pie_rubros'] = _pie_rubros
+            info['pie_detalle'] = _pie_detalle
+        elif any(_int(r.get('IdPpto')) == id_ppto for r in q('PiePpto')):
+            # El archivo SÍ trae pie, pero solo el renglón «COSTO DIRECTO»:
+            # en PowerCost ese presupuesto no lleva costos indirectos. Hay que
+            # decirlo explícitamente (0 %), porque si no la app aplicaría sus
+            # porcentajes por defecto (10/5/18) y el total no cuadraría con el
+            # archivo.
+            info['gf_pct'] = 0.0
+            info['utilidad_pct'] = 0.0
+            info['igv_pct'] = 0.0
+            info['pie_activo_default'] = False
+    except Exception:
+        # Un pie ilegible no debe tumbar la importación del presupuesto:
+        # se cae al pie por defecto y el usuario lo ajusta a mano.
+        pass
 
     # ── 3. Helpers compartidos entre sub-presupuestos ───────────────────
 
