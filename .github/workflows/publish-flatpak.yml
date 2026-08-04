@@ -1,0 +1,142 @@
+# Construye el Flatpak (edición sideload) y publica el repositorio OSTree
+# firmado en R2, detrás de https://downloads.ingepresupuestos.com/flatpak/
+#
+# Los usuarios instalan con:
+#   flatpak install --from https://downloads.ingepresupuestos.com/flatpak/ingepresupuestos.flatpakref
+#
+# NO es la edición de Flathub (`installer/flathub/`): esta usa el host para
+# ODT/ODS vía flatpak-spawn y por eso es la COMPLETA. No mezclar las dos.
+#
+# Secrets necesarios:
+#   FLATPAK_GPG_KEY  — clave PRIVADA armada (ASCII) que firma el repo.
+#                      Sin contraseña: el CI firma sin intervención.
+#                      Respaldo en ~/Documentos/claves-gpg-ingepresupuestos/.
+#   R2_*             — los mismos que usa build-linux.yml.
+#
+# Historia: hasta 2026-08-04 el repo se generaba A MANO. Se quedó en la versión
+# del 7 de julio mientras el resto de canales avanzaba, y la clave que lo
+# firmaba se perdió al reparticionar el disco. De ahí este workflow.
+
+name: Publicar Flatpak
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag a publicar (vX.Y.Z)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag a publicar (vX.Y.Z)
+        required: true
+        type: string
+
+concurrency:
+  # El repo OSTree es un destino único: dos publicaciones a la vez lo
+  # corromperían (el `summary` se reescribe entero).
+  group: publish-flatpak
+  cancel-in-progress: false
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Comprobar secrets
+        env:
+          HAS_GPG: ${{ secrets.FLATPAK_GPG_KEY != '' }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
+        run: |
+          if [ "$HAS_GPG" != "true" ] || [ "$HAS_R2" != "true" ]; then
+            echo "::error::Faltan secrets: FLATPAK_GPG_KEY y/o R2_*."
+            exit 1
+          fi
+
+      - name: Instalar flatpak y flatpak-builder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak flatpak-builder ostree
+          flatpak remote-add --if-not-exists --user flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Instalar runtimes
+        run: |
+          # El manifiesto declara sus runtimes; se instalan con --install-deps-from
+          # más abajo, pero la base-app de PySide es pesada y conviene cachearla.
+          flatpak install --user -y --noninteractive flathub \
+            org.kde.Platform//6.10 org.kde.Sdk//6.10 || true
+
+      - name: Importar la clave de firma
+        env:
+          GPG_KEY: ${{ secrets.FLATPAK_GPG_KEY }}
+        run: |
+          echo "$GPG_KEY" | gpg --batch --import
+          FPR=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
+          echo "GPG_FPR=$FPR" >> "$GITHUB_ENV"
+          echo "Firmando con $FPR"
+
+      - name: Construir el Flatpak
+        run: |
+          set -e
+          cd installer/flatpak
+          # El manifiesto espera el árbol del proyecto como fuente `dir`.
+          flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --install-deps-from=flathub \
+            --repo=$GITHUB_WORKSPACE/flatpak-repo \
+            --gpg-sign="$GPG_FPR" \
+            build com.ingepresupuestos.IngePresupuestos.yml
+
+      - name: Firmar y compactar el repositorio
+        run: |
+          set -e
+          flatpak build-update-repo \
+            --generate-static-deltas \
+            --prune --prune-depth=3 \
+            --gpg-sign="$GPG_FPR" \
+            "$GITHUB_WORKSPACE/flatpak-repo"
+
+      - name: Generar el .flatpakref
+        run: |
+          set -e
+          V="${{ inputs.tag }}"; V="${V#v}"
+          KEY=$(gpg --export "$GPG_FPR" | base64 -w0)
+          cat > "$GITHUB_WORKSPACE/ingepresupuestos.flatpakref" <<EOF
+          [Flatpak Ref]
+          Title=IngePresupuestos
+          Name=com.ingepresupuestos.IngePresupuestos
+          Branch=master
+          Url=https://downloads.ingepresupuestos.com/flatpak/repo/
+          Homepage=https://ingepresupuestos.com
+          Comment=Software libre de presupuestos de obra
+          Icon=https://ingepresupuestos.com/images/logo.png
+          IsRuntime=false
+          GPGKey=$KEY
+          RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          EOF
+          echo "✓ .flatpakref para v$V"
+
+      - name: Publicar en R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -e
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          B="s3://ingepresupuestos-downloads/flatpak"
+          # El repo primero y el .flatpakref DESPUÉS: si alguien instala a
+          # media subida, mejor que el ref apunte a un repo ya completo.
+          aws s3 sync "$GITHUB_WORKSPACE/flatpak-repo" "$B/repo/" \
+            --endpoint-url "$EP" --delete --no-progress
+          aws s3 cp "$GITHUB_WORKSPACE/ingepresupuestos.flatpakref" "$B/ingepresupuestos.flatpakref" \
+            --endpoint-url "$EP" \
+            --content-type "application/vnd.flatpak.ref" \
+            --cache-control "no-cache, max-age=0"
+          echo "✓ Flatpak publicado en downloads.ingepresupuestos.com/flatpak/"

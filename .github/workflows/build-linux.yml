@@ -189,3 +189,16 @@ jobs:
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp version.json "s3://ingepresupuestos-downloads/version.json" --endpoint-url "$EP" --content-type application/json --cache-control "no-cache, max-age=0"
           echo "✓ version.json actualizado en R2 → v${V}"
+
+  # ── Publicar el repositorio Flatpak ──────────────────────────────────────
+  # Encadenado aquí por el mismo motivo que winget en build-windows.yml: el
+  # Release lo crea el paso de arriba con el GITHUB_TOKEN por defecto y GitHub
+  # no dispara workflows nuevos desde eventos generados con ese token.
+  # Antes se generaba a mano y se quedó un mes atrás (ver publish-flatpak.yml).
+  flatpak:
+    needs: build-linux
+    if: ${{ startsWith(github.ref, 'refs/tags/') && github.repository == 'ingelibre/ingepresupuestos' }}
+    uses: ./.github/workflows/publish-flatpak.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
