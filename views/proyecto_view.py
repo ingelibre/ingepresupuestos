@@ -162,7 +162,8 @@ class _SubPptoTab(QPushButton):
     eliminar  = Signal()      # pide eliminar este sub-presupuesto
     copiar    = Signal()      # copiar este sub-presupuesto completo
     pegar_sub = Signal()      # pegar el sub-presupuesto del clipboard (nuevo)
-    exportar  = Signal()      # sacar este sub-presupuesto a un proyecto nuevo
+    exportar  = Signal()      # convertirlo en un proyecto nuevo (dentro de la app)
+    exportar_db = Signal()    # volcarlo a un archivo .db independiente
 
     def __init__(self, nombre: str, editable: bool = True,
                  borrable: bool = False, parent=None):
@@ -188,7 +189,10 @@ class _SubPptoTab(QPushButton):
             act_paste = menu.addAction(
                 f"{tr('Pegar sub-presupuesto')} «{_pc.nombre_subppto_clipboard()}»")
         menu.addSeparator()
-        act_export = menu.addAction(tr("Exportar como proyecto nuevo") + "…")
+        # Dos destinos distintos, a propósito separados: uno se queda DENTRO
+        # del programa y el otro produce un archivo para llevárselo.
+        act_export = menu.addAction(tr("Convertir en proyecto nuevo") + "…")
+        act_export_db = menu.addAction(tr("Exportar a archivo .db") + "…")
         chosen = menu.exec(event.globalPos())
         if chosen is None:
             return
@@ -202,6 +206,8 @@ class _SubPptoTab(QPushButton):
             self.pegar_sub.emit()
         elif chosen is act_export:
             self.exportar.emit()
+        elif chosen is act_export_db:
+            self.exportar_db.emit()
 
     def _apply_full_name(self, nombre: str):
         """Trunca con elipsis al ancho disponible y propaga al tooltip."""
@@ -10594,6 +10600,8 @@ class ProyectoView(QWidget):
             btn.pegar_sub.connect(self._pegar_subppto)
             btn.exportar.connect(
                 lambda t=tid, n=tab['nombre']: self._exportar_subppto_a_proyecto(t, n))
+            btn.exportar_db.connect(
+                lambda t=tid, n=tab['nombre']: self._exportar_subppto_a_db(t, n))
             self._tab_bar_hl.addWidget(btn)
 
         # Botón "+" pegado al lado de las pestañas, mismo estilo pasivo
@@ -10686,8 +10694,9 @@ class ProyectoView(QWidget):
 
         self._on_sub_ppto_cambiado(nuevo_id)
 
-    def _exportar_subppto_a_proyecto(self, tid, nombre: str):
-        """Saca un sub-presupuesto a un PROYECTO NUEVO e independiente.
+    def _crear_proyecto_desde_subppto(self, tid, nombre: str,
+                                       nuevo_nombre: str) -> tuple[int, int]:
+        """Crea un PROYECTO NUEVO con el contenido de un sub-presupuesto.
 
         Copia la cabecera del proyecto actual (cliente, ubicación, plazo,
         porcentajes, moneda…), las partidas del sub con su ACU / metrados /
@@ -10696,20 +10705,13 @@ class ProyectoView(QWidget):
         aportaba ese sub aquí. El proyecto de origen NO se toca.
 
         NO se copia el cronograma: sus duraciones y predecesoras cuelgan de
-        `partida_id`, y al copiar las partidas cambian de id (se avisa).
+        `partida_id`, y al copiar las partidas cambian de id.
+
+        Devuelve ``(nuevo_pid, n_partidas)``. Lo usan las dos salidas del menú
+        de la pestaña: quedarse con el proyecto dentro del programa, o
+        volcarlo a un archivo .db y descartarlo.
         """
-        from PySide6.QtWidgets import QInputDialog
-        from utils.i18n import tr
         from utils import partidas_clipboard as _pclip
-
-        sugerido = nombre or 'Sub-presupuesto'
-        nuevo_nombre, ok = QInputDialog.getText(
-            self, tr("Exportar como proyecto nuevo"),
-            tr("Nombre del proyecto nuevo:"), text=sugerido)
-        if not ok:
-            return
-        nuevo_nombre = (nuevo_nombre or '').strip() or sugerido
-
         conn = get_db()
         try:
             # 1. Cabecera: clonar el proyecto actual salvo lo que identifica
@@ -10746,24 +10748,104 @@ class ProyectoView(QWidget):
                     f"SELECT {','.join(tcols)}, ? FROM {tabla} WHERE proyecto_id=?",
                     (nuevo_pid, self.pid))
             conn.commit()
-        except Exception as e:
+        except Exception:
             conn.rollback()
             conn.close()
-            QMessageBox.critical(self, tr("Exportar sub-presupuesto"),
-                                 f"No se pudo exportar:\n{e}")
-            return
+            raise
         conn.close()
+        return nuevo_pid, n_part
 
+    _NOTA_COPIA = ("Se copian los ACU, metrados, acero, especificaciones y el "
+                   "pie de presupuesto. El cronograma NO se copia: sus "
+                   "duraciones y predecesoras dependen de las partidas "
+                   "originales.")
+
+    def _exportar_subppto_a_proyecto(self, tid, nombre: str):
+        """Convierte el sub-presupuesto en un proyecto nuevo DENTRO del
+        programa (aparece en el tablero; no genera ningún archivo)."""
+        from PySide6.QtWidgets import QInputDialog
+        from utils.i18n import tr
+        sugerido = nombre or 'Sub-presupuesto'
+        nuevo_nombre, ok = QInputDialog.getText(
+            self, tr("Convertir en proyecto nuevo"),
+            tr("Nombre del proyecto nuevo:"), text=sugerido)
+        if not ok:
+            return
+        nuevo_nombre = (nuevo_nombre or '').strip() or sugerido
+        try:
+            nuevo_pid, n_part = self._crear_proyecto_desde_subppto(
+                tid, nombre, nuevo_nombre)
+        except Exception as e:
+            QMessageBox.critical(self, tr("Convertir en proyecto nuevo"),
+                                 f"No se pudo crear el proyecto:\n{e}")
+            return
         resp = QMessageBox.question(
-            self, tr("Exportar como proyecto nuevo"),
-            f"«{nuevo_nombre}» se creó con {n_part} partidas.\n\n"
-            "Se copiaron los ACU, metrados, acero, especificaciones y el pie "
-            "de presupuesto. El cronograma NO se copia (sus duraciones y "
-            "predecesoras dependen de las partidas originales).\n\n"
-            "¿Abrirlo ahora?",
+            self, tr("Convertir en proyecto nuevo"),
+            f"«{nuevo_nombre}» se creó con {n_part} partidas y ya está en tu "
+            f"lista de proyectos.\n\n{self._NOTA_COPIA}\n\n¿Abrirlo ahora?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if resp == QMessageBox.Yes:
             self.cambiar_a_proyecto.emit(nuevo_pid)
+
+    def _exportar_subppto_a_db(self, tid, nombre: str):
+        """Vuelca el sub-presupuesto a un archivo .db independiente, en la
+        carpeta que elija el usuario.
+
+        Internamente crea el proyecto, lo exporta con
+        `exporter.exportar_proyecto_db` y lo BORRA de la base: el usuario pidió
+        un archivo, no un proyecto más en su lista."""
+        import re as _re
+        from PySide6.QtWidgets import QFileDialog, QApplication
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from utils.i18n import tr
+        from core.exporter import exportar_proyecto_db
+
+        base = nombre or 'Sub-presupuesto'
+        safe = _re.sub(r'[\\/:*?"<>|]', '_', base).strip()[:80] or 'subpresupuesto'
+        ruta, _f = QFileDialog.getSaveFileName(
+            self, tr("Exportar sub-presupuesto a SQLite (.db)"),
+            f"{safe}.db", "Base de datos SQLite (*.db)")
+        if not ruta:
+            return
+        if not ruta.lower().endswith('.db'):
+            ruta += '.db'
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        nuevo_pid = None
+        try:
+            nuevo_pid, n_part = self._crear_proyecto_desde_subppto(
+                tid, nombre, base)
+            exportar_proyecto_db(nuevo_pid, ruta)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, tr("Exportar a archivo .db"),
+                                 f"No se pudo exportar:\n{e}")
+            n_part = 0
+        else:
+            QApplication.restoreOverrideCursor()
+        finally:
+            # El proyecto intermedio era solo el vehículo para el archivo.
+            if nuevo_pid is not None:
+                try:
+                    c = get_db()
+                    c.execute("DELETE FROM proyectos WHERE id=?", (nuevo_pid,))
+                    c.commit(); c.close()
+                except Exception:
+                    pass
+        if not n_part:
+            return
+        resp = QMessageBox.question(
+            self, tr("Exportar a archivo .db"),
+            f"Guardado en:\n{ruta}\n\n{n_part} partidas.\n\n"
+            f"{self._NOTA_COPIA}\n\n"
+            "Se abre con «Importar → ingePresupuestos (.db)».\n\n"
+            "¿Abrir la carpeta?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if resp == QMessageBox.Yes:
+            import os as _os
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(_os.path.dirname(_os.path.abspath(ruta))))
 
     def _copiar_subppto(self, tid, nombre: str):
         """Copia el sub-presupuesto completo (nombre + partidas con metrados/
