@@ -331,8 +331,17 @@ def import_powercost_prs(filepath: str,
         base tiene varios proyectos, se importa el primero. Para archivos
         con cientos de proyectos, usar `listar_proyectos_powercost()` y
         pedirle al usuario que elija.
-      id_subppto: opcional, ID del sub-presupuesto. Si no se pasa, se usa
-        el primero con IdSubPpto>0 (el total IdSubPpto=0 no se usa).
+      id_subppto: opcional, ID de UN sub-presupuesto concreto. Si no se
+        pasa se importan TODOS los del proyecto (IdSubPpto>0; la fila
+        IdSubPpto=0 es el total y no se usa): el primero queda como
+        Principal del proyecto y los demás viajan en cada partida vía
+        ``sub_ref`` para que ``guardar_importacion()`` los cree dentro
+        del mismo proyecto, replicando la estructura de PowerCost.
+
+    Con varios sub-presupuestos los ítems se repiten entre subs (cada uno
+    numera desde 01), así que ``acus_data``/``metrados_data`` se indexan
+    por la clave única ``item_origen`` (``"<IdSubPpto>|<item>"``) que
+    también lleva cada partida.
     """
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"No existe: {filepath}")
@@ -356,19 +365,37 @@ def import_powercost_prs(filepath: str,
 
     subpptos = q('SubPptos')
     subs_del_proy = [s for s in subpptos
-                     if _int(s['IdPpto']) == id_ppto_real]
+                     if _int(s['IdPpto']) == id_ppto_real
+                     and _int(s['IdSubPpto']) > 0]
+    subs_del_proy.sort(key=lambda s: (_int(s.get('Orden')),
+                                      _int(s['IdSubPpto'])))
     if id_subppto is not None:
-        sp = next((s for s in subs_del_proy
-                   if _int(s['IdSubPpto']) == id_subppto), None)
+        subs_sel = [s for s in subs_del_proy
+                    if _int(s['IdSubPpto']) == id_subppto]
+        if not subs_sel:
+            raise ValueError(
+                f"El proyecto IdPpto={id_ppto_real} no tiene el "
+                f"sub-presupuesto IdSubPpto={id_subppto}."
+            )
     else:
-        sp = next((s for s in subs_del_proy
-                   if _int(s['IdSubPpto']) > 0), None)
-    if not sp:
-        raise ValueError(
-            f"El proyecto IdPpto={id_ppto_real} no tiene sub-presupuesto activo."
-        )
-    sp_id = _int(sp['IdSubPpto'])
+        subs_sel = subs_del_proy
+        if not subs_sel:
+            raise ValueError(
+                f"El proyecto IdPpto={id_ppto_real} no tiene sub-presupuesto activo."
+            )
     id_ppto = id_ppto_real
+
+    # Nombre de cada sub-presupuesto, con desambiguación: dos subs con el
+    # mismo nombre colapsarían en una sola pestaña al guardar (sub_ref es
+    # el nombre), así que al repetido se le añade « (2)», « (3)»…
+    nombres_subs: list[str] = []
+    for s in subs_sel:
+        n = _str(s.get('NomSubPpto')) or f"Sub-presupuesto {_int(s['IdSubPpto'])}"
+        base, k = n, 2
+        while n in nombres_subs:
+            n = f"{base} ({k})"
+            k += 1
+        nombres_subs.append(n)
 
     titulos    = q('Titulos')
     analisis   = q('Analisis')
@@ -407,7 +434,9 @@ def import_powercost_prs(filepath: str,
         'nombre':          _str(proy.get('NomPpto')) or 'Proyecto importado',
         'cliente':         '',
         'ubicacion':       _str(proy.get('Localidad')),
-        'sub_presupuesto': _str(sp.get('NomSubPpto')) or '',
+        # El primer sub-presupuesto es el «Principal» del proyecto; los
+        # demás los crea guardar_importacion() a partir de sub_ref.
+        'sub_presupuesto': nombres_subs[0],
         # Pie de presupuesto: por ahora se siembra inactivo (igual que
         # Delphin). PowerCost tiene tablas PiePpto/ValoresPieP con la
         # estructura real del pie, pero parsearlas se aplazó a v2.
@@ -415,33 +444,7 @@ def import_powercost_prs(filepath: str,
         'costo_al':        _str(proy.get('Fecha')),
     }
 
-    # ── 3. Construir árbol de partidas ──────────────────────────────────
-    # Filtrar las filas del sub-presupuesto seleccionado
-    filas = [r for r in est_sub
-             if _int(r['IdPpto']) == id_ppto and _int(r['IdSubPpto']) == sp_id]
-
-    # Mapa: IdPartida → fila
-    by_id = {_int(r['IdPartida']): r for r in filas}
-
-    def nivel(idp: int) -> int:
-        n, cur = 0, idp
-        seen = set()
-        while cur:
-            cur_padre = _int(by_id.get(cur, {}).get('IdPartidaPadre', 0))
-            if not cur_padre or cur_padre in seen:
-                break
-            seen.add(cur_padre)
-            cur = cur_padre
-            n += 1
-        return n
-
-    def hijos(parent_id: int) -> list[int]:
-        r = [pid for pid, row in by_id.items()
-             if _int(row['IdPartidaPadre']) == parent_id]
-        r.sort(key=lambda x: (_int(by_id[x]['IdItem']),
-                               _str(by_id[x]['TxItem'])))
-        return r
-
+    # ── 3. Helpers compartidos entre sub-presupuestos ───────────────────
 
     # Descripciones de partidas (preferir IdAnalisis.NomAnalisis o IdTitulo)
     def descripcion(row: dict) -> str:
@@ -461,37 +464,6 @@ def import_powercost_prs(filepath: str,
         an = anl_by_id.get(_int(row['IdAnalisis']))
         return _str(an['Unidad']) if an else ''
 
-    # DFS desde las raíces (IdPartidaPadre=0)
-    partidas_data: list[dict] = []
-    item_de: dict[int, str] = {}
-
-    def emit(idp: int, prefijo: str, indice: int):
-        # Numeración JERÁRQUICA por posición de hermano: 01, 01.01, 01.02,
-        # 02, … NO usar TxItem/IdItem del .prs: en el .prs masivo TxItem
-        # viene vacío y el fallback a IdItem (contador global) producía
-        # numeración saltada (01, 04, 06, 13…). El orden de hermanos lo da
-        # hijos() (por IdItem documental).
-        row = by_id[idp]
-        item = (prefijo + '.' if prefijo else '') + f"{indice:02d}"
-        item_de[idp] = item
-
-        es_titulo = (_int(row['Tipo']) == 1)
-        partidas_data.append({
-            'item':            item,
-            'descripcion':     descripcion(row),
-            'unidad':          unidad_part(row),
-            'metrado':         _num(row['Metrado']),
-            'precio_unitario': _num(row['Precio']),
-            'nivel':           min(nivel(idp) + 1, 4),
-            'es_titulo':       1 if es_titulo else 0,
-        })
-        for i, child in enumerate(hijos(idp), 1):
-            emit(child, item, i)
-
-    for i, r in enumerate(hijos(0), 1):
-        emit(r, '', i)
-
-    # ── 4. ACUs (rendimiento + items) ───────────────────────────────────
     # Tipos de costo en PowerCost: 1=MO, 2=MAT, 3=EQ + IdCategoria 2=SUB CONTRATO.
     # PowerCost no tiene tipo SC explícito, pero clasifica insumos en
     # Categoria SUB CONTRATO (cat_id=2) → los mapeamos a SC.
@@ -500,9 +472,6 @@ def import_powercost_prs(filepath: str,
         # incluye OPERARIO/OFICIAL/CEMENTO (verificado en bases reales) — no
         # significa subcontrato. Los SC reales entran como sub-análisis.
         return {1: 'MO', 2: 'MAT', 3: 'EQ'}.get(t, 'MAT')
-
-    acus_data: dict = {}
-    recursos_uniq: dict[str, dict] = {}
 
     def _es_global_anl(an: dict) -> bool:
         """Análisis global (glb/est/serv): cantidades directas, sin cuadrilla."""
@@ -615,66 +584,148 @@ def import_powercost_prs(filepath: str,
         _cu_memo[aid] = cu
         return cu
 
-    for idp, row in by_id.items():
-        if _int(row['Tipo']) != 0:
-            continue  # solo partidas, no títulos
-        aid = _int(row['IdAnalisis'])
-        if not aid:
-            continue
-        an = anl_by_id.get(aid)
-        if not an:
-            continue
-        item = item_de.get(idp)
-        if not item:
-            continue
+    # ── 4. Partidas, ACUs y metrados — POR SUB-PRESUPUESTO ──────────────
+    partidas_data: list[dict] = []
+    acus_data: dict = {}
+    recursos_uniq: dict[str, dict] = {}
+    metrados_data: dict[str, list[dict]] = {}
 
-        items_acu = _filas_acu(aid)
-        for it in items_acu:
-            if it['codigo'] not in recursos_uniq:
-                recursos_uniq[it['codigo']] = {
-                    'codigo':      it['codigo'],
-                    'descripcion': it['descripcion'],
-                    'tipo':        it['tipo'],
-                    'unidad':      it['unidad'],
-                    'precio':      it['precio'],
+    # Numeración de títulos raíz CONTINUA entre sub-presupuestos, como en
+    # PowerCost y sus reportes: si el sub 01 termina en el título 03, el
+    # sub 02 empieza en 04 (verificado contra reportes reales: 01, 04, 08,
+    # 11, 15, 21, 23…). Además deja el ítem único en todo el proyecto, que
+    # es lo que asumen los reportes que ordenan por ítem sin agrupar por sub.
+    raiz_sig = 1
+
+    for _idx_sub, _sp in enumerate(subs_sel):
+        sp_id = _int(_sp['IdSubPpto'])
+        # El primer sub es el Principal del proyecto (sub_ref=None); los
+        # demás llevan su nombre para que guardar_importacion() los cree
+        # dentro del mismo proyecto.
+        sub_ref = None if _idx_sub == 0 else nombres_subs[_idx_sub]
+
+        # Filtrar las filas del sub-presupuesto en curso
+        filas = [r for r in est_sub
+                 if _int(r['IdPpto']) == id_ppto
+                 and _int(r['IdSubPpto']) == sp_id]
+
+        # Mapa: IdPartida → fila
+        by_id = {_int(r['IdPartida']): r for r in filas}
+
+        def nivel(idp: int) -> int:
+            n, cur = 0, idp
+            seen = set()
+            while cur:
+                cur_padre = _int(by_id.get(cur, {}).get('IdPartidaPadre', 0))
+                if not cur_padre or cur_padre in seen:
+                    break
+                seen.add(cur_padre)
+                cur = cur_padre
+                n += 1
+            return n
+
+        def hijos(parent_id: int) -> list[int]:
+            r = [pid for pid, row in by_id.items()
+                 if _int(row['IdPartidaPadre']) == parent_id]
+            r.sort(key=lambda x: (_int(by_id[x]['IdItem']),
+                                   _str(by_id[x]['TxItem'])))
+            return r
+
+        # DFS desde las raíces (IdPartidaPadre=0)
+        item_de: dict[int, str] = {}
+
+        def emit(idp: int, prefijo: str, indice: int):
+            # Numeración JERÁRQUICA por posición de hermano: 01, 01.01, 01.02,
+            # 02, … NO usar TxItem/IdItem del .prs: en el .prs masivo TxItem
+            # viene vacío y el fallback a IdItem (contador global) producía
+            # numeración saltada (01, 04, 06, 13…). El orden de hermanos lo da
+            # hijos() (por IdItem documental). Los niveles anidados reinician
+            # por padre; solo los títulos RAÍZ continúan entre subs (raiz_sig).
+            row = by_id[idp]
+            item = (prefijo + '.' if prefijo else '') + f"{indice:02d}"
+            item_de[idp] = item
+
+            es_titulo = (_int(row['Tipo']) == 1)
+            partidas_data.append({
+                'item':            item,
+                'item_origen':     f"{sp_id}|{item}",
+                'sub_ref':         sub_ref,
+                'descripcion':     descripcion(row),
+                'unidad':          unidad_part(row),
+                'metrado':         _num(row['Metrado']),
+                'precio_unitario': _num(row['Precio']),
+                'nivel':           min(nivel(idp) + 1, 4),
+                'es_titulo':       1 if es_titulo else 0,
+            })
+            for i, child in enumerate(hijos(idp), 1):
+                emit(child, item, i)
+
+        n_raices = 0
+        for i, r in enumerate(hijos(0), raiz_sig):
+            emit(r, '', i)
+            n_raices += 1
+        raiz_sig += n_raices
+
+        # ACUs (rendimiento + items) del sub en curso
+        for idp, row in by_id.items():
+            if _int(row['Tipo']) != 0:
+                continue  # solo partidas, no títulos
+            aid = _int(row['IdAnalisis'])
+            if not aid:
+                continue
+            an = anl_by_id.get(aid)
+            if not an:
+                continue
+            item = item_de.get(idp)
+            if not item:
+                continue
+
+            items_acu = _filas_acu(aid)
+            for it in items_acu:
+                if it['codigo'] not in recursos_uniq:
+                    recursos_uniq[it['codigo']] = {
+                        'codigo':      it['codigo'],
+                        'descripcion': it['descripcion'],
+                        'tipo':        it['tipo'],
+                        'unidad':      it['unidad'],
+                        'precio':      it['precio'],
+                    }
+
+            if items_acu:
+                acus_data[f"{sp_id}|{item}"] = {
+                    'rendimiento': _num(an['Rend'], 1.0),
+                    'items':       items_acu,
                 }
 
-        if items_acu:
-            acus_data[item] = {
-                'rendimiento': _num(an['Rend'], 1.0),
-                'items':       items_acu,
-            }
+        # Metrados detallados del sub en curso
+        for idp, row in by_id.items():
+            mid = _int(row.get('IdMetrado4', 0))
+            if mid <= 0:
+                continue
+            item = item_de.get(idp)
+            if not item:
+                continue
+            filas_m = met_por_id.get(mid, [])
+            if not filas_m:
+                continue
+            det = []
+            for f in filas_m:
+                det.append({
+                    'descripcion':   _str(f.get('Descripcion')),
+                    'n_estructuras': _num(f.get('NEstr')),
+                    'n_elementos':   _num(f.get('NElem')),
+                    'area':          _num(f.get('Area')) or None,
+                    'largo':         _num(f.get('Largo')),
+                    'ancho':         _num(f.get('Ancho')),
+                    'alto':          _num(f.get('Alto')),
+                    'parcial':       _num(f.get('Parcial')),
+                })
+            if det:
+                metrados_data[f"{sp_id}|{item}"] = det
 
     recursos_data = list(recursos_uniq.values())
 
-    # ── 5. Metrados detallados ───────────────────────────────────────────
-    metrados_data: dict[str, list[dict]] = {}
-    for idp, row in by_id.items():
-        mid = _int(row.get('IdMetrado4', 0))
-        if mid <= 0:
-            continue
-        item = item_de.get(idp)
-        if not item:
-            continue
-        filas_m = met_por_id.get(mid, [])
-        if not filas_m:
-            continue
-        det = []
-        for f in filas_m:
-            det.append({
-                'descripcion':   _str(f.get('Descripcion')),
-                'n_estructuras': _num(f.get('NEstr')),
-                'n_elementos':   _num(f.get('NElem')),
-                'area':          _num(f.get('Area')) or None,
-                'largo':         _num(f.get('Largo')),
-                'ancho':         _num(f.get('Ancho')),
-                'alto':          _num(f.get('Alto')),
-                'parcial':       _num(f.get('Parcial')),
-            })
-        if det:
-            metrados_data[item] = det
-
-    # ── 6. Conciliar PU con la suma del ACU ──────────────────────────────
+    # ── 5. Conciliar PU con la suma del ACU ──────────────────────────────
     # PowerCost suma los parciales SIN redondear cada uno; la app los
     # redondea a 2 (criterio S10). Eso deja diferencias de ±1-2 céntimos.
     # Se adopta la suma de la app SOLO si el impacto monetario en el CD
@@ -687,7 +738,7 @@ def import_powercost_prs(filepath: str,
     for p in partidas_data:
         if p.get('es_titulo'):
             continue
-        acu = acus_data.get(p['item'])
+        acu = acus_data.get(p['item_origen'])
         if not acu:
             continue
         cu_app = _pu_desde_items(acu['items'])

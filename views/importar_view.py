@@ -146,8 +146,10 @@ FORMATOS = [
             "Selecciona el .prs — se importa todo: títulos, partidas, "
             "ACUs (con rendimiento y cuadrillas), insumos (con código INEI "
             "auto-mapeado) y la planilla de metrados detallados.",
-            "Si tu PowerCost guardó varios sub-presupuestos en el mismo .prs, "
-            "se importa el primero (sub-presupuesto activo).",
+            "Si el proyecto tiene varios sub-presupuestos, se importan "
+            "TODOS dentro del mismo proyecto (como pestañas), igual que en "
+            "PowerCost. Si el archivo guarda varios proyectos, aparece una "
+            "lista para elegir cuáles importar.",
             "⚠ En Linux requiere `mdbtools` (`sudo apt install -y mdbtools`). "
             "En Windows requiere Office o el driver gratuito Access Database Engine.",
         ],

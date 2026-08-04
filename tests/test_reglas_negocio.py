@@ -287,14 +287,109 @@ def test_importador_prs_reconcilia():
     for prs in archivos:
         info, partidas, acus, recursos, metrados = import_powercost_prs(prs)
         for p in partidas:
-            if p.get('es_titulo') or p['item'] not in acus:
+            # acus_data se indexa por item_origen (clave única por sub).
+            key = p.get('item_origen') or p['item']
+            if p.get('es_titulo') or key not in acus:
                 continue
-            cu = d._pu_desde_items(acus[p['item']]['items'])
+            cu = d._pu_desde_items(acus[key]['items'])
             dif = abs(cu - (p['precio_unitario'] or 0))
             # ≤ 2 céntimos: criterio de redondeo PowerCost vs app (tolerado
             # por el detector). Más que eso = desglose incompleto (regresión).
             assert dif <= 0.0205, \
                 f"{os.path.basename(prs)} {p['item']}: PU={p['precio_unitario']} vs ACU={cu}"
+
+
+def test_importador_prs_subpresupuestos_dentro_del_proyecto():
+    """Un proyecto .prs con varios sub-presupuestos se importa COMPLETO como
+    UN solo proyecto: el primer sub es el Principal y los demás viajan en
+    `sub_ref`; al guardar quedan como filas de `sub_presupuestos` con sus
+    partidas colgadas. El CD de cada sub cuadra con la tabla SubPptos.
+
+    Regresión: antes se importaba en silencio solo el primer sub
+    (`IdSubPpto>0`), así que una base con 7 sub-presupuestos traía 1 de 7.
+    """
+    import shutil as _sh
+    prs = os.path.expanduser('~/Descargas/p/base de datos mantenimiento.prs')
+    if not os.path.isfile(prs) or not _sh.which('mdb-export'):
+        print("      (saltado: sin archivo .prs de prueba o sin mdbtools)")
+        return
+    from core.powercost_prs_importer import import_powercost_prs, _query, _int, _num
+    from core import importer
+
+    # CD por sub según la tabla SubPptos del archivo (IdSubPpto=0 es el total)
+    subs_tabla = {r['NomSubPpto'].strip(): _num(r['CD'])
+                  for r in _query(prs, 'SubPptos') if _int(r['IdSubPpto']) > 0}
+    if len(subs_tabla) < 2:
+        print("      (saltado: el .prs de prueba no tiene varios subs)")
+        return
+
+    info, partidas, acus, recursos, metrados = import_powercost_prs(prs)
+
+    # 1) Las claves item_origen son únicas aunque cada sub numere desde 01
+    origenes = [p['item_origen'] for p in partidas]
+    assert len(origenes) == len(set(origenes)), "item_origen duplicado"
+
+    # 1b) Y los ÍTEMS VISIBLES también son únicos en todo el proyecto: la
+    #     numeración de títulos raíz es continua entre subs (01, 04, 08…),
+    #     como en PowerCost. Es un requisito duro: `calcular_totales` indexa
+    #     los parciales en un dict por `item` (database.py:885) y con ítems
+    #     repetidos solo sobrevivía el último → el CD salía truncado, y
+    #     `subtotal_de(prefijo)` mezclaba títulos de subs distintos.
+    items_vis = [p['item'] for p in partidas]
+    assert len(items_vis) == len(set(items_vis)), \
+        "ítems visibles duplicados entre sub-presupuestos"
+
+    # 2) Aparecen TODOS los subs: Principal (sub_ref None) + N-1 con nombre
+    refs = {p.get('sub_ref') for p in partidas}
+    assert None in refs, "falta el sub Principal"
+    assert len(refs) == len(subs_tabla), \
+        f"esperados {len(subs_tabla)} subs, importados {len(refs)}"
+
+    # 3) CD por sub cuadra con SubPptos (1 sol de tolerancia de redondeo)
+    def _cd(pred):
+        return sum((p['metrado'] or 0) * (p['precio_unitario'] or 0)
+                   for p in partidas
+                   if not p.get('es_titulo') and pred(p))
+    for nombre, cd_tabla in subs_tabla.items():
+        es_principal = (nombre == info['sub_presupuesto'])
+        cd_imp = _cd(lambda p, n=nombre, ep=es_principal:
+                     (p.get('sub_ref') is None) if ep else (p.get('sub_ref') == n))
+        assert abs(cd_imp - cd_tabla) <= 1.0, \
+            f"{nombre}: CD archivo={cd_tabla:.2f} vs importado={cd_imp:.2f}"
+
+    # 4) Persistencia: guardar crea las filas de sub_presupuestos y cuelga
+    #    las partidas; los ACU no se cruzan entre subs.
+    conn = _db_seed()
+    d.init_db()
+    pid = importer.guardar_importacion(info, partidas, acus, recursos, metrados)
+    conn = d.get_db()
+    n_subs_bd = conn.execute(
+        "SELECT COUNT(*) FROM sub_presupuestos WHERE proyecto_id=?", (pid,)
+    ).fetchone()[0]
+    assert n_subs_bd == len(subs_tabla) - 1, \
+        f"sub_presupuestos en BD: {n_subs_bd}, esperados {len(subs_tabla)-1}"
+    # CD por sub en la BD = CD por sub del archivo
+    for row in conn.execute(
+        """SELECT COALESCE(s.nombre, ?) AS nom,
+                  SUM(p.metrado * p.precio_unitario) AS cd
+           FROM partidas p
+           LEFT JOIN sub_presupuestos s ON s.id = p.sub_presupuesto_id
+           WHERE p.proyecto_id=? AND p.es_titulo=0
+           GROUP BY p.sub_presupuesto_id""",
+        (info['sub_presupuesto'], pid)
+    ).fetchall():
+        cd_tabla = subs_tabla.get(row['nom'])
+        assert cd_tabla is not None, f"sub inesperado en BD: {row['nom']}"
+        assert abs(row['cd'] - cd_tabla) <= 1.0, \
+            f"{row['nom']}: BD={row['cd']:.2f} vs archivo={cd_tabla:.2f}"
+
+    # 5) El CD del proyecto = suma de TODOS los subs. Con ítems duplicados
+    #    el dict de parciales de calcular_totales se comía los repetidos.
+    _items, tot = d.calcular_totales(pid)
+    cd_archivo = sum(subs_tabla.values())
+    assert abs(tot['cd'] - cd_archivo) <= 1.0, \
+        f"CD proyecto: calcular_totales={tot['cd']:.2f} vs archivo={cd_archivo:.2f}"
+    conn.close()
 
 
 if __name__ == "__main__":

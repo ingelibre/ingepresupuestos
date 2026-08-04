@@ -1161,15 +1161,40 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
                 " VALUES (?,?,?,?,?,?,?,?)",
                 (pid, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)
             )
+    # Sub-presupuestos: si una partida trae `sub_ref` (nombre del sub al que
+    # pertenece; None/ausente = Principal), la fila se crea en
+    # sub_presupuestos por orden de aparición y la partida se cuelga de ella.
+    # Los importadores que no lo traen (Delphin, S10, IFC, PDF, Excel) siguen
+    # exactamente igual: todas las partidas al Principal (sub NULL).
+    sub_ids: dict = {}
     partida_map = {}
     for p in partidas_data:
+        sref = p.get('sub_ref')
+        spid = None
+        if sref:
+            if sref not in sub_ids:
+                c = conn.execute(
+                    "INSERT INTO sub_presupuestos (proyecto_id, nombre, orden) "
+                    "VALUES (?,?,?)",
+                    (pid, sref, len(sub_ids) + 1)
+                )
+                sub_ids[sref] = c.lastrowid
+            spid = sub_ids[sref]
         c = conn.execute(
             """INSERT INTO partidas (proyecto_id, item, descripcion, unidad, metrado,
-               precio_unitario, nivel, es_titulo) VALUES (?,?,?,?,?,?,?,?)""",
+               precio_unitario, nivel, es_titulo, sub_presupuesto_id)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (pid, p['item'], p['descripcion'], p['unidad'],
-             p['metrado'], p['precio_unitario'], p['nivel'], p['es_titulo'])
+             p['metrado'], p['precio_unitario'], p['nivel'], p['es_titulo'],
+             spid)
         )
+        # Con varios sub-presupuestos el `item` («01.01») se repite en cada
+        # sub: solo `item_origen` (clave namespaced del importador) es único.
+        # Se registran AMBAS claves; para orígenes sin sub-presupuestos el
+        # comportamiento es idéntico al histórico.
         partida_map[p['item']] = c.lastrowid
+        if p.get('item_origen'):
+            partida_map[p['item_origen']] = c.lastrowid
 
     # Código de origen → ítem limpio. PowerCost reasigna ítems jerárquicos
     # (01, 01.01…) pero el ACU y los metrados vienen con el código original del
@@ -1180,6 +1205,12 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
                     for p in partidas_data if p.get('item_origen')}
 
     def _pid_de(code):
+        # Primero la clave tal cual: cubre tanto ítems limpios como las
+        # claves item_origen (namespaced por sub-presupuesto), que se
+        # registran directamente en partida_map.
+        pid_part = partida_map.get(code)
+        if pid_part is not None:
+            return pid_part
         return partida_map.get(raw_to_clean.get(code, code))
 
     # Mapa de recursos acotado a ESTA importación: colapsa mismo insumo
