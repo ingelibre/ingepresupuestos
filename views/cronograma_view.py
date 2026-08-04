@@ -2404,6 +2404,7 @@ class GanttWidget(QWidget):
         TITLE_BG = QColor("#E2E8F0")
         ZEBRA_BG = QColor("#F6F8FB")
         TITLE_FG = QColor("#B71C1C")   # rojo títulos (igual que Presupuesto)
+        HEADER_FG = QColor("#1F2A38")  # oscuro: resumen del proyecto y sub-ppto
         SUBT_FG  = QColor("#0D52BF")   # arándano (Blueberry 700)
         zebra_i = 0
         for p in filas:
@@ -2493,7 +2494,12 @@ class GanttWidget(QWidget):
                     if es_titulo and nivel_p == 1 and c in (1, 2):
                         f.setUnderline(True)
                     it.setFont(f)
-                    it.setForeground(QBrush(TITLE_FG))
+                    # El rojo es de los TÍTULOS del presupuesto; las cabeceras
+                    # estructurales (resumen del proyecto y sub-presupuesto) van
+                    # en oscuro para no competir con ellos.
+                    it.setForeground(QBrush(
+                        HEADER_FG if virtual in ('proyecto', 'subppto')
+                        else TITLE_FG))
                 elif es_hito_v:
                     f = QFont(); f.setBold(True); it.setFont(f)
                     it.setForeground(QBrush(BLUE if virtual == 'inicio' else GREEN))
@@ -7145,6 +7151,35 @@ class ValorizadoWidget(QWidget):
         idx = (delta_dias - 1) // self._period_days
         return idx if 0 <= idx < n_periods else -1
 
+    def _fila_sub_val(self, nombre: str, n_left: int, n_right: int,
+                      bg: QColor, fg: QColor):
+        """Fila-cabecera de sub-presupuesto en el cronograma valorizado.
+        Negrita + subrayado sobre banda, en oscuro (el rojo queda para los
+        títulos del presupuesto). Se inserta en AMBAS tablas para no romper
+        la alineación de los paneles congelado/desplazable."""
+        r = self.tbl_l.rowCount()
+        self.tbl_l.insertRow(r)
+        self.tbl_r.insertRow(r)
+        for c in range(n_left):
+            it = QTableWidgetItem(nombre if c == 0 else '')
+            if c == 0:
+                it.setToolTip(nombre)
+            it.setBackground(QBrush(bg))
+            f = QFont(); f.setBold(True)
+            if c == 0:
+                f.setUnderline(True)
+            it.setFont(f)
+            it.setForeground(QBrush(fg))
+            it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.tbl_l.setItem(r, c, it)
+        # El nombre ocupa Ítem+Descripción (las demás columnas van vacías).
+        self.tbl_l.setSpan(r, 0, 1, 2)
+        for c in range(n_right):
+            it = QTableWidgetItem('')
+            it.setBackground(QBrush(bg))
+            it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.tbl_r.setItem(r, c, it)
+
     def cargar(self):
         if not hasattr(self._cv, '_partidas'):
             return
@@ -7260,12 +7295,35 @@ class ValorizadoWidget(QWidget):
         ZEBRA_BG = QColor("#F6F8FB")
         TITLE_BG = QColor("#E2E8F0")
         TITLE_FG = QColor("#B71C1C")   # rojo títulos (igual que Presupuesto)
+        HEADER_FG = QColor("#1F2A38")  # oscuro: cabeceras de sub-presupuesto
         SUBT_FG  = QColor("#0D52BF")   # arándano (Blueberry 700)
         zebra_i  = 0
         # Word-wrap en descripción para no perder texto largo
         self.tbl_l.setWordWrap(True)
 
+        # Cabecera por sub-presupuesto (proyectos con más de uno), igual que en
+        # el Gantt: `partidas` ya viene AGRUPADO por sub (ver el ORDER BY de
+        # `_partidas`), así que basta detectar el cambio de grupo.
+        # `_filas_render` deja constancia de la correspondencia fila↔partida
+        # CON las cabeceras incluidas: el export a Excel indexa por número de
+        # fila (`partidas[r]`) y sin esto se desalinearía.
+        _sub_nombres = getattr(self._cv, '_sub_nombres', {None: 'Principal'})
+        _con_subs = len(_sub_nombres) > 1
+        _grupo_prev = object()
+        self._filas_render = []
+
         for p in partidas:
+            if _con_subs:
+                _g = p.get('sub_presupuesto_id')
+                if _g != _grupo_prev:
+                    _grupo_prev = _g
+                    _nom = _sub_nombres.get(_g) or 'Sub-presupuesto'
+                    self._fila_sub_val(_nom, len(left_headers), N_RIGHT,
+                                       TITLE_BG, HEADER_FG)
+                    self._filas_render.append({'_sub': _nom, 'es_titulo': 1,
+                                               'nivel': 0, 'item': '',
+                                               'descripcion': _nom})
+            self._filas_render.append(p)
             r = self.tbl_l.rowCount()
             # Insertar fila en AMBAS tablas para mantener alineación
             self.tbl_l.insertRow(r)
@@ -7985,7 +8043,10 @@ class ValorizadoWidget(QWidget):
 
         # Acceso a las partidas para detectar títulos por índice (las filas
         # del QTableWidget mantienen el mismo orden que `_cv._partidas`).
-        partidas = getattr(self._cv, '_partidas', None) or []
+        # Lista TAL COMO SE PINTÓ (incluye las cabeceras de
+        # sub-presupuesto): este export indexa por número de fila.
+        partidas = (getattr(self, '_filas_render', None)
+                    or getattr(self._cv, '_partidas', None) or [])
         # Colores de título por nivel = espejo del PDF (_NIVEL_COL) y del
         # programa: N1 rojo, N2 arándano, N3 morado, N4 rosa, default marrón.
         NIVEL_COL_X = {1: 'B71C1C', 2: '0D52BF', 3: '6A1B9A', 4: 'AD1457'}
@@ -8033,6 +8094,21 @@ class ValorizadoWidget(QWidget):
             if es_titulo:
                 p = partidas[r]
                 niv = int(p.get('nivel') or 1)
+                if p.get('_sub'):
+                    # Cabecera de sub-presupuesto: oscura y subrayada (el rojo
+                    # se reserva a los títulos de partida). Ocupa Ítem+Desc.
+                    _fs = Font(name='Inter', bold=True, size=11, color=TXT_DK,
+                               underline='single')
+                    cell = ws.cell(row=row, column=1, value=p['_sub'])
+                    cell.font = _fs; cell.alignment = align_left
+                    cell.border = border_title1
+                    for c in range(2, n_cols + 1):
+                        cell = ws.cell(row=row, column=c, value='')
+                        cell.font = _fs; cell.border = border_title1
+                    ws.row_dimensions[row].height = _alto_desc(
+                        p['_sub'], 0, bold=True)
+                    row += 1
+                    continue
                 # Color por nivel (espejo del PDF). N1: rojo + uppercase +
                 # subrayado; N2+: color de nivel, sin subrayado.
                 if niv <= 1:

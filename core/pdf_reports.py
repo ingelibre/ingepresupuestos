@@ -1511,10 +1511,21 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
         n_show = min(n_show, n_periods)
 
     # ── Calcular distribuciones completas para TODAS las partidas ─────────
+    # Cabecera por sub-presupuesto (proyectos con más de uno), igual que en
+    # la vista del valorizado: se marca la 1ª entrada de cada grupo.
+    _cab_sub_val: dict = {}
+    for _nom_sub, _its in agrupar_items_por_sub(pid, items):
+        if _its:
+            _cab_sub_val[id(_its[0])] = _nom_sub
+
     partidas_data = []
     for i, entry in enumerate(items):
         p = entry['partida']
         es_titulo = bool(p.get('es_titulo'))
+        _cab = _cab_sub_val.get(id(entry))
+        if _cab:
+            partidas_data.append({'titulo': True, 'sub': _cab, 'p': p,
+                                  'parcial': 0, 'nivel': 0})
         if es_titulo:
             partidas_data.append({
                 'titulo': True, 'p': p, 'parcial': entry['total'],
@@ -1704,6 +1715,23 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
 
         for rp in partidas_data:
             p = rp['p']
+            if rp.get('sub'):
+                # Cabecera de sub-presupuesto: subrayada y en oscuro (el rojo
+                # queda para los títulos de partida, que van debajo).
+                _s_css = ('padding:9pt 6pt 4pt;color:#1F2A38;background:white;'
+                          'font-weight:700;font-size:10pt;'
+                          'text-decoration:underline;')
+                _celdas_s = ''.join(
+                    f'<td style="{_s_css}"></td><td style="{_s_css}"></td>'
+                    + (SEP_MED if k == k_end - 1 else SEP_THIN)
+                    for k in range(k_start, k_end)
+                )
+                rows.append(
+                    f'<tr><td colspan="6" style="{_s_css}">'
+                    f'{escape(rp["sub"])}</td>{SEP_MED}{_celdas_s}'
+                    f'<td style="{_s_css}"></td></tr>'
+                )
+                continue
             if rp['titulo']:
                 niv = rp['nivel']
                 _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
