@@ -360,6 +360,33 @@ def test_importador_prs_pie_de_presupuesto():
     assert abs(gg - 58590.00) <= 0.02, f"desagregado GG = {gg:.2f}"
     assert n_tit > 0, "no se importaron los títulos del desagregado"
 
+    # ── Segundo archivo: los rubros se llaman DISTINTO ────────────────────
+    # «GASTOS DE EXP. TEC.» no contiene «EXPEDIENTE»: clasificar por nombre
+    # lo tomaba por un subtotal y perdía sus 6 500. El tipo debe salir de la
+    # ESTRUCTURA (si tiene desagregado en EstGGs → es un rubro).
+    prs2 = os.path.expanduser('~/Descargas/yara/yarah.prs')
+    if not os.path.isfile(prs2):
+        return
+    info2, part2, acus2, rec2, met2 = import_powercost_prs(prs2)
+    pid2 = importer.guardar_importacion(info2, part2, acus2, rec2, met2)
+    _i2, tot2 = d.calcular_totales(pid2)
+    conn = d.get_db()
+    rubros2, total2 = _calcular_rubros_pie(conn, pid2, tot2['cd'])
+    conn.close()
+    esperado2 = {
+        'Gastos Generales':      27750.00,
+        'Gastos De Supervision': 12000.00,
+        'Gastos De Liquidacion':  4500.00,
+        'Gastos De Exp. Tec.':    6500.00,
+        'Costo Total De Obra':  213396.74,
+    }
+    vistos2 = {r['nombre']: r['valor'] for r in (rubros2 or [])}
+    for nombre, val in esperado2.items():
+        assert nombre in vistos2, f"falta «{nombre}» (¿clasificado como subtotal?)"
+        assert abs(vistos2[nombre] - val) <= 0.02, \
+            f"{nombre}: app={vistos2[nombre]:.2f} vs PowerCost={val:.2f}"
+    assert abs(total2 - 213396.74) <= 0.02, f"total yarah = {total2:.2f}"
+
 
 def test_importador_prs_subpresupuestos_dentro_del_proyecto():
     """Un proyecto .prs con varios sub-presupuestos se importa COMPLETO como

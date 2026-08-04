@@ -386,7 +386,13 @@ def _leer_pie(q, id_ppto: int, cd: float) -> tuple[list, list]:
     # Códigos de la app (mismos que `rubros_default` en core/importer.py).
     _POR_NOMBRE = [
         ('SUPERVIS',  'SUP',  'rubro'),
+        # Los nombres varían por obra: «EXPEDIENTE TECNICO», «GASTOS DE
+        # EXP. TEC.»… El tipo lo decide la estructura (ver abajo); estos
+        # patrones solo eligen un CÓDIGO legible.
         ('EXPEDIENTE','ET',   'rubro'),
+        ('EXP. TEC',  'ET',   'rubro'),
+        ('EXP TEC',   'ET',   'rubro'),
+        ('EXPED',     'ET',   'rubro'),
         ('LIQUIDAC',  'LQ',   'rubro'),
         ('GASTOS GENERALES', 'GG', 'rubro'),
         ('UTILIDAD',  'UTIL', 'pct_cd'),
@@ -417,12 +423,27 @@ def _leer_pie(q, id_ppto: int, cd: float) -> tuple[list, list]:
             if clave in up:
                 codigo, tipo = cod, tp
                 break
+
+        # El NOMBRE no basta para decidir el tipo: cada obra bautiza sus
+        # rubros a su manera («GASTOS DE EXP. TEC.» no contiene
+        # «EXPEDIENTE»). Manda la ESTRUCTURA del archivo:
+        #   · tiene desagregado en EstGGs          → 'rubro'
+        #   · la fórmula lleva  <<Detalle>>        → 'rubro' (aunque venga vacío)
+        #   · la fórmula lleva  ST*n/100           → 'pct_sub'
+        #   · la fórmula lleva  CD*n/100           → 'pct_cd'
+        #   · resto (suma de términos ya calculados) → 'subtotal'
+        _expr_sin_esp = expr.replace(' ', '').upper()
+        if gg_por_pos.get(idpos) or '<<DETALLE>>' in expr.upper():
+            tipo = 'rubro'
+        elif tipo is None:
+            if _re.search(r'\bST\s*\*', _expr_sin_esp):
+                tipo = 'pct_sub'
+            elif _re.search(r'\bCD\s*\*', _expr_sin_esp):
+                tipo = 'pct_cd'
+            else:
+                tipo = 'subtotal'
         if codigo is None:
-            # SUB TOTAL / VALOR REFERENCIAL / COSTO TOTAL → acumulados.
-            # Se reconocen por la fórmula: suman términos ya calculados y no
-            # llevan ni porcentaje ni desagregado.
             codigo = _re.sub(r'[^A-Z0-9]', '', up)[:10] or f'POS{idpos}'
-            tipo = 'subtotal'
         while codigo in usados:            # nombres repetidos → código único
             codigo += 'X'
         usados.add(codigo)
