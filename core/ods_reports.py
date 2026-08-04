@@ -89,10 +89,18 @@ def generar_ods_gastos_generales(pid: int, archivo: str) -> str:
                               'gastos_generales')
 
 
+def generar_ods_insumos_sub(pid: int, archivo: str) -> str:
+    """Insumos separados por sub-presupuesto (una tabla por sub)."""
+    return _generar_via_xlsx(
+        lambda p: exporter.exportar_insumos(p, por_sub=True),
+        pid, archivo, 'insumos_sub')
+
+
 _GENERADORES = {
     'presupuesto':      generar_ods_presupuesto,
     'acus':             generar_ods_acus,
     'insumos':          generar_ods_insumos,
+    'insumos_sub':      generar_ods_insumos_sub,
     'metrados':         generar_ods_metrados,
     'gastos_generales': generar_ods_gastos_generales,
     'completo':         generar_ods_completo,

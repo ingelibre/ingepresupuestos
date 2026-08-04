@@ -2125,6 +2125,20 @@ class ProyectoView(QWidget):
 
         vl.addWidget(hdr)
 
+        # ── Título del sub-presupuesto activo ────────────────────────────────
+        # Las pestañas viven ABAJO del árbol y con nombres largos van elididas,
+        # así que sin esto no se sabe qué sub-presupuesto se está viendo.
+        # Solo se muestra cuando el proyecto tiene más de uno (_cargar_sub_pptos).
+        self._lbl_sub_activo = QLabel("")
+        self._lbl_sub_activo.setVisible(False)
+        self._lbl_sub_activo.setStyleSheet(
+            f"QLabel {{ background:#EEF1F5; color:{SLATE_700};"
+            f" border-bottom:1px solid {SILVER_300};"
+            f" font-size:11px; font-weight:700; padding:5px 10px; }}"
+        )
+        self._lbl_sub_activo.setWordWrap(False)
+        vl.addWidget(self._lbl_sub_activo)
+
         # Árbol de partidas con drag & drop
         self.tree = _PresupuestoTree()
         self.tree.setHeaderLabels(_cols_ppto())
@@ -10510,6 +10524,20 @@ class ProyectoView(QWidget):
         nombre_principal = self._proy.get('sub_presupuesto') or 'Principal'
         tabs = [{'id': None, 'nombre': nombre_principal}] + [dict(s) for s in subs]
 
+        # Rótulo del sub-presupuesto activo, encima del árbol. Solo tiene
+        # sentido con más de uno; con uno solo sería ruido.
+        if hasattr(self, '_lbl_sub_activo'):
+            if len(tabs) > 1:
+                _act = next((t for t in tabs if t['id'] == self._sub_ppto_id), tabs[0])
+                _n_act = [t['id'] for t in tabs].index(_act['id']) + 1
+                self._lbl_sub_activo.setText(
+                    f"{tr('Sub-presupuesto')} {_n_act}/{len(tabs)}   ·   {_act['nombre']}"
+                )
+                self._lbl_sub_activo.setToolTip(_act['nombre'])
+                self._lbl_sub_activo.setVisible(True)
+            else:
+                self._lbl_sub_activo.setVisible(False)
+
         for tab in tabs:
             tid    = tab['id']
             activo = (tid == self._sub_ppto_id)
@@ -10523,6 +10551,8 @@ class ProyectoView(QWidget):
             btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             # Estilo tipo pestaña real: borde inferior solo al activo, fondo
             # gris suave para inactivos para que se distingan del frame.
+            # text-align:left — QPushButton centra por defecto, y con nombres
+            # largos elididos el texto quedaba flotando en medio de la pestaña.
             if activo:
                 btn.setStyleSheet(
                     f"QPushButton {{ background:white;"
@@ -10530,6 +10560,7 @@ class ProyectoView(QWidget):
                     f" border-top-left-radius:6px; border-top-right-radius:6px;"
                     f" border-bottom-left-radius:0; border-bottom-right-radius:0;"
                     f" padding:0 12px; font-size:11px; font-weight:700;"
+                    f" text-align:left;"
                     f" color:{SLATE_700}; min-height:0; }}"
                 )
             else:
@@ -10539,9 +10570,15 @@ class ProyectoView(QWidget):
                     f" border-top-left-radius:6px; border-top-right-radius:6px;"
                     f" border-bottom-left-radius:0; border-bottom-right-radius:0;"
                     f" padding:0 12px; font-size:11px; font-weight:500;"
+                    f" text-align:left;"
                     f" color:{SLATE_500}; min-height:0; }}"
                     f"QPushButton:hover {{ background:#E8EBF0; color:{SLATE_700}; }}"
                 )
+            # Tooltip: nombre COMPLETO (las pestañas van elididas a 220 px) más
+            # su posición, para orientarse cuando hay muchas y todas empiezan
+            # con las mismas palabras («MANTENIMIENTO DE…»).
+            _pos = tabs.index(tab) + 1
+            btn.setToolTip(f"{tr('Sub-presupuesto')} {_pos}/{len(tabs)}\n{tab['nombre']}")
             btn.clicked.connect(lambda _, t=tid: self._on_sub_ppto_cambiado(t))
             if tid is None:
                 btn.renombrar.connect(self._renombrar_principal)

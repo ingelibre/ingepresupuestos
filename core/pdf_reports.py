@@ -34,7 +34,8 @@ from PySide6.QtGui import (
 
 from core.database import (
     calcular_totales, get_acu_items, get_config, get_db,
-    get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto, set_config, _orden_mo,
+    get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
+    get_insumos_para_partidas, set_config, _orden_mo,
 )
 from utils.formatting import fmt as _fmt_money
 
@@ -312,6 +313,58 @@ def _clean_costo_al(val) -> str:
 # Plantilla HTML — estilos comunes
 # ══════════════════════════════════════════════════════════════════════════════
 
+def subpresupuestos_de(pid: int) -> list[dict]:
+    """Sub-presupuestos del proyecto en orden de pestaña, incluido el
+    Principal (las partidas con ``sub_presupuesto_id IS NULL``).
+
+    Devuelve ``[{'id': None|int, 'nombre': str}, …]``, o **lista vacía**
+    cuando el proyecto tiene un único sub-presupuesto: así los reportes
+    saben que NO deben dibujar separadores (proyecto normal de toda la
+    vida) con un simple ``if grupos:``.
+    """
+    from core.database import get_db
+    conn = get_db()
+    try:
+        extra = conn.execute(
+            "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=? "
+            "ORDER BY orden, id", (pid,)
+        ).fetchall()
+        if not extra:
+            return []
+        proy = conn.execute(
+            "SELECT sub_presupuesto FROM proyectos WHERE id=?", (pid,)
+        ).fetchone()
+    finally:
+        conn.close()
+    principal = (proy['sub_presupuesto'] if proy else '') or 'Principal'
+    return [{'id': None, 'nombre': principal}] + \
+           [{'id': r['id'], 'nombre': r['nombre']} for r in extra]
+
+
+def agrupar_items_por_sub(pid: int, items: list) -> list[tuple[str, list]]:
+    """Parte la lista de `calcular_totales` en bloques por sub-presupuesto.
+
+    Devuelve ``[(nombre_sub, [items…]), …]`` en orden de pestaña, o
+    **lista vacía** si el proyecto tiene un solo sub-presupuesto (el
+    llamador entonces renderiza plano, como siempre).
+
+    Las partidas del Principal son las que traen ``sub_presupuesto_id``
+    NULL. Un sub sin partidas no genera bloque (no se dibujan cabeceras
+    huérfanas).
+    """
+    grupos_def = subpresupuestos_de(pid)
+    if not grupos_def:
+        return []
+    por_id: dict = {g['id']: [] for g in grupos_def}
+    for entry in items:
+        sid = entry['partida'].get('sub_presupuesto_id')
+        # Un sub_presupuesto_id que no esté en el mapa (borrado a medias)
+        # cae al Principal en vez de perderse.
+        por_id.setdefault(sid if sid in por_id else None, []).append(entry)
+    return [(g['nombre'], por_id[g['id']])
+            for g in grupos_def if por_id.get(g['id'])]
+
+
 def _brand_colors() -> tuple[str, str, str]:
     """Lee el toggle 'Reportes sobrios' y devuelve (color, dark, soft).
 
@@ -580,12 +633,45 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             f'{html_inner}</td></tr></table>'
         )
 
+    # Cabecera de sub-presupuesto: cuando el proyecto tiene varios, se
+    # intercala una banda con su nombre y su costo directo justo antes de
+    # la primera partida de cada bloque, para no leer 27 títulos corridos
+    # sin saber a cuál pertenece cada uno. Con un solo sub → dict vacío y
+    # el reporte sale exactamente igual que siempre.
+    _sub_de_partida: dict = {}
+    _grupos_sub = agrupar_items_por_sub(pid, items)
+    if _grupos_sub:
+        for _nom_sub, _its in _grupos_sub:
+            if _its:
+                _sub_de_partida[id(_its[0])] = (
+                    _nom_sub, sum((e['total'] or 0) for e in _its
+                                  if not e['partida'].get('es_titulo'))
+                )
+
     for i, entry in enumerate(items):
         p = entry['partida']
         total = entry['total']
         nivel = p.get('nivel', 1)
         es_titulo = p.get('es_titulo', 0)
         _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
+
+        _cab = _sub_de_partida.get(id(entry))
+        if _cab:
+            _nom_sub, _cd_sub = _cab
+            # Sin fondo sólido: mismo criterio que los títulos de partida
+            # (texto subrayado). Una banda oscura pesaba demasiado en la
+            # página y competía con la jerarquía de los títulos.
+            rows.append(
+                '<tr><td colspan="5" style="background:white;color:%s;'
+                'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
+                'text-transform:uppercase;letter-spacing:0.5pt;'
+                'text-decoration:underline;border:none;">%s</td>'
+                '<td align="right" style="background:white;color:%s;'
+                'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
+                'text-decoration:underline;border:none;">%s %s</td></tr>'
+                % (_od_hp, escape(_nom_sub), _od_hp,
+                   sym, _fmt(_cd_sub * factor, dec))
+            )
 
         if es_titulo:
             if nivel == 1:
@@ -830,6 +916,17 @@ def _html_metrados(pid: int, proy: dict, items: list) -> str:
     conn = get_db()
     parts = ['<h2>Hoja de Metrados</h2>']
 
+    # Con varios sub-presupuestos, cada bloque abre con su nombre para no
+    # leer decenas de planillas seguidas sin saber a cuál pertenecen.
+    # El nombre se resuelve por ENTRADA (no marcando la primera) y se emite
+    # de forma perezosa: muchas partidas se saltan por no tener planilla, así
+    # que la cabecera debe salir junto a la primera que REALMENTE se imprime.
+    _sub_de: dict = {}
+    for _nom_sub, _its in agrupar_items_por_sub(pid, items):
+        for _e in _its:
+            _sub_de[id(_e)] = _nom_sub
+    _sub_emitido = None
+
     cnt = 0
     for entry in items:
         p = entry['partida']
@@ -850,6 +947,15 @@ def _html_metrados(pid: int, proy: dict, items: list) -> str:
         if not detalles and not aceros and not (p.get('metrado') or 0):
             continue
         cnt += 1
+
+        _nom_sub_cab = _sub_de.get(id(entry))
+        if _nom_sub_cab and _nom_sub_cab != _sub_emitido:
+            _sub_emitido = _nom_sub_cab
+            parts.append(
+                f'<p style="margin:14pt 0 6pt 0;font-size:10.5pt;'
+                f' font-weight:700;color:{od};text-decoration:underline">'
+                f'{escape(_nom_sub_cab)}</p>'
+            )
 
         # Usar <p> con márgenes explícitos en lugar de <div>s — QTextDocument
         # respeta mejor la altura de párrafos y evita que el header colapse
@@ -2615,15 +2721,58 @@ def _html_cronograma(pid: int, proy: dict, items: list) -> str:
     return "\n".join(parts)
 
 
-def _html_insumos(pid: int, proy: dict) -> str:
-    o, od, _os = _brand_colors()
-    sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
-    dec = get_decimales_ppto()
+def _html_insumos(pid: int, proy: dict, por_sub: bool = False) -> str:
+    """Relación de insumos del proyecto.
+
+    ``por_sub=True`` y proyecto con varios sub-presupuestos → una sección
+    completa por sub (con su propio resumen por tipo), en vez de una única
+    consolidada. Se elige en el Centro de Reportes; el default (False)
+    mantiene el reporte histórico.
+    """
+    if por_sub:
+        _subs = subpresupuestos_de(pid)
+        if _subs:
+            _conn = get_db()
+            try:
+                _bloques = []
+                for _s in _subs:
+                    _ids = [r['id'] for r in _conn.execute(
+                        "SELECT id FROM partidas WHERE proyecto_id=? "
+                        "AND es_titulo=0 AND sub_presupuesto_id IS ?",
+                        (pid, _s['id'])
+                    ).fetchall()]
+                    _ins = get_insumos_para_partidas(_conn, _ids) if _ids else []
+                    _bloques.append((_s['nombre'], _ins))
+            finally:
+                _conn.close()
+            _o2, _od2, _os2 = _brand_colors()
+            _out = ['<h2>Relación de Insumos por Sub-presupuesto</h2>']
+            for _i, (_nom, _ins) in enumerate(_bloques):
+                if _i:
+                    _out.append('<p style="margin-top:30pt">&nbsp;</p>')
+                _out.append(
+                    f'<p style="margin:0 0 10pt 0;font-size:11pt;font-weight:700;'
+                    f' color:{_od2};text-decoration:underline">'
+                    f'{escape(_nom)}</p>'
+                )
+                _out.append(_html_insumos_bloque(pid, proy, _ins))
+            return "\n".join(_out)
+
     conn = get_db()
     insumos = get_insumos_proyecto(conn, pid)
     conn.close()
+    return ('<h2>Relación de Insumos</h2>\n'
+            + _html_insumos_bloque(pid, proy, insumos))
 
-    parts = ['<h2>Relación de Insumos</h2>']
+
+def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
+    """Cuerpo del reporte de insumos para un conjunto ya resuelto de
+    recursos (todo el proyecto o los de un sub-presupuesto)."""
+    o, od, _os = _brand_colors()
+    sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
+    dec = get_decimales_ppto()
+
+    parts = []
 
     if not insumos:
         parts.append('<p style="color:#888;font-style:italic">Sin insumos.</p>')
@@ -3170,9 +3319,37 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
 
     # ── Estructura del presupuesto: títulos de nivel 1 y 2 con sus montos ──
     # Eco-mode: sin fondos sólidos, jerarquía con peso de fuente y bordes.
+    # Con varios sub-presupuestos se agrupa por sub y se antepone una banda
+    # con su nombre y su costo directo; si no, sale la lista plana de siempre.
     estructura_rows = []
+    _grupos_re = agrupar_items_por_sub(pid, items)
+    _cab_sub: dict = {}
+    if _grupos_re:
+        for _nom_sub, _its in _grupos_re:
+            _prim = next((e for e in _its
+                          if e['partida'].get('es_titulo')
+                          and int(e['partida'].get('nivel') or 1) <= 2), None)
+            if _prim is not None:
+                _cab_sub[id(_prim)] = (
+                    _nom_sub,
+                    sum((e['total'] or 0) for e in _its
+                        if not e['partida'].get('es_titulo'))
+                )
     for e in items:
         p = e['partida']
+        _c = _cab_sub.get(id(e))
+        if _c:
+            _nom_sub, _cd_sub = _c
+            estructura_rows.append(
+                f'<tr><td colspan="2" style="padding:10pt 6pt 4pt;'
+                f' font-size:9.5pt;font-weight:700;color:{od};'
+                f' text-decoration:underline">'
+                f'{escape(_nom_sub)}</td>'
+                f'<td align="right" style="padding:10pt 8pt 4pt;'
+                f' font-size:9.5pt;font-weight:700;color:{od};'
+                f' text-decoration:underline">'
+                f'{sym} {_fmt(_cd_sub, dec)}</td></tr>'
+            )
         if not p.get('es_titulo'):
             continue
         niv = int(p.get('nivel') or 1)
@@ -4038,6 +4215,7 @@ REPORT_TYPES = [
     ('presupuesto',             'Presupuesto',                'Listado completo de partidas con metrados, precios y totales.'),
     ('gastos_generales',        'Desagregado del Pie de Presupuesto', 'Desglose del pie por rubro (GG, Supervisión, Expediente, Liquidación) con su detalle y subtotales.'),
     ('insumos',                 'Insumos',                    'Recursos consolidados por categoría y montos.'),
+    ('insumos_sub',             'Insumos por Sub-presupuesto','Los mismos recursos pero separados por sub-presupuesto, cada uno con su resumen por tipo. Solo aparece si el proyecto tiene más de un sub-presupuesto.'),
     ('acus',                    'Análisis de Costos',         'ACU detallado de cada partida con sus recursos.'),
     ('metrados',                'Hoja de Metrados',           'Detalle por partida con dimensiones y parciales.'),
     ('especificaciones',        'Especificaciones Técnicas',  'Texto técnico de cada partida con especificaciones.'),
@@ -4190,6 +4368,10 @@ def _build_html_for(tipo: str, pid: int) -> tuple[str, str, dict]:
     if tipo == 'insumos':
         return ('Relación de Insumos',
                 _html_insumos(pid, proy),
+                proy)
+    if tipo == 'insumos_sub':
+        return ('Relación de Insumos por Sub-presupuesto',
+                _html_insumos(pid, proy, por_sub=True),
                 proy)
     if tipo == 'especificaciones':
         return ('Especificaciones Técnicas',

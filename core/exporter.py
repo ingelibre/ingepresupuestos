@@ -818,6 +818,20 @@ def exportar_presupuesto(proyecto_id):
     _dots = [(it['partida'].get('item') or '').count('.') for it in items]
     _min_dots = min(_dots) if _dots else 0
 
+    # Cabecera de sub-presupuesto (proyectos con más de uno): fila con el
+    # nombre y su CD, subrayada y sin relleno — mismo criterio que el PDF y
+    # que los títulos N1. Con un solo sub el dict queda vacío y no cambia nada.
+    from core.pdf_reports import agrupar_items_por_sub as _agrup_sub
+    _cab_sub: dict = {}
+    for _nom_sub, _its in _agrup_sub(proyecto_id, items):
+        if _its:
+            _cab_sub[id(_its[0])] = (
+                _nom_sub, sum((e['total'] or 0) for e in _its
+                              if not e['partida'].get('es_titulo'))
+            )
+    _font_sub = Font(name='Inter', bold=True, size=12,
+                     color=C_ORANGE_DARK, underline='single')
+
     for idx, entry in enumerate(items):
         p     = entry['partida']
         total = entry['total']
@@ -825,6 +839,24 @@ def exportar_presupuesto(proyecto_id):
         nivel = int(p.get('nivel') or 1)
         desc = p['descripcion'] or ''
         _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
+
+        _cab = _cab_sub.get(id(entry))
+        if _cab:
+            _nom_sub, _cd_sub = _cab
+            if idx > 0:
+                ws.row_dimensions[r].height = 10
+                r += 1
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            c_s = ws.cell(r, 1, _nom_sub)
+            c_s.font = _font_sub
+            c_s.alignment = Alignment(horizontal='left', vertical='center',
+                                      wrap_text=True)
+            c_sv = ws.cell(r, 7, _cd_sub)
+            c_sv.font = _font_sub
+            c_sv.number_format = fmt_money
+            c_sv.alignment = Alignment(horizontal='right', vertical='center')
+            ws.row_dimensions[r].height = max(24, _alto_fila(_nom_sub, 82))
+            r += 1
 
         # Spacer row — solo si el anterior NO es padre directo
         if es_titulo and idx > 0:
@@ -1267,7 +1299,7 @@ def exportar_acus(proyecto_id):
 
 # ─── EXCEL: Listado de insumos ────────────────────────────────────────────────
 
-def exportar_insumos(proyecto_id):
+def exportar_insumos(proyecto_id, por_sub: bool = False):
     """Export Excel del reporte Insumos — espejo visual del PDF `_html_insumos`.
 
     - Header 3 zonas + nombre proyecto full-width.
@@ -1303,224 +1335,258 @@ def exportar_insumos(proyecto_id):
                   'SC': 'Sub-contratos / Servicios'}
 
     # ── Workbook setup ──────────────────────────────────────────────────────
+    # ── Bloques a generar: 1 hoja normal, o una hoja por sub-presupuesto ────
+    if por_sub:
+        from core.pdf_reports import subpresupuestos_de as _subs_de
+        from core.database import get_insumos_para_partidas as _get_ins_part
+        _subs = _subs_de(proyecto_id)
+    else:
+        _subs = []
+    if _subs:
+        _conn2 = get_db()
+        try:
+            _bloques = []
+            for _s in _subs:
+                _ids = [x['id'] for x in _conn2.execute(
+                    "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+                    "AND sub_presupuesto_id IS ?", (proyecto_id, _s['id'])
+                ).fetchall()]
+                _ins_s = _get_ins_part(_conn2, _ids) if _ids else []
+                _ins_s = sorted(_ins_s,
+                                key=lambda x: (_orden_tipo.get(x['tipo'], 99),
+                                               x['descripcion'] or ''))
+                _bloques.append((_s['nombre'], _ins_s))
+        finally:
+            _conn2.close()
+    else:
+        _bloques = [(None, insumos)]
+
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Insumos"
-    ws.page_setup.paperSize = ws.PAPERSIZE_A4
-    ws.sheet_view.showGridLines = False
-    ws.print_options.gridLines = False
-    ws.print_options.gridLinesSet = True
+    for _i_bloque, (_nom_sub, insumos) in enumerate(_bloques):
+        ws = wb.active if _i_bloque == 0 else wb.create_sheet()
+        # Excel: máx 31 caracteres y sin []:*?/\\ en el nombre de hoja.
+        _t = (_nom_sub or 'Insumos')
+        for _ch in '[]:*?/\\':
+            _t = _t.replace(_ch, '-')
+        ws.title = (f"{_i_bloque+1}. {_t}")[:31] if _nom_sub else 'Insumos'
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.sheet_view.showGridLines = False
+        ws.print_options.gridLines = False
+        ws.print_options.gridLinesSet = True
 
-    # 7 cols físicas (Descripción se SPLIT en B+C — patrón espejo de
-    # Presupuesto/ACU/Metrados: balancea el tripartite del header. B+C se
-    # mergean en cada fila → user ve 1 sola columna Descripción).
-    N = 7  # Código · Desc1 · Desc2 · Und · Cantidad · Precio · Parcial
-    ws.column_dimensions['A'].width = 12   # Código
-    ws.column_dimensions['B'].width = 18   # Descripción parte 1
-    ws.column_dimensions['C'].width = 24   # Descripción parte 2
-    ws.column_dimensions['D'].width = 7    # Und
-    ws.column_dimensions['E'].width = 12   # Cantidad
-    ws.column_dimensions['F'].width = 12   # Precio
-    ws.column_dimensions['G'].width = 14   # Parcial
+        # 7 cols físicas (Descripción se SPLIT en B+C — patrón espejo de
+        # Presupuesto/ACU/Metrados: balancea el tripartite del header. B+C se
+        # mergean en cada fila → user ve 1 sola columna Descripción).
+        N = 7  # Código · Desc1 · Desc2 · Und · Cantidad · Precio · Parcial
+        ws.column_dimensions['A'].width = 12   # Código
+        ws.column_dimensions['B'].width = 18   # Descripción parte 1
+        ws.column_dimensions['C'].width = 24   # Descripción parte 2
+        ws.column_dimensions['D'].width = 7    # Und
+        ws.column_dimensions['E'].width = 12   # Cantidad
+        ws.column_dimensions['F'].width = 12   # Precio
+        ws.column_dimensions['G'].width = 14   # Parcial
 
-    # Helper para mergear Descripción (cols 2+3) en una fila dada.
-    def _merge_descripcion(row_idx: int):
-        ws.merge_cells(start_row=row_idx, start_column=2,
-                          end_row=row_idx, end_column=3)
+        # Helper para mergear Descripción (cols 2+3) en una fila dada.
+        def _merge_descripcion(row_idx: int):
+            ws.merge_cells(start_row=row_idx, start_column=2,
+                              end_row=row_idx, end_column=3)
 
-    # ── Encabezado 3 zonas + nombre proyecto en row 2 centro ────────────────
-    # cols_partition=(2, 5) → Left=A+B (30) · Center=C+D+E (43) · Right=F+G (26).
-    r = _xlsx_header_pdf_style(ws, proyecto, 'Relación de Insumos', N,
-                                  cols_partition=(2, 5))
+        # ── Encabezado 3 zonas + nombre proyecto en row 2 centro ────────────────
+        # cols_partition=(2, 5) → Left=A+B (30) · Center=C+D+E (43) · Right=F+G (26).
+        r = _xlsx_header_pdf_style(ws, proyecto, 'Relación de Insumos', N,
+                                      cols_partition=(2, 5))
 
-    # ── Título h2 ───────────────────────────────────────────────────────────
-    from utils.theme import accent_reportes
-    _h2_color = accent_reportes()[1].lstrip('#').upper()
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
-    c_h2 = ws.cell(r, 1, 'Relación de Insumos')
-    c_h2.font      = Font(name='Inter', bold=True, size=14, color=_h2_color)
-    c_h2.alignment = Alignment(horizontal='left', vertical='center')
-    ws.row_dimensions[r].height = 22
-    r += 1
-
-    fmt_money = '[$-0409]#,##0.00'
-    fmt_4     = '#,##0.0000'
-    side_slate_300 = Side(style='thin', color='CBD5E1')
-
-    # Símbolo moneda
-    try:
-        from utils.formatting import _moneda_simbolo
-        sym = _moneda_simbolo(proyecto['moneda'] or 'Soles')
-    except Exception:
-        sym = 'S/'
-
-    # ── Cabecera de columnas — bg accent_soft (espejo de Presupuesto).
-    # Cols físicas: A · (B+C merged) · D · E · F · G
-    from utils.theme import accent_reportes as _accent_hdr_i
-    _, _, _os_hdr_i = _accent_hdr_i()
-    C_HDR_BG_I = _os_hdr_i.lstrip('#').upper()
-    hdr_fill_i = PatternFill(start_color=C_HDR_BG_I, end_color=C_HDR_BG_I,
-                                fill_type='solid')
-    hdrs_fisicos = [
-        (1, 'Código',      'left'),
-        (2, 'Descripción', 'left'),    # merge con col 3
-        (4, 'Und',         'center'),
-        (5, 'Cantidad',    'right'),
-        (6, 'Precio',      'right'),
-        (7, 'Parcial',     'right'),
-    ]
-    # PRE-aplicar fill a TODAS las cols (incluye col 3 que será MergedCell).
-    for col_ in range(1, N + 1):
-        ws.cell(r, col_).fill = hdr_fill_i
-    for col_idx, h, al in hdrs_fisicos:
-        cell = ws.cell(r, col_idx, h)
-        cell.font      = Font(name='Inter', bold=True, size=10, color=C_SLATE_500)
-        cell.alignment = Alignment(horizontal=al, vertical='center')
-        cell.border    = Border(bottom=side_slate_300)
-    _merge_descripcion(r)
-    ws.row_dimensions[r].height = 16
-    r += 1
-
-    # ── Loop por tipo: barra de sección + items + subtotal ─────────────────
-    por_tipo_lista = {}
-    subtotal_tipo  = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
-    for ins in insumos:
-        por_tipo_lista.setdefault(ins['tipo'], []).append(ins)
-
-    primer_tipo = True
-    for tipo in ('MO', 'MAT', 'EQ', 'SC'):
-        lst = por_tipo_lista.get(tipo)
-        if not lst:
-            continue
-        if not primer_tipo:
-            r += 1  # espaciador
-        primer_tipo = False
-
-        tipo_color = TIPO_FG[tipo]
-        soft_fill = PatternFill(start_color=TIPO_SOFT[tipo],
-                                 end_color=TIPO_SOFT[tipo], fill_type='solid')
-
-        # ── Barra de sección (fondo suave del tipo + texto del color) ───────
+        # ── Título h2 ───────────────────────────────────────────────────────────
+        from utils.theme import accent_reportes
+        _h2_color = accent_reportes()[1].lstrip('#').upper()
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
-        c_bar = ws.cell(r, 1, f"{tipo}    {TIPO_LABEL[tipo].upper()}")
-        c_bar.font = Font(name='Inter', bold=True, size=11, color=tipo_color)
-        c_bar.alignment = Alignment(horizontal='left', vertical='center',
-                                     indent=1)
-        for c in range(1, N + 1):
-            ws.cell(r, c).fill = soft_fill
+        # Nombre del sub-presupuesto subrayado (mismo criterio que el PDF y
+        # que los títulos N1 del Presupuesto); sin él, título normal.
+        c_h2 = ws.cell(r, 1, _nom_sub or 'Relación de Insumos')
+        c_h2.font      = Font(name='Inter', bold=True, size=14, color=_h2_color,
+                              underline=('single' if _nom_sub else None))
+        c_h2.alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[r].height = 22
         r += 1
 
-        # ── Items del tipo ──────────────────────────────────────────────────
-        # Cols físicas: A=Cód · (B+C merged)=Desc · D=Und · E=Cant · F=Pre · G=Parc
-        sub = 0.0
-        num_font = Font(name='Inter', size=10, color=C_SLATE_900)
-        for ins in lst:
-            c_cod = ws.cell(r, 1, ins['codigo']); c_cod.font = num_font
-            c_cod.alignment = Alignment(horizontal='left', vertical='top')
-            c_dsc = ws.cell(r, 2, ins['descripcion'] or ''); c_dsc.font = num_font
-            c_dsc.alignment = Alignment(horizontal='left', vertical='top',
-                                         wrap_text=True)
-            # PRE-estilar col 3 antes del merge (post-merge sería MergedCell)
-            ws.cell(r, 3).font = num_font
-            c_un = ws.cell(r, 4, ins['unidad'] or ''); c_un.font = num_font
-            c_un.alignment = Alignment(horizontal='center', vertical='top')
-            c_ct = ws.cell(r, 5, ins['cantidad_total'] or 0); c_ct.font = num_font
-            c_ct.number_format = fmt_4
-            c_ct.alignment = Alignment(horizontal='right', vertical='top')
-            c_pr = ws.cell(r, 6, ins['precio'] or 0); c_pr.font = num_font
-            c_pr.number_format = fmt_money
-            c_pr.alignment = Alignment(horizontal='right', vertical='top')
-            parcial = ins.get('parcial_total') or 0
-            sub += parcial
-            c_pa = ws.cell(r, 7, parcial); c_pa.font = num_font
-            c_pa.number_format = fmt_money
-            c_pa.alignment = Alignment(horizontal='right', vertical='top')
-            _merge_descripcion(r)
-            ws.row_dimensions[r].height = max(16, _alto_fila(
-                ins['descripcion'] or '', 38))
-            r += 1
+        fmt_money = '[$-0409]#,##0.00'
+        fmt_4     = '#,##0.0000'
+        side_slate_300 = Side(style='thin', color='CBD5E1')
 
-        # ── Subtotal del tipo (label cols 1-6 right + valor en col 7) ───────
-        subtotal_tipo[tipo] = sub
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-        c_sl = ws.cell(r, 1, f"Subtotal {TIPO_LABEL[tipo]}")
-        c_sl.font = Font(name='Inter', bold=True, size=10, color=tipo_color)
-        c_sl.alignment = Alignment(horizontal='right', vertical='center')
-        c_sv = ws.cell(r, 7, sub)
-        c_sv.font = Font(name='Inter', bold=True, size=10, color=tipo_color)
-        c_sv.number_format = fmt_money
-        c_sv.alignment = Alignment(horizontal='right', vertical='center')
-        ws.row_dimensions[r].height = 18
-        r += 1
+        # Símbolo moneda
+        try:
+            from utils.formatting import _moneda_simbolo
+            sym = _moneda_simbolo(proyecto['moneda'] or 'Soles')
+        except Exception:
+            sym = 'S/'
 
-    # ── Resumen por Tipo de Insumo (al pie) ─────────────────────────────────
-    total_general = sum(subtotal_tipo.values())
-    r += 3  # separación equivalente al margin-top:28pt del PDF
-
-    # h3 "Resumen por Tipo de Insumo"
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
-    c_h3 = ws.cell(r, 1, 'Resumen por Tipo de Insumo')
-    c_h3.font = Font(name='Inter', bold=True, size=11, color='2E3C52')
-    c_h3.alignment = Alignment(horizontal='left', vertical='center')
-    ws.row_dimensions[r].height = 18
-    r += 1
-
-    # Cabecera resumen — FULL-WIDTH: Tipo (cols 1-5 merged) · Subtotal (col 6) · % CD (col 7).
-    # bg accent_soft espejo del PDF para diferenciarse del cuerpo.
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
-    for col_ in range(1, N + 1):
-        ws.cell(r, col_).fill = hdr_fill_i
-    c_h_t = ws.cell(r, 1, 'Tipo')
-    c_h_t.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
-    c_h_t.alignment = Alignment(horizontal='left', vertical='center')
-    c_h_s = ws.cell(r, 6, 'Subtotal')
-    c_h_s.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
-    c_h_s.alignment = Alignment(horizontal='right', vertical='center')
-    c_h_p = ws.cell(r, 7, '% CD')
-    c_h_p.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
-    c_h_p.alignment = Alignment(horizontal='right', vertical='center')
-    ws.row_dimensions[r].height = 16
-    r += 1
-
-    for tipo, label in [('MO', 'Mano de Obra'), ('MAT', 'Materiales'),
-                        ('EQ', 'Equipos / Herramientas'),
-                        ('SC', 'Sub-contratos / Servicios')]:
-        v = subtotal_tipo.get(tipo, 0)
-        pct = (v / total_general * 100) if total_general else 0
-        # Tipo + label en cols 1-5 merged (full-width)
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
-        c_t = ws.cell(r, 1, f"{tipo}   {label}")
-        c_t.font = Font(name='Inter', size=10, color=C_SLATE_900)
-        c_t.alignment = Alignment(horizontal='left', vertical='center')
-        # Subtotal en col 6
-        c_s = ws.cell(r, 6, v)
-        c_s.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
-        c_s.number_format = fmt_money
-        c_s.alignment = Alignment(horizontal='right', vertical='center')
-        # % en col 7
-        c_p = ws.cell(r, 7, f"{pct:.1f}%")
-        c_p.font = Font(name='Inter', size=10, color=C_SLATE_500)
-        c_p.alignment = Alignment(horizontal='right', vertical='center')
+        # ── Cabecera de columnas — bg accent_soft (espejo de Presupuesto).
+        # Cols físicas: A · (B+C merged) · D · E · F · G
+        from utils.theme import accent_reportes as _accent_hdr_i
+        _, _, _os_hdr_i = _accent_hdr_i()
+        C_HDR_BG_I = _os_hdr_i.lstrip('#').upper()
+        hdr_fill_i = PatternFill(start_color=C_HDR_BG_I, end_color=C_HDR_BG_I,
+                                    fill_type='solid')
+        hdrs_fisicos = [
+            (1, 'Código',      'left'),
+            (2, 'Descripción', 'left'),    # merge con col 3
+            (4, 'Und',         'center'),
+            (5, 'Cantidad',    'right'),
+            (6, 'Precio',      'right'),
+            (7, 'Parcial',     'right'),
+        ]
+        # PRE-aplicar fill a TODAS las cols (incluye col 3 que será MergedCell).
+        for col_ in range(1, N + 1):
+            ws.cell(r, col_).fill = hdr_fill_i
+        for col_idx, h, al in hdrs_fisicos:
+            cell = ws.cell(r, col_idx, h)
+            cell.font      = Font(name='Inter', bold=True, size=10, color=C_SLATE_500)
+            cell.alignment = Alignment(horizontal=al, vertical='center')
+            cell.border    = Border(bottom=side_slate_300)
+        _merge_descripcion(r)
         ws.row_dimensions[r].height = 16
         r += 1
 
-    # ── TOTAL COSTO DIRECTO — bold slate-900, SIN bordes (full-width) ───────
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
-    c_tl = ws.cell(r, 1, 'TOTAL COSTO DIRECTO')
-    c_tl.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
-    c_tl.alignment = Alignment(horizontal='left', vertical='center')
-    c_tv = ws.cell(r, 6, total_general)
-    c_tv.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
-    c_tv.number_format = fmt_money
-    c_tv.alignment = Alignment(horizontal='right', vertical='center')
-    c_tp = ws.cell(r, 7, "100.0%")
-    c_tp.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
-    c_tp.alignment = Alignment(horizontal='right', vertical='center')
-    ws.row_dimensions[r].height = 20
-    r += 1
+        # ── Loop por tipo: barra de sección + items + subtotal ─────────────────
+        por_tipo_lista = {}
+        subtotal_tipo  = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
+        for ins in insumos:
+            por_tipo_lista.setdefault(ins['tipo'], []).append(ins)
 
-    _setup_impresion(ws, n_filas_encabezado=4, n_cols=N, proyecto=proyecto)
+        primer_tipo = True
+        for tipo in ('MO', 'MAT', 'EQ', 'SC'):
+            lst = por_tipo_lista.get(tipo)
+            if not lst:
+                continue
+            if not primer_tipo:
+                r += 1  # espaciador
+            primer_tipo = False
+
+            tipo_color = TIPO_FG[tipo]
+            soft_fill = PatternFill(start_color=TIPO_SOFT[tipo],
+                                     end_color=TIPO_SOFT[tipo], fill_type='solid')
+
+            # ── Barra de sección (fondo suave del tipo + texto del color) ───────
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+            c_bar = ws.cell(r, 1, f"{tipo}    {TIPO_LABEL[tipo].upper()}")
+            c_bar.font = Font(name='Inter', bold=True, size=11, color=tipo_color)
+            c_bar.alignment = Alignment(horizontal='left', vertical='center',
+                                         indent=1)
+            for c in range(1, N + 1):
+                ws.cell(r, c).fill = soft_fill
+            ws.row_dimensions[r].height = 22
+            r += 1
+
+            # ── Items del tipo ──────────────────────────────────────────────────
+            # Cols físicas: A=Cód · (B+C merged)=Desc · D=Und · E=Cant · F=Pre · G=Parc
+            sub = 0.0
+            num_font = Font(name='Inter', size=10, color=C_SLATE_900)
+            for ins in lst:
+                c_cod = ws.cell(r, 1, ins['codigo']); c_cod.font = num_font
+                c_cod.alignment = Alignment(horizontal='left', vertical='top')
+                c_dsc = ws.cell(r, 2, ins['descripcion'] or ''); c_dsc.font = num_font
+                c_dsc.alignment = Alignment(horizontal='left', vertical='top',
+                                             wrap_text=True)
+                # PRE-estilar col 3 antes del merge (post-merge sería MergedCell)
+                ws.cell(r, 3).font = num_font
+                c_un = ws.cell(r, 4, ins['unidad'] or ''); c_un.font = num_font
+                c_un.alignment = Alignment(horizontal='center', vertical='top')
+                c_ct = ws.cell(r, 5, ins['cantidad_total'] or 0); c_ct.font = num_font
+                c_ct.number_format = fmt_4
+                c_ct.alignment = Alignment(horizontal='right', vertical='top')
+                c_pr = ws.cell(r, 6, ins['precio'] or 0); c_pr.font = num_font
+                c_pr.number_format = fmt_money
+                c_pr.alignment = Alignment(horizontal='right', vertical='top')
+                parcial = ins.get('parcial_total') or 0
+                sub += parcial
+                c_pa = ws.cell(r, 7, parcial); c_pa.font = num_font
+                c_pa.number_format = fmt_money
+                c_pa.alignment = Alignment(horizontal='right', vertical='top')
+                _merge_descripcion(r)
+                ws.row_dimensions[r].height = max(16, _alto_fila(
+                    ins['descripcion'] or '', 38))
+                r += 1
+
+            # ── Subtotal del tipo (label cols 1-6 right + valor en col 7) ───────
+            subtotal_tipo[tipo] = sub
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            c_sl = ws.cell(r, 1, f"Subtotal {TIPO_LABEL[tipo]}")
+            c_sl.font = Font(name='Inter', bold=True, size=10, color=tipo_color)
+            c_sl.alignment = Alignment(horizontal='right', vertical='center')
+            c_sv = ws.cell(r, 7, sub)
+            c_sv.font = Font(name='Inter', bold=True, size=10, color=tipo_color)
+            c_sv.number_format = fmt_money
+            c_sv.alignment = Alignment(horizontal='right', vertical='center')
+            ws.row_dimensions[r].height = 18
+            r += 1
+
+        # ── Resumen por Tipo de Insumo (al pie) ─────────────────────────────────
+        total_general = sum(subtotal_tipo.values())
+        r += 3  # separación equivalente al margin-top:28pt del PDF
+
+        # h3 "Resumen por Tipo de Insumo"
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+        c_h3 = ws.cell(r, 1, 'Resumen por Tipo de Insumo')
+        c_h3.font = Font(name='Inter', bold=True, size=11, color='2E3C52')
+        c_h3.alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[r].height = 18
+        r += 1
+
+        # Cabecera resumen — FULL-WIDTH: Tipo (cols 1-5 merged) · Subtotal (col 6) · % CD (col 7).
+        # bg accent_soft espejo del PDF para diferenciarse del cuerpo.
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        for col_ in range(1, N + 1):
+            ws.cell(r, col_).fill = hdr_fill_i
+        c_h_t = ws.cell(r, 1, 'Tipo')
+        c_h_t.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
+        c_h_t.alignment = Alignment(horizontal='left', vertical='center')
+        c_h_s = ws.cell(r, 6, 'Subtotal')
+        c_h_s.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
+        c_h_s.alignment = Alignment(horizontal='right', vertical='center')
+        c_h_p = ws.cell(r, 7, '% CD')
+        c_h_p.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
+        c_h_p.alignment = Alignment(horizontal='right', vertical='center')
+        ws.row_dimensions[r].height = 16
+        r += 1
+
+        for tipo, label in [('MO', 'Mano de Obra'), ('MAT', 'Materiales'),
+                            ('EQ', 'Equipos / Herramientas'),
+                            ('SC', 'Sub-contratos / Servicios')]:
+            v = subtotal_tipo.get(tipo, 0)
+            pct = (v / total_general * 100) if total_general else 0
+            # Tipo + label en cols 1-5 merged (full-width)
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+            c_t = ws.cell(r, 1, f"{tipo}   {label}")
+            c_t.font = Font(name='Inter', size=10, color=C_SLATE_900)
+            c_t.alignment = Alignment(horizontal='left', vertical='center')
+            # Subtotal en col 6
+            c_s = ws.cell(r, 6, v)
+            c_s.font = Font(name='Inter', bold=True, size=10, color=C_SLATE_900)
+            c_s.number_format = fmt_money
+            c_s.alignment = Alignment(horizontal='right', vertical='center')
+            # % en col 7
+            c_p = ws.cell(r, 7, f"{pct:.1f}%")
+            c_p.font = Font(name='Inter', size=10, color=C_SLATE_500)
+            c_p.alignment = Alignment(horizontal='right', vertical='center')
+            ws.row_dimensions[r].height = 16
+            r += 1
+
+        # ── TOTAL COSTO DIRECTO — bold slate-900, SIN bordes (full-width) ───────
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        c_tl = ws.cell(r, 1, 'TOTAL COSTO DIRECTO')
+        c_tl.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
+        c_tl.alignment = Alignment(horizontal='left', vertical='center')
+        c_tv = ws.cell(r, 6, total_general)
+        c_tv.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
+        c_tv.number_format = fmt_money
+        c_tv.alignment = Alignment(horizontal='right', vertical='center')
+        c_tp = ws.cell(r, 7, "100.0%")
+        c_tp.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
+        c_tp.alignment = Alignment(horizontal='right', vertical='center')
+        ws.row_dimensions[r].height = 20
+        r += 1
+
+        _setup_impresion(ws, n_filas_encabezado=4, n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1603,6 +1669,32 @@ def _hoja_metrados(wb, proyecto_id):
     card_fill = PatternFill(start_color=C_CARD_BG, end_color=C_CARD_BG,
                               fill_type='solid')
 
+    # Nombre del sub-presupuesto por partida (proyectos con más de uno).
+    # Se emite de forma PEREZOSA, junto a la primera partida que realmente se
+    # imprime: muchas se saltan por no tener planilla ni metrado directo, y
+    # marcar la primera del grupo dejaría cabeceras huérfanas.
+    _sub_de_part: dict = {}
+    try:
+        from core.pdf_reports import subpresupuestos_de as _subs_de_m
+        if _subs_de_m(proyecto_id):
+            _conn_s = get_db()
+            try:
+                for _row in _conn_s.execute(
+                    "SELECT p.id, COALESCE(s.nombre, ?) AS nom "
+                    "FROM partidas p LEFT JOIN sub_presupuestos s "
+                    "  ON s.id = p.sub_presupuesto_id "
+                    "WHERE p.proyecto_id=?",
+                    ((proyecto['sub_presupuesto'] or 'Principal'), proyecto_id)
+                ).fetchall():
+                    _sub_de_part[_row['id']] = _row['nom']
+            finally:
+                _conn_s.close()
+    except Exception:
+        _sub_de_part = {}
+    _sub_emitido = None
+    _font_sub_m = Font(name='Inter', bold=True, size=12,
+                       color=_h2_color, underline='single')
+
     for partida in partidas:
         detalles = conn.execute(
             "SELECT * FROM metrados_detalle WHERE partida_id=? ORDER BY orden",
@@ -1622,6 +1714,20 @@ def _hoja_metrados(wb, proyecto_id):
         # Saltar si la partida no tiene detalle ni metrado directo (como el PDF)
         if not detalles:
             continue
+
+        # ── Cabecera de sub-presupuesto (solo al cambiar de sub) ────────────
+        _nom_sub_m = _sub_de_part.get(partida['id'])
+        if _nom_sub_m and _nom_sub_m != _sub_emitido:
+            _sub_emitido = _nom_sub_m
+            if r > 1:
+                r += 1   # respiro antes del bloque
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+            c_sm = ws.cell(r, 1, _nom_sub_m)
+            c_sm.font = _font_sub_m
+            c_sm.alignment = Alignment(horizontal='left', vertical='center',
+                                       wrap_text=True)
+            ws.row_dimensions[r].height = max(22, _alto_fila(_nom_sub_m, 90))
+            r += 1
 
         # ── Header de la partida (card con bg accent_soft) ──────────────────
         # Línea 1: ítem + descripción (slate-900 bold) — PRE-aplicar fill

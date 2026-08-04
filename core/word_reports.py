@@ -218,12 +218,13 @@ def _para_bottom_border(para, *, sz: int = 16, color: str = 'F37329'):
 
 def _set_cell_text(cell, texto: str, *, bold: bool = False,
                    size: int = 10, color: RGBColor = _SLATE_700,
-                   align: str = 'left', italic: bool = False):
+                   align: str = 'left', italic: bool = False,
+                   underline: bool = False, space_before: int = 0):
     """Limpia y setea texto formateado en una celda. Sin space_after para
     que las filas de tabla queden compactas (espejo del PDF)."""
     cell.text = ''
     p = cell.paragraphs[0]
-    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_before = Pt(space_before)
     p.paragraph_format.space_after = Pt(0)
     if align == 'right':
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -234,6 +235,7 @@ def _set_cell_text(cell, texto: str, *, bold: bool = False,
     run.font.color.rgb = color
     run.bold = bold
     run.italic = italic
+    run.underline = underline
 
 
 def _add_heading(doc: Document, texto: str, *, size: int = 14,
@@ -584,9 +586,29 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
         # Sin marco/sin barra — puramente tipográficas (espejo del PDF).
 
     # Estructura del Presupuesto (títulos nivel 1 y 2)
-    estructura = [e for e in items
-                  if e['partida'].get('es_titulo')
-                  and int(e['partida'].get('nivel') or 1) <= 2]
+    # Con varios sub-presupuestos se antepone una fila con su nombre y su CD
+    # (subrayada, sin fondo) — espejo del PDF. `filas` mezcla cabeceras de sub
+    # (dicts con 'sub') con entradas normales de `items`.
+    from core.pdf_reports import agrupar_items_por_sub as _agrup
+    _o_rgb = _accent_od_rgb()
+    _grupos_re = _agrup(pid, items)
+    filas: list = []
+    if _grupos_re:
+        for _nom_sub, _its in _grupos_re:
+            _est_sub = [e for e in _its
+                        if e['partida'].get('es_titulo')
+                        and int(e['partida'].get('nivel') or 1) <= 2]
+            if not _est_sub:
+                continue
+            filas.append({'sub': _nom_sub,
+                          'cd': sum((e['total'] or 0) for e in _its
+                                    if not e['partida'].get('es_titulo'))})
+            filas.extend(_est_sub)
+    else:
+        filas = [e for e in items
+                 if e['partida'].get('es_titulo')
+                 and int(e['partida'].get('nivel') or 1) <= 2]
+    estructura = filas
     if estructura:
         _add_heading(doc, "Estructura del Presupuesto",
                      size=11, color=_SLATE_700,
@@ -601,6 +623,18 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
             row.cells[1].width = Cm(11.7)
             row.cells[2].width = Cm(3.5)
         for i, e in enumerate(estructura):
+            if 'sub' in e:
+                # Cabecera de sub-presupuesto: subrayada, sin fondo ni bordes.
+                row = tbl_e.rows[i]
+                _set_cell_text(row.cells[0], '', bold=True, color=_o_rgb,
+                               underline=True, space_before=8)
+                _set_cell_text(row.cells[1], e['sub'], bold=True,
+                               color=_o_rgb, underline=True, space_before=8)
+                _set_cell_text(row.cells[2],
+                               f"{sym} {_fmt(e['cd'] or 0, dec)}",
+                               bold=True, color=_o_rgb, align='right',
+                               underline=True, space_before=8)
+                continue
             p_e = e['partida']
             niv = int(p_e.get('nivel') or 1)
             bold = (niv == 1)

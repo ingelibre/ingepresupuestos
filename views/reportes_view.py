@@ -33,7 +33,8 @@ from core import pdf_reports, word_reports, odt_reports, ods_reports
 from utils.icons import icon
 
 # Tipos soportados por cada exportador (PDF y Print aplican siempre).
-_EXCEL_TIPOS = {'presupuesto', 'acus', 'insumos', 'metrados', 'gastos_generales',
+_EXCEL_TIPOS = {'presupuesto', 'acus', 'insumos', 'insumos_sub', 'metrados',
+                'gastos_generales',
                 'completo', 'cronograma_valorizado', 'cronograma_adquisiciones'}
 _WORD_TIPOS = word_reports.tipos_soportados()
 _ODT_TIPOS = odt_reports.tipos_soportados()
@@ -52,6 +53,7 @@ _SECCIONES_COMPLETO = [
     ('presupuesto',          'Presupuesto'),
     ('gastos_generales',     'Pie'),
     ('insumos',              'Insumos'),
+    ('insumos_sub',          'Insumos x Sub'),
     ('acus',                 'ACU'),
     ('metrados',             'Metrados'),
     ('especificaciones',     'Especif.'),
@@ -60,7 +62,7 @@ _SECCIONES_COMPLETO = [
     ('cron_adquisiciones',   'Adquisic.'),
     ('cron_curva',           'Curva S'),
 ]
-_SECCIONES_NUCLEO = {c for c, _ in _SECCIONES_COMPLETO[:8]}
+_SECCIONES_NUCLEO = {c for c, _ in _SECCIONES_COMPLETO[:9]}
 
 # Tarjeta del sidebar → sección del Reporte Completo. El orden de las
 # tarjetas (arrastrables) define el orden de las secciones del Completo.
@@ -71,6 +73,7 @@ _CARD_A_SECCION = {
     'presupuesto':              'presupuesto',
     'gastos_generales':         'gastos_generales',
     'insumos':                  'insumos',
+    'insumos_sub':              'insumos_sub',
     'acus':                     'acus',
     'metrados':                 'metrados',
     'especificaciones':         'especificaciones',
@@ -493,6 +496,7 @@ class ReportesView(QWidget):
             'acus':                     'rep-acus',
             'metrados':                 'rep-metrados',
             'insumos':                  'rep-insumos',
+            'insumos_sub':              'rep-insumos',
             'especificaciones':         'rep-especificaciones',
             'gastos_generales':         'rep-presupuesto',
             'cronograma':               'rep-cronograma',
@@ -511,6 +515,16 @@ class ReportesView(QWidget):
         orden = [c for c in guardado if c in por_codigo]
         orden += [c for c, _t, _d in pdf_reports.REPORT_TYPES if c not in orden]
         self._orden_cards = orden
+
+        # «Insumos por Sub-presupuesto» solo tiene sentido si el proyecto
+        # tiene más de uno; si no, sería una tarjeta que duplica a «Insumos».
+        try:
+            _tiene_subs = bool(pdf_reports.subpresupuestos_de(self.pid))
+        except Exception:
+            _tiene_subs = False
+        if not _tiene_subs:
+            orden = [c for c in orden if c != 'insumos_sub']
+            self._orden_cards = orden
 
         for codigo in orden:
             _c, titulo, descripcion = por_codigo[codigo]
@@ -953,6 +967,13 @@ class ReportesView(QWidget):
         orden = [_CARD_A_SECCION[c] for c in getattr(self, '_orden_cards', [])
                  if c in _CARD_A_SECCION]
         orden += [c for c, _ in _SECCIONES_COMPLETO if c not in orden]
+        # «Insumos x Sub» solo si el proyecto tiene más de un sub-presupuesto
+        # (igual que su tarjeta): si no, duplicaría la sección «Insumos».
+        try:
+            if not pdf_reports.subpresupuestos_de(self.pid):
+                orden = [c for c in orden if c != 'insumos_sub']
+        except Exception:
+            orden = [c for c in orden if c != 'insumos_sub']
         return orden
 
     def _on_orden_cards(self, codes: list):
@@ -1615,6 +1636,7 @@ class ReportesView(QWidget):
                 'presupuesto':      exportar_presupuesto,
                 'acus':             exportar_acus,
                 'insumos':          exportar_insumos,
+                'insumos_sub':      lambda pid: exportar_insumos(pid, por_sub=True),
                 'metrados':         exportar_metrados,
                 'gastos_generales': exportar_gastos_generales,
                 'completo':         exportar_reporte_completo,
