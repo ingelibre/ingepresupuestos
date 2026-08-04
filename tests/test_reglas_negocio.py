@@ -336,7 +336,6 @@ def test_importador_prs_pie_de_presupuesto():
         'Supervision De Obra':       25560.00,
         'Expediente Tecnico':        35000.00,
         'Liquidación De Obra':        6000.00,
-        'Costo Total Del Proyecto': 598912.99,
     }
     assert abs(tot['cd'] - 377458.27) <= 0.02, f"CD={tot['cd']}"
     vistos = {}
@@ -347,6 +346,10 @@ def test_importador_prs_pie_de_presupuesto():
         assert abs(vistos[nombre] - val) <= 0.02, \
             f"{nombre}: app={vistos[nombre]:.2f} vs PowerCost={val:.2f}"
     assert abs(total - 598912.99) <= 0.02, f"total={total:.2f}"
+    # El renglón del GRAN TOTAL (EsTotal=1 en PiePpto) NO debe importarse:
+    # la app cierra el pie con su propia línea y saldría el monto dos veces.
+    assert not any('COSTO TOTAL' in n.upper() for n in vistos), \
+        f"el gran total se importó como rubro y saldrá duplicado: {list(vistos)}"
 
     # El desagregado también, no solo los totales.
     conn = d.get_db()
@@ -378,7 +381,6 @@ def test_importador_prs_pie_de_presupuesto():
         'Gastos De Supervision': 12000.00,
         'Gastos De Liquidacion':  4500.00,
         'Gastos De Exp. Tec.':    6500.00,
-        'Costo Total De Obra':  213396.74,
     }
     vistos2 = {r['nombre']: r['valor'] for r in (rubros2 or [])}
     for nombre, val in esperado2.items():
@@ -386,6 +388,8 @@ def test_importador_prs_pie_de_presupuesto():
         assert abs(vistos2[nombre] - val) <= 0.02, \
             f"{nombre}: app={vistos2[nombre]:.2f} vs PowerCost={val:.2f}"
     assert abs(total2 - 213396.74) <= 0.02, f"total yarah = {total2:.2f}"
+    assert not any('COSTO TOTAL' in n.upper() for n in vistos2), \
+        f"el gran total se importó como rubro: {list(vistos2)}"
 
 
 def test_importador_prs_subpresupuestos_dentro_del_proyecto():

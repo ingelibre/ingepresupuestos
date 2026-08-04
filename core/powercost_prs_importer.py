@@ -416,6 +416,11 @@ def _leer_pie(q, id_ppto: int, cd: float) -> tuple[list, list]:
         up = nombre.upper()
         if up.startswith('COSTO DIRECTO'):
             continue                      # el CD es la base, no un rubro
+        if _int(f.get('EsTotal')) == 1:
+            # El renglón del gran total (PowerCost lo marca con EsTotal=1) NO
+            # se importa: la app ya cierra el pie con su propia línea de total.
+            # Si se importara saldría el mismo monto dos veces seguidas.
+            continue
         idpos = _int(f.get('IdPos'))
 
         codigo = tipo = None
