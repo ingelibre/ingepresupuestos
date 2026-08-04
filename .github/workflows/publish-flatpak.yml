@@ -81,6 +81,33 @@ jobs:
           echo "GPG_FPR=$FPR" >> "$GITHUB_ENV"
           echo "Firmando con $FPR"
 
+      # El manifiesto toma la fuente de `.staging/src` (ruta relativa a
+      # installer/flatpak). Localmente la prepara build-flatpak.sh con un
+      # rsync que excluye venv, .git, dist, backups y `release/` (que lleva
+      # datos de clientes). Aquí se replica con las MISMAS exclusiones: si
+      # divergen, el Flatpak publicado no coincidiría con el que se prueba
+      # en local.
+      - name: Preparar la fuente limpia
+        run: |
+          set -e
+          rm -rf installer/flatpak/.staging/src
+          mkdir -p installer/flatpak/.staging/src
+          rsync -a \
+            --exclude 'venv/' --exclude '.git/' --exclude 'dist/' \
+            --exclude 'build/' --exclude 'release/' --exclude '.claude/' \
+            --exclude '__pycache__/' --exclude '*.pyc' --exclude 'backups/' \
+            --exclude '*.bak*' --exclude 'node_modules/' \
+            --exclude 'installer/flatpak/.staging/' \
+            --exclude 'installer/flatpak/.flatpak-builder/' \
+            ./ installer/flatpak/.staging/src/
+          # Distribución pública: seed LIMPIO, no el de desarrollo.
+          if [ -f presupuestos_seed_publico.db ]; then
+            cp -f presupuestos_seed_publico.db \
+              installer/flatpak/.staging/src/presupuestos_seed.db
+            echo "usando el seed público"
+          fi
+          du -sh installer/flatpak/.staging/src
+
       - name: Construir el Flatpak
         run: |
           set -e
