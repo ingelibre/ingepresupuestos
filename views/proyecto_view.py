@@ -162,6 +162,7 @@ class _SubPptoTab(QPushButton):
     eliminar  = Signal()      # pide eliminar este sub-presupuesto
     copiar    = Signal()      # copiar este sub-presupuesto completo
     pegar_sub = Signal()      # pegar el sub-presupuesto del clipboard (nuevo)
+    exportar  = Signal()      # sacar este sub-presupuesto a un proyecto nuevo
 
     def __init__(self, nombre: str, editable: bool = True,
                  borrable: bool = False, parent=None):
@@ -186,6 +187,8 @@ class _SubPptoTab(QPushButton):
         if _pc.hay_subppto_clipboard():
             act_paste = menu.addAction(
                 f"{tr('Pegar sub-presupuesto')} «{_pc.nombre_subppto_clipboard()}»")
+        menu.addSeparator()
+        act_export = menu.addAction(tr("Exportar como proyecto nuevo") + "…")
         chosen = menu.exec(event.globalPos())
         if chosen is None:
             return
@@ -197,6 +200,8 @@ class _SubPptoTab(QPushButton):
             self.copiar.emit()
         elif chosen is act_paste:
             self.pegar_sub.emit()
+        elif chosen is act_export:
+            self.exportar.emit()
 
     def _apply_full_name(self, nombre: str):
         """Trunca con elipsis al ancho disponible y propaga al tooltip."""
@@ -10587,6 +10592,8 @@ class ProyectoView(QWidget):
                 btn.eliminar.connect(lambda t=tid, n=tab['nombre']: self._eliminar_sub_ppto(t, n))
             btn.copiar.connect(lambda t=tid, n=tab['nombre']: self._copiar_subppto(t, n))
             btn.pegar_sub.connect(self._pegar_subppto)
+            btn.exportar.connect(
+                lambda t=tid, n=tab['nombre']: self._exportar_subppto_a_proyecto(t, n))
             self._tab_bar_hl.addWidget(btn)
 
         # Botón "+" pegado al lado de las pestañas, mismo estilo pasivo
@@ -10678,6 +10685,85 @@ class ProyectoView(QWidget):
         conn.close()
 
         self._on_sub_ppto_cambiado(nuevo_id)
+
+    def _exportar_subppto_a_proyecto(self, tid, nombre: str):
+        """Saca un sub-presupuesto a un PROYECTO NUEVO e independiente.
+
+        Copia la cabecera del proyecto actual (cliente, ubicación, plazo,
+        porcentajes, moneda…), las partidas del sub con su ACU / metrados /
+        acero / especificaciones, y el pie de presupuesto con sus gastos
+        generales, para que los totales del proyecto nuevo cuadren con lo que
+        aportaba ese sub aquí. El proyecto de origen NO se toca.
+
+        NO se copia el cronograma: sus duraciones y predecesoras cuelgan de
+        `partida_id`, y al copiar las partidas cambian de id (se avisa).
+        """
+        from PySide6.QtWidgets import QInputDialog
+        from utils.i18n import tr
+        from utils import partidas_clipboard as _pclip
+
+        sugerido = nombre or 'Sub-presupuesto'
+        nuevo_nombre, ok = QInputDialog.getText(
+            self, tr("Exportar como proyecto nuevo"),
+            tr("Nombre del proyecto nuevo:"), text=sugerido)
+        if not ok:
+            return
+        nuevo_nombre = (nuevo_nombre or '').strip() or sugerido
+
+        conn = get_db()
+        try:
+            # 1. Cabecera: clonar el proyecto actual salvo lo que identifica
+            #    a la fila y lo que debe empezar de cero.
+            _EXCLUIR = {'id', 'nombre', 'sub_presupuesto', 'creado_en',
+                        'modificado_en', 'favorito', 'estado'}
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(proyectos)")
+                    if r[1] not in _EXCLUIR]
+            src = conn.execute(
+                f"SELECT {','.join(cols)} FROM proyectos WHERE id=?",
+                (self.pid,)
+            ).fetchone()
+            campos = ['nombre', 'sub_presupuesto'] + cols
+            valores = [nuevo_nombre, nombre or 'Principal'] + \
+                      [src[c] for c in cols]
+            cur = conn.execute(
+                f"INSERT INTO proyectos ({','.join(campos)}) "
+                f"VALUES ({','.join('?' * len(campos))})", valores)
+            nuevo_pid = cur.lastrowid
+
+            # 2. Partidas del sub → raíces del Principal del proyecto nuevo.
+            n_part = _pclip.copiar_subppto(conn, self.pid, tid, nombre)
+            _pclip.pegar_subppto(conn, nuevo_pid, None)
+
+            # 3. Pie de presupuesto y gastos generales (para que el total
+            #    del proyecto nuevo se calcule igual que aquí).
+            for tabla in ('pie_rubros', 'gastos_generales'):
+                tcols = [r[1] for r in conn.execute(f"PRAGMA table_info({tabla})")
+                         if r[1] not in ('id', 'proyecto_id')]
+                if not tcols:
+                    continue
+                conn.execute(
+                    f"INSERT INTO {tabla} ({','.join(tcols)}, proyecto_id) "
+                    f"SELECT {','.join(tcols)}, ? FROM {tabla} WHERE proyecto_id=?",
+                    (nuevo_pid, self.pid))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            QMessageBox.critical(self, tr("Exportar sub-presupuesto"),
+                                 f"No se pudo exportar:\n{e}")
+            return
+        conn.close()
+
+        resp = QMessageBox.question(
+            self, tr("Exportar como proyecto nuevo"),
+            f"«{nuevo_nombre}» se creó con {n_part} partidas.\n\n"
+            "Se copiaron los ACU, metrados, acero, especificaciones y el pie "
+            "de presupuesto. El cronograma NO se copia (sus duraciones y "
+            "predecesoras dependen de las partidas originales).\n\n"
+            "¿Abrirlo ahora?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if resp == QMessageBox.Yes:
+            self.cambiar_a_proyecto.emit(nuevo_pid)
 
     def _copiar_subppto(self, tid, nombre: str):
         """Copia el sub-presupuesto completo (nombre + partidas con metrados/
