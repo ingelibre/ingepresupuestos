@@ -47,6 +47,12 @@ modules:
       - type: archive
         url: https://kerberos.org/dist/krb5/1.21/krb5-1.21.3.tar.gz
         sha256: b7a4cd5ead67fb08b980b21abd150ff7217e85ea320c9ed0c6dadd304840ad35
+        # kerberos.org NO responde desde los runners de GitHub (timeout a los
+        # 60 s, 2026-08-04) aunque sí desde una conexión normal. El espejo de
+        # MIT sirve el MISMO archivo (sha256 verificado) y es el sitio oficial
+        # de krb5. Sin esto, la publicación del Flatpak falla en CI.
+        mirror-urls:
+          - https://web.mit.edu/kerberos/dist/krb5/1.21/krb5-1.21.3.tar.gz
 
   - name: ingepresupuestos
     buildsystem: simple
