@@ -585,10 +585,38 @@ class _ValorizacionesPanel(QWidget):
 
     # ── Tabla ────────────────────────────────────────────────────────────────
 
+    def _expandir_subs(self, filas: list) -> list:
+        """Inserta una fila-cabecera por sub-presupuesto (proyectos con más de
+        uno). Devuelve la lista expandida; las cabeceras se marcan con la clave
+        ``_sub`` y NO llevan id de partida.
+
+        Se aplica en `_refrescar_tabla` Y en `_actualizar_valores` con la misma
+        lista, porque el segundo asume que la fila `r` de la tabla es
+        `filas[r]`: si solo una de las dos expandiera, el mapeo se desalinearía
+        y los valores se escribirían en la fila equivocada.
+        """
+        try:
+            from core.pdf_reports import subpresupuestos_de
+            subs = subpresupuestos_de(self.pid)
+        except Exception:
+            subs = []
+        if not subs:
+            return filas
+        nombre_de = {s['id']: s['nombre'] for s in subs}
+        out, actual = [], object()
+        for f in filas:
+            sid = f.get('sub_presupuesto_id')
+            if sid != actual:
+                actual = sid
+                out.append({'_sub': nombre_de.get(sid, '—')})
+            out.append(f)
+        return out
+
     def _refrescar_tabla(self):
         if not self._val_id:
             return
         filas, resumen = V.get_valorizacion_detalle(self._val_id)
+        filas = self._expandir_subs(filas)
         # Editable solo si la valorización está abierta Y la obra «En ejecución».
         abierta = (resumen.get('estado') == 'abierta') and _co_editable(self._proy)
         dm = get_decimales_metrado()
@@ -596,12 +624,18 @@ class _ValorizacionesPanel(QWidget):
 
         # Profundidad jerárquica = puntos del ítem relativos al más superficial
         # (igual que el presupuesto) → sangría de la descripción.
-        dots = [(f['item'] or '').count('.') for f in filas]
+        dots = [(f['item'] or '').count('.') for f in filas if '_sub' not in f]
         min_dots = min(dots) if dots else 0
 
         self.tbl.blockSignals(True)
+        # Los spans de las cabeceras de sub sobreviven al setRowCount y
+        # se solaparían con la carga siguiente.
+        self.tbl.clearSpans()
         self.tbl.setRowCount(len(filas))
         for r, f in enumerate(filas):
+            if '_sub' in f:
+                self._fila_sub(r, f['_sub'])
+                continue
             self._fila_valor(r, f, min_dots, dm, moneda, abierta)
         self.tbl.blockSignals(False)
         # Dimensionar columnas UNA vez por carga completa (no en cada edición).
@@ -625,6 +659,23 @@ class _ValorizacionesPanel(QWidget):
         self.tbl_total.setVisible(True)
         self._pintar_total(resumen, moneda)
         self._pintar_resumen(resumen)
+
+    def _fila_sub(self, r, nombre: str):
+        """Fila-cabecera de sub-presupuesto: negrita + subrayado, mismo estilo
+        que los títulos de nivel 1 del presupuesto. Sin id de partida, así que
+        `_on_item_changed` la ignora (lee UserRole y sale si es None)."""
+        self.tbl.setSpan(r, COL_ITEM, 1, NCOLS)
+        it = QTableWidgetItem(nombre)
+        it.setToolTip(nombre)
+        fnt = it.font(); fnt.setBold(True); fnt.setUnderline(True)
+        it.setFont(fnt)
+        it.setForeground(QColor(SLATE_700))
+        it.setBackground(QColor(SILVER_200))
+        it.setFlags(Qt.ItemIsEnabled)
+        it.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.tbl.setItem(r, COL_ITEM, it)
+        for c in range(COL_ITEM + 1, NCOLS):
+            self.tbl.setItem(r, c, None)
 
     def _fila_valor(self, r, f, min_dots, dm, moneda, abierta):
         es_tit = f['es_titulo']
@@ -820,6 +871,9 @@ class _ValorizacionesPanel(QWidget):
         if not self._val_id:
             return
         filas, resumen = V.get_valorizacion_detalle(self._val_id)
+        # MISMA expansión que _refrescar_tabla: aquí el índice `r` tiene que
+        # seguir apuntando a la misma fila de la tabla.
+        filas = self._expandir_subs(filas)
         dm = get_decimales_metrado()
         moneda = self._proy.get('moneda', 'Soles')
         def money(v):
@@ -827,6 +881,8 @@ class _ValorizacionesPanel(QWidget):
         self.tbl.blockSignals(True)
         # Solo cambian Actual, Acumulado y Saldo (Anterior/Base son fijos).
         for r, f in enumerate(filas):
+            if '_sub' in f:
+                continue
             base = f['base_val'] or 0
             es_tit = f['es_titulo']
             niv = f.get('nivel', 1) or 1
@@ -1598,8 +1654,35 @@ class _CuadernoPanel(QWidget):
 
     # ── Carga / render ───────────────────────────────────────────────────────
 
+    def _expandir_subs(self, partidas: list) -> list:
+        """Inserta una fila-cabecera por sub-presupuesto (proyectos con más de
+        uno). La cabecera va marcada con ``_sub`` y con ``es_titulo=1`` para
+        que todo el código existente la trate como no editable (los guards de
+        `_es_titulo_row` ya la saltan); `id=None` la deja fuera de los
+        mapeos fila→partida."""
+        try:
+            from core.pdf_reports import subpresupuestos_de
+            subs = subpresupuestos_de(self.pid)
+        except Exception:
+            subs = []
+        if not subs:
+            return partidas
+        nombre_de = {s['id']: s['nombre'] for s in subs}
+        out, actual = [], object()
+        for p in partidas:
+            sid = p.get('sub_presupuesto_id')
+            if sid != actual:
+                actual = sid
+                out.append({'_sub': nombre_de.get(sid, '—'), 'id': None,
+                            'item': '', 'descripcion': nombre_de.get(sid, '—'),
+                            'unidad': '', 'nivel': 1, 'es_titulo': 1,
+                            'metrado': 0, 'precio_unitario': 0,
+                            'sub_presupuesto_id': sid})
+            out.append(p)
+        return out
+
     def cargar(self):
-        self._partidas = PD.partidas_proyecto(self.pid)
+        self._partidas = self._expandir_subs(PD.partidas_proyecto(self.pid))
         no_titulos = [p for p in self._partidas if not p['es_titulo']]
         sin_ppto = (len(no_titulos) == 0)
         self._split.setVisible(not sin_ppto)
@@ -1666,6 +1749,7 @@ class _CuadernoPanel(QWidget):
         self._rendering = True
         self.tbl_fix.blockSignals(True)
         self.tbl_dias.blockSignals(True)
+        self.tbl_fix.clearSpans()
         self.tbl_fix.setRowCount(nrows)
         self.tbl_dias.setColumnCount(len(partes))
         self._mes_header.set_cols(day_cols)
@@ -1682,6 +1766,22 @@ class _CuadernoPanel(QWidget):
             self._celda(self.tbl_fix, r, CUA_DESC, p['descripcion'], left=True,
                         es_tit=es_tit, niv=niv, depth=depth)
             self.tbl_fix.item(r, CUA_ITEM).setData(Qt.UserRole, p['id'])
+            if '_sub' in p:
+                # Cabecera de sub-presupuesto: negrita + subrayado, mismo
+                # estilo que los títulos N1. Ocupa Ítem+Descripción.
+                self.tbl_fix.setSpan(r, CUA_ITEM, 1, 2)
+                it_s = self.tbl_fix.item(r, CUA_ITEM)
+                it_s.setText(p['_sub'])
+                it_s.setToolTip(p['_sub'])
+                _f = it_s.font(); _f.setBold(True); _f.setUnderline(True)
+                it_s.setFont(_f)
+                it_s.setForeground(QColor(SLATE_700))
+                it_s.setBackground(QColor(SILVER_200))
+                for c in range(CUA_UND, CUA_NFIJAS):
+                    self._celda(self.tbl_fix, r, c, "")
+                for j in range(len(partes)):
+                    self._celda(self.tbl_dias, r, j, "")
+                continue
             if es_tit:
                 for c in range(CUA_UND, CUA_NFIJAS):
                     self._celda(self.tbl_fix, r, c, "")
@@ -1716,6 +1816,11 @@ class _CuadernoPanel(QWidget):
         # (absorbe el ancho que da el split). No se usa ancho fijo.
         for c in (CUA_ITEM, CUA_UND, CUA_BASE, CUA_ACUM):
             self.tbl_fix.resizeColumnToContents(c)
+        # Las cabeceras de sub-presupuesto viven en la col Ítem (con span sobre
+        # Descripción), y `resizeColumnToContents` mide SU texto: sin tope, un
+        # nombre largo estiraba la columna hasta comerse la Descripción.
+        if self.tbl_fix.columnWidth(CUA_ITEM) > 80:
+            self.tbl_fix.setColumnWidth(CUA_ITEM, 80)
         if self.tbl_fix.columnWidth(CUA_BASE) < 70:
             self.tbl_fix.setColumnWidth(CUA_BASE, 70)
         if self.tbl_fix.columnWidth(CUA_ACUM) < 80:

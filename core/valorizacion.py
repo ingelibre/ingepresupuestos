@@ -253,6 +253,9 @@ def get_valorizacion_detalle(val_id: int) -> tuple[list[dict], dict]:
             'unidad': p['unidad'], 'nivel': p['nivel'],
             'es_titulo': p['es_titulo'], 'precio_unitario': p['precio_unitario'] or 0,
             'origen': origen_map.get(p['id'], 'manual'),
+            # Para que la grilla pueda separar por sub-presupuesto (proyectos
+            # importados de PowerCost con varios). None = Principal.
+            'sub_presupuesto_id': p['sub_presupuesto_id'],
         }
         if p['es_titulo']:
             base_val = _subtotal(p['item'], 'base_val')

@@ -603,7 +603,8 @@ def partidas_proyecto(proyecto_id: int) -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT id, item, descripcion, unidad, nivel, es_titulo, metrado, "
-            "precio_unitario FROM partidas WHERE proyecto_id=? ORDER BY item",
+            "precio_unitario, sub_presupuesto_id "
+            "FROM partidas WHERE proyecto_id=? ORDER BY item",
             (proyecto_id,)).fetchall()
         return [dict(r) for r in rows]
     finally:
