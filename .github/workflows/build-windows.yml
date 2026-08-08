@@ -156,13 +156,16 @@ jobs:
 
       # El .msix va SOLO a Partner Center (Microsoft Store) — no es un binario
       # público, así que no se publica en el Release ni en R2. Se guarda como
-      # artifact aparte con retención larga para tener tiempo de subirlo.
+      # artifact aparte. Retención CORTA a propósito: con el repo privado
+      # (2026-08) el almacenamiento de artifacts está limitado a 500 MB y un
+      # solo .msix pesa ~313 MB — a 90 días, dos releases seguidos bloqueaban
+      # los uploads de Actions. Subirlo a Partner Center dentro de la semana.
       - name: Subir MSIX (artifact para Partner Center)
         uses: actions/upload-artifact@v4
         with:
           name: ingepresupuestos-msix
           path: dist/IngePresupuestos-*.msix
-          retention-days: 90
+          retention-days: 7
 
       # Si el workflow se disparó por tag (v0.5.0, v1.0.0, etc.),
       # publica AMBOS archivos en la sección Releases del repo.

@@ -1,0 +1,150 @@
+AVISOS DE COMPONENTES DE TERCEROS — IngePresupuestos
+=====================================================
+
+IngePresupuestos 2.9.0 y posteriores es software propietario
+(Copyright (C) 2026 Marco Sumari / Sumari SAC), pero incorpora y distribuye
+componentes de terceros que se rigen por sus propias licencias.
+
+Este archivo cumple las obligaciones de atribución de dichas licencias. Nada
+en el Contrato de Licencia de Usuario Final de IngePresupuestos restringe los
+derechos que estas licencias otorgan al Usuario sobre estos componentes.
+
+
+1. Qt / PySide6 — LGPL-3.0  (IMPORTANTE)
+-----------------------------------------
+
+  PySide6 6.11.1 y shiboken6 6.11.1
+  Copyright (C) The Qt Company Ltd. y colaboradores
+  Licencia: LGPL-3.0-only  https://www.gnu.org/licenses/lgpl-3.0.html
+  Fuente:   https://download.qt.io/official_releases/QtForPython/
+
+  IngePresupuestos usa Qt bajo los términos de la LGPL-3.0, no bajo licencia
+  comercial. La LGPL-3.0 exige que el usuario final pueda reemplazar las
+  bibliotecas de Qt por versiones propias o modificadas. Por eso:
+
+    * La aplicación se distribuye en formato de carpeta ("onedir"), con las
+      bibliotecas de Qt como archivos separados y reemplazables dentro de
+      _internal/PySide6/, y NO como ejecutable único ("onefile").
+    * El usuario puede sustituir esas bibliotecas por otra compilación
+      compatible de Qt y volver a ejecutar la aplicación.
+    * El código fuente de Qt/PySide6 está disponible en el enlace de arriba.
+
+  ESTA CONDICIÓN ES OBLIGATORIA. No cambiar el empaquetado a "onefile" sin
+  adquirir previamente una licencia comercial de Qt.
+
+
+2. Bibliotecas de Python
+-------------------------
+
+  Nombre            Versión    Licencia
+  ----------------  ---------  --------------------------------------------
+  anthropic         0.117.0    MIT
+  openai            2.46.0     Apache-2.0
+  groq              1.5.0      Apache-2.0
+  google-genai      2.12.1     Apache-2.0
+  httpx             0.28.1     BSD-3-Clause
+  pydantic          2.13.4     MIT
+  certifi           2026.6.17  MPL-2.0
+  cryptography      49.0.0     Apache-2.0 OR BSD-3-Clause
+  numpy             2.5.1      BSD-3-Clause y otras (ver su LICENSE)
+  openpyxl          3.1.5      MIT
+  et-xmlfile        2.0.0      MIT
+  xlrd              2.0.2      BSD
+  python-docx       1.2.0      MIT
+  odfpy             1.4.1      Apache-2.0  (se ejerce la opción Apache del
+                               licenciamiento múltiple del proyecto)
+  reportlab         5.0.0      BSD-3-Clause
+  pdfplumber        0.11.10    MIT
+  pypdf             6.14.2     BSD-3-Clause
+  Pillow            12.3.0     MIT-CMU
+  pyodbc            5.3.0      MIT
+  access-parser     0.0.6      Apache-2.0
+  rapidfuzz         3.14.5     MIT
+  werkzeug          3.1.8      BSD-3-Clause
+  model2vec         0.8.2      MIT
+  tokenizers        0.23.1     Apache-2.0
+  safetensors       0.8.0      Apache-2.0
+  huggingface-hub   1.24.0     Apache-2.0
+
+  El texto íntegro de cada licencia acompaña a la biblioteca correspondiente
+  dentro de _internal/ en la distribución.
+
+
+3. PyInstaller (empaquetado)
+-----------------------------
+
+  PyInstaller 6.21.0 — GPLv2-or-later con excepción especial que permite
+  expresamente empaquetar y distribuir programas no libres, incluidos los
+  comerciales. El "bootloader" que se distribuye dentro del ejecutable está
+  cubierto por esa excepción.
+  https://pyinstaller.org/en/stable/license.html
+
+
+4. Tipografías
+---------------
+
+  Inter — SIL Open Font License 1.1
+  Copyright (C) The Inter Project Authors
+  https://github.com/rsms/inter · https://openfontlicense.org
+
+  Bootstrap Icons — MIT
+  Copyright (C) The Bootstrap Authors
+  https://github.com/twbs/icons
+
+
+5. Iconografía
+---------------
+
+  Tabler Icons — MIT
+  Copyright (c) 2020-2026 Paweł Kuna
+  https://github.com/tabler/tabler-icons
+  Set principal de la interfaz (resources/icons/elementary/24/ — la carpeta
+  conserva su nombre histórico, pero el contenido es Tabler).
+
+  Material Symbols — Apache-2.0
+  Copyright (C) Google LLC
+  https://fonts.google.com/icons
+  (icono «psychology»)
+
+  El detalle archivo por archivo consta en resources/icons/PROCEDENCIA.md,
+  que forma parte integrante de estos avisos.
+
+
+6. Cartografía
+---------------
+
+  El módulo de ubicación muestra teselas servidas en línea por terceros y no
+  las redistribuye:
+
+    * OpenStreetMap — datos © colaboradores de OpenStreetMap, bajo Open
+      Database License (ODbL). https://www.openstreetmap.org/copyright
+    * Esri World Imagery (capa satelital) — © Esri y sus proveedores de
+      imágenes, sujeto a los términos de uso de Esri.
+
+  La atribución correspondiente se muestra en pantalla junto al mapa.
+
+
+7. Datos de ubigeo del Perú
+----------------------------
+
+  resources/ubigeo_peru.json contiene los códigos de ubigeo, nombres de
+  distrito, provincia y departamento, y coordenadas de capitales distritales
+  del Perú, elaborados a partir de información pública del Instituto Nacional
+  de Estadística e Informática (INEI).
+
+
+8. Modelo de recuperación semántica
+------------------------------------
+
+  potion-multilingual-128M (MinishLab) — modelo de embeddings estáticos
+  empleado por la función «Sugerir partidas».
+  https://huggingface.co/minishlab/potion-multilingual-128M
+
+  Se descarga durante la compilación y se distribuye con la aplicación en
+  resources/models/. Su licencia consta en la ficha del modelo y debe
+  reproducirse en resources/models/LICENSE junto al modelo descargado.
+
+
+---------------------------------------------------------------------------
+Consultas sobre estos avisos: ing.sumari@gmail.com
+Última revisión: agosto de 2026 — revisar en cada cambio de dependencias.

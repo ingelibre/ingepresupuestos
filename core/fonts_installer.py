@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """Instala la fuente Inter (bundleada en `resources/fonts/`) en el directorio
 de fuentes del usuario para que otros programas — LibreOffice, MS Word,
 Excel, etc. — también puedan usarla al abrir los reportes .docx/.odt/.xlsx

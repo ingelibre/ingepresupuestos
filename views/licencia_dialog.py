@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """Diálogo de licencia — activación, estado, links de compra.
 
 Dos modos:
@@ -64,7 +64,7 @@ class LicenciaDialog(QDialog):
         self._lic = L.cargar()
         self.setWindowTitle("Licencia de IngePresupuestos")
         self.setWindowModality(Qt.WindowModal)
-        self.setMinimumSize(560, 540)
+        self.setMinimumSize(560, 680)
         self._build()
 
     def _build(self):
@@ -229,7 +229,7 @@ class LicenciaDialog(QDialog):
         vl.addWidget(hd)
 
         sub = QLabel(
-            "Pegá la clave que recibiste por mail/WhatsApp, o seleccioná "
+            "Pega la clave que recibiste por correo/WhatsApp, o selecciona "
             "el archivo .lic adjunto."
         )
         sub.setWordWrap(True)
@@ -241,7 +241,7 @@ class LicenciaDialog(QDialog):
 
         self.txt_clave = QTextEdit()
         self.txt_clave.setPlaceholderText(
-            "Pegá la clave aquí… (ej. eyJlbWFpbCI6...)"
+            "Pega la clave aquí… (ej. eyJlbWFpbCI6...)"
         )
         self.txt_clave.setMinimumHeight(80)
         self.txt_clave.setMaximumHeight(110)
@@ -292,7 +292,7 @@ class LicenciaDialog(QDialog):
         vl.setContentsMargins(14, 12, 14, 12)
         vl.setSpacing(8)
 
-        hd = QLabel("¿No tienes licencia? Adquirí una")
+        hd = QLabel("¿No tienes licencia? Adquiere una")
         f = QFont(); f.setBold(True)
         hd.setFont(f)
         hd.setStyleSheet(
@@ -301,11 +301,11 @@ class LicenciaDialog(QDialog):
         vl.addWidget(hd)
 
         nota = QLabel(
-            "<b>Gratis para siempre:</b> todos los reportes en PDF, "
+            "<b>Gratis para siempre:</b> los reportes del presupuesto en PDF, "
             "importadores de Delphin / PowerCost / S10, Tuxia con tu API key, "
             "y la app completa.<br>"
-            "<b>Licencia desbloquea</b> los reportes editables — Excel, ODS, "
-            "Word, ODT y MS Project (.xml)."
+            "<b>La licencia desbloquea</b> los reportes editables — Excel, ODS, "
+            "Word, ODT y MS Project — y los reportes de Control de Obra."
         )
         nota.setTextFormat(Qt.RichText)
         nota.setWordWrap(True)
@@ -323,6 +323,9 @@ class LicenciaDialog(QDialog):
             c = QFrame()
             c.setObjectName("cardPrecio")
             c.setAttribute(Qt.WA_StyledBackground, True)
+            # Sin mínimo, el layout comprime la card cuando el diálogo va
+            # justo de alto y las 3 líneas se encimaban (visto en QA 2.9.0).
+            c.setMinimumHeight(68)
             c.setStyleSheet(
                 f"QFrame#cardPrecio {{ background:{WHITE};"
                 f" border:1px solid {SILVER_300}; border-radius:6px; }}"
@@ -352,10 +355,10 @@ class LicenciaDialog(QDialog):
             return c
 
         h_precios.addWidget(_card_precio(
-            "Anual", "USD 30", "1 PC · 1 año de updates"
+            "Anual", "S/ 80", "1 PC · 1 año de updates"
         ))
         h_precios.addWidget(_card_precio(
-            "Perpetua", "USD 150", "1 PC · 2 años de updates"
+            "Perpetua", "S/ 300", "1 PC · 2 años de updates"
         ))
         h_precios.addStretch(1)
         vl.addLayout(h_precios)
@@ -437,7 +440,7 @@ class LicenciaDialog(QDialog):
         if not clave:
             QMessageBox.information(
                 self, "Activar licencia",
-                "Pegá la clave o cargá el archivo .lic primero."
+                "Pega la clave o carga el archivo .lic primero."
             )
             return
         ok, msg, lic = L.activar_clave(clave)

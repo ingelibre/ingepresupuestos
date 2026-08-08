@@ -4,16 +4,16 @@ PackageVersion: 2.8.4
 PackageLocale: es-PE
 Publisher: Marco Sumari
 PublisherUrl: https://ingepresupuestos.com
-PublisherSupportUrl: https://github.com/ingelibre/ingepresupuestos/issues
+PublisherSupportUrl: https://ingepresupuestos.com/soporte
 PrivacyUrl: https://ingepresupuestos.com/privacidad
 Author: Ing. Marco Sumari
 PackageName: IngePresupuestos
 PackageUrl: https://ingepresupuestos.com
-License: GPL-3.0-or-later
-LicenseUrl: https://github.com/ingelibre/ingepresupuestos/blob/main/LICENSE
+License: Proprietary
+LicenseUrl: https://ingepresupuestos.com/licencia
 Copyright: Copyright (c) 2026 Marco Sumari / Sumari SAC
-CopyrightUrl: https://github.com/ingelibre/ingepresupuestos/blob/main/LICENSE
-ShortDescription: Software libre de presupuestos de obra con ACU, cronograma Gantt valorizado y 13 reportes profesionales.
+CopyrightUrl: https://ingepresupuestos.com/licencia
+ShortDescription: Software de presupuestos de obra con ACU, cronograma Gantt valorizado y 13 reportes profesionales.
 Description: |-
   IngePresupuestos es el software de presupuestos de obra para ingenieros y
   arquitectos. Elabora presupuestos con Análisis de Costos Unitarios (ACU),
@@ -22,15 +22,14 @@ Description: |-
   exportables a PDF, Excel, Word, ODS y ODT. Importa tus presupuestos existentes
   de S10, PowerCost y Delphin, además de Excel e IFC. Incluye Control de Obra
   (requerimientos, almacén, cuaderno, valorizaciones y curva S) y un asistente con
-  inteligencia artificial opcional (con tu propia clave). Software libre y gratuito
-  (GPL-3.0): todas las funciones incluidas. Tus datos quedan en tu equipo.
+  inteligencia artificial opcional (con tu propia clave). Descarga y uso sin costo:
+  presupuestos, ACU, cronograma, control de obra, importadores y todos los reportes
+  en PDF. La exportación a formatos editables (Excel, Word, ODS, ODT y MS Project)
+  requiere licencia tras 30 días de prueba. Tus datos quedan en tu equipo.
 Moniker: ingepresupuestos
 ReleaseNotes: |-
-  Corrección en metrados: la planilla de acero ya no se copia a otra partida
-  al cambiar de pestaña. Icono de documento propio para los archivos .db.
-  Licencia GPL-3.0 en el instalador. Software libre y gratuito: todas las
-  funciones incluidas.
-ReleaseNotesUrl: https://github.com/ingelibre/ingepresupuestos/releases/tag/v2.8.4
+  Consultar las notas de la versión en https://ingepresupuestos.com
+ReleaseNotesUrl: https://ingepresupuestos.com/novedades
 Tags:
   - presupuestos
   - construccion

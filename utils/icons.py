@@ -1,8 +1,15 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
-"""Cargador de iconos Elementary OS para ingePresupuestos.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+"""Cargador de iconos de ingePresupuestos.
+
+El set de UI es **Tabler Icons** (MIT) desde el cierre del código (2.9.0):
+trazo 2 px sobre 24×24, color por defecto #37474F, colorizable vía
+``icon_colored``. Los archivos conservan los NOMBRES históricos del tema
+elementary (``document-save.svg`` etc.) para no tocar los call-sites — la
+carpeta se sigue llamando ``elementary/24`` solo por eso. Procedencia y
+licencias: ``resources/icons/PROCEDENCIA.md``.
 
 Prioridad:
   1. SVG propio en resources/icons/elementary/24/  (colorizable)
@@ -17,7 +24,7 @@ Uso:
 """
 from pathlib import Path
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 
 _ICON_DIR = Path(__file__).parent.parent / "resources" / "icons" / "elementary" / "24"
 
@@ -141,6 +148,7 @@ def colorize_svg(svg_path: Path, color: str) -> QIcon:
     try:
         txt = svg_path.read_text()
         txt = txt.replace('currentColor', color)
+        txt = txt.replace('#37474F', color)   # slate por defecto del set Tabler
         txt = txt.replace('#000000', color)
         txt = txt.replace('#000', color)
         from PySide6.QtSvg import QSvgRenderer

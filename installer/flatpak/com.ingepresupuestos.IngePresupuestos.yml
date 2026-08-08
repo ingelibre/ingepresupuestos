@@ -66,9 +66,16 @@ modules:
       #    (empaquetado) y pyodbc (solo Windows — en Linux usamos mdbtools).
       - grep -vE '^\s*(pyinstaller|pyodbc)\b' requirements.txt > reqs.txt
       - pip3 install --prefix=${FLATPAK_DEST} --no-warn-script-location -r reqs.txt
-      # 2. Código y datos de la app
+      # 2. Código y datos de la app — SOLO BYTECODE (código cerrado desde
+      #    2.9.0): se copian los .py, se compilan a .pyc legacy (-b, junto al
+      #    fuente) y se borran los .py, igual que hace PyInstaller en el
+      #    AppImage/instalador. Sin este paso el Flatpak instalaba el código
+      #    fuente LEGIBLE en /app/ingepresupuestos.
       - mkdir -p ${FLATPAK_DEST}/ingepresupuestos
       - cp -a core models utils views widgets worker resources main.py presupuestos_seed.db ${FLATPAK_DEST}/ingepresupuestos/
+      - python3 -m compileall -b -q ${FLATPAK_DEST}/ingepresupuestos
+      - find ${FLATPAK_DEST}/ingepresupuestos -name '*.py' -delete
+      - find ${FLATPAK_DEST}/ingepresupuestos -name '__pycache__' -type d -exec rm -rf {} +
       # 3. Lanzador
       - install -Dm755 installer/flatpak/flatpak-launcher.sh ${FLATPAK_DEST}/bin/ingepresupuestos
       # 4. Integración de escritorio

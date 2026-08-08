@@ -1,87 +1,13 @@
-# Edición Flathub de IngePresupuestos
+# Edición Flathub — DESCONTINUADA (era GPL, ≤2.8.8)
 
-Manifiesto y archivos para publicar IngePresupuestos en **Flathub** (la tienda
-de apps de Linux). Es una **edición aparte** de la Flatpak de R2/GitHub
-(`installer/flatpak/`): NO comparten configuración.
+Esta carpeta era la candidatura a Flathub de la época en que IngePresupuestos
+era software libre. **Desde la 2.9.0 el código es propietario y esta edición
+NO debe publicarse**: Flathub construye desde el código fuente y este
+manifiesto instalaría los `.py` legibles (además de que los PRs a Flathub
+nunca llegaron a mergearse).
 
-## Diferencias con las otras ediciones (por reglas de Flathub)
+El canal Flatpak vigente es la **edición sideload** (`installer/flatpak/`),
+que desde el cierre instala solo bytecode (`compileall -b` + borrado de
+`.py`) y se publica firmada en R2 vía `publish-flatpak.yml`.
 
-| Aspecto | Otras ediciones | Flathub |
-|---|---|---|
-| Reportes PDF / Word / Excel | ✅ | ✅ |
-| Reportes **ODT / ODS** | ✅ (LibreOffice del host) | ❌ (Flathub prohíbe salir del sandbox) |
-| Importar `.prs` (PowerCost) | host mdbtools | ✅ mdbtools **embebido** |
-| PySide6 | pip | base-app `io.qt.PySide.BaseApp` |
-| Dependencias Python | pip online | **offline** con hashes (`python3-requirements.yaml`) |
-| Acceso a archivos | `--filesystem=home` | **portal** de archivos |
-
-ODT/ODS degrada solo: sin acceso al host, `core/soffice.py::find_soffice()`
-devuelve `None` y el reporte muestra un aviso (no crashea). No requiere cambios
-de código compartido.
-
-## Archivos
-
-- `com.ingepresupuestos.IngePresupuestos.yml` — manifiesto (lint OK).
-- `com.ingepresupuestos.IngePresupuestos.metainfo.xml` — AppStream (lint OK, con capturas).
-- `com.ingepresupuestos.IngePresupuestos.desktop` — entrada de escritorio.
-- `flathub-launcher.sh` — lanzador dentro del sandbox.
-- `python3-requirements.yaml` — deps Python congeladas (generado, sin PySide6).
-
-## Regenerar las dependencias Python (si cambia requirements.txt)
-
-```bash
-# reqs sin PySide6 (base-app), pyinstaller ni pyodbc (Windows) ni model2vec (Fase 2).
-# --prefer-wheels es OBLIGATORIO para los paquetes compilados: sin él el generador
-# baja el sdist y el build offline falla al compilar (Pillow/cryptography/rapidfuzz/…).
-venv/bin/python flatpak-pip-generator.py \
-  --runtime='org.freedesktop.Sdk//25.08' \
-  --prefer-wheels='pillow,cryptography,rapidfuzz,pydantic-core,cffi,jiter,lxml,markupsafe,pypdfium2' \
-  --requirements-file reqs-flathub.txt \
-  --yaml --output installer/flathub/python3-requirements
-```
-(`flatpak-pip-generator.py` se baja de github.com/flatpak/flatpak-builder-tools)
-
-⚠ **odfpy** no tiene rueda (solo `.egg` + sdist) y el generador elige el `.egg`
-(pip no lo instala). Tras regenerar, corregir a mano su fuente en el yaml al
-`odfpy-1.4.1.tar.gz` (sdist, es Python puro y compila bien).
-
-## Probar el build localmente (PENDIENTE — descarga varios GB)
-
-Requiere el SDK de KDE + los base-apps (org.kde.Sdk//6.10, io.qt.PySide.BaseApp,
-io.qt.qtwebengine.BaseApp):
-
-```bash
-cd installer/flathub
-flatpak install flathub org.kde.Sdk//6.10 org.kde.Platform//6.10   # ~2-3 GB
-flatpak run org.flatpak.Builder --force-clean --install-deps-from=flathub \
-  --user --install builddir com.ingepresupuestos.IngePresupuestos.yml
-flatpak run com.ingepresupuestos.IngePresupuestos
-```
-**Verificar en el build:**
-1. La app abre (PySide6 del base-app en el PYTHONPATH correcto).
-2. Importar/exportar funciona por el **portal** de archivos (sin `--filesystem=home`).
-   Si algún flujo escribe a ruta fija (p.ej. export directo a Descargas), añadir
-   `--filesystem=xdg-download` o justificar `--filesystem=home` en el PR.
-3. Reportes PDF/Word/Excel OK; ODT/ODS muestra aviso (no crash).
-4. `.prs` importa con el mdbtools embebido.
-5. Lint del build: `flatpak run --command=flatpak-builder-lint org.flatpak.Builder builddir builddir`
-
-## Enviar a Flathub (PENDIENTE — tras validar el build)
-
-1. Fork de `github.com/flathub/flathub`.
-2. Rama nueva; copiar a la RAÍZ del repo: el `.yml`, `.metainfo.xml`, `.desktop`,
-   `flathub-launcher.sh` y `python3-requirements.yaml`.
-3. PR contra la rama **`new-pr`** de `flathub/flathub` (NO master).
-4. El bot compila y un revisor humano revisa (días–semanas; puede pedir ajustes).
-5. Al aprobarse, Flathub crea el repo `flathub/com.ingepresupuestos.IngePresupuestos`
-   y da acceso. La "app verificada" (✔) se obtiene luego probando dominio
-   `ingepresupuestos.com`.
-
-## Estado
-
-- ✅ Manifiesto + metainfo + launcher + desktop + deps offline (lint limpio).
-- ✅ **Build local VALIDADO** (2026-07-07): compila limpio, lint OK (solo el aviso
-  esperado `appstream-external-screenshot-url`), la app arranca offscreen sin
-  errores, 14/14 imports OK (PySide6 del base-app, odfpy, rapidfuzz, cryptography,
-  AI SDKs), QtPdf/QtLocation OK, `mdb-export` en `/app/bin` (importar .prs OK).
-- ⏳ PR a `flathub/flathub` (rama `new-pr`) — pendiente de enviar.
+Se conserva la carpeta solo como referencia histórica.

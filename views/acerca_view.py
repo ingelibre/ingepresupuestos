@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """acerca_view — Acerca de + contacto (≈ acerca_de.html de Flask).
 
 Layout:
@@ -63,6 +63,16 @@ def _email_valido(s: str) -> bool:
 def _app_info() -> list[tuple[str, str]]:
     """Ficha técnica del programa. Función (no constante) para que la
     versión y licencia se lean siempre actualizadas."""
+    from core import licencia as L
+    lic = L.cargar()
+    # Forma corta: el estado completo (con titular) no cabe en la fila de la
+    # ficha — el detalle vive en el diálogo «Activar licencia…».
+    if lic.tipo == 'perpetua' and lic.vigente():
+        lic_str = "Perpetua · activa"
+    elif lic.tipo == 'anual' and lic.vigente():
+        lic_str = f"Anual · hasta {lic.expira}"
+    else:
+        lic_str = lic.estado_str()
     return [
         ("Versión",          CURRENT_VERSION),
         ("Desarrollado por", "Ing. Marco Sumari"),
@@ -71,7 +81,7 @@ def _app_info() -> list[tuple[str, str]]:
         ("Backend",          "Python 3 + SQLite 3"),
         ("UI",               "PySide6 (Qt 6)"),
         ("Reportes",         "PDF · Excel · ODS · Word · ODT"),
-        ("Licencia",         "Software Libre · GPL-3.0-or-later"),
+        ("Licencia",         lic_str),
     ]
 
 
@@ -121,126 +131,6 @@ class _SendWorker(QThread):
             self.failed.emit(msg)
         except Exception as e:
             self.failed.emit(f"Error de red: {e}")
-
-
-# ── Diálogo "Apoyar el proyecto" (software libre) ──
-class _ApoyarDialog(QDialog):
-    """Diálogo de apoyo/donaciones. Muestra QR Yape + CCI + estrella GitHub,
-    todo bundleado (funciona sin conexión). Los datos son constantes fáciles
-    de editar."""
-
-    YAPE_NUMERO  = "998839090"
-    YAPE_TITULAR = "Marco Sum*"   # como lo enmascara Yape al pagar
-    CCI          = "0093 1320 7930 5176 8084"
-    GITHUB_URL   = "https://github.com/tuxiasumari/ingepresupuestos"
-    WEB_APOYAR   = "https://ingepresupuestos.com/apoyar"
-
-    _BTN_SS = (
-        f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-        f" border:1px solid {SILVER_300}; border-radius:6px;"
-        f" padding:7px 12px; font-size:12px; font-weight:600; }}"
-        f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-        f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-    )
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Apoyar IngePresupuestos")
-        self.setModal(True)
-        self.setStyleSheet(f"QDialog {{ background:{WHITE}; }}")
-        self._build()
-
-    def _abrir(self, url: str):
-        from PySide6.QtGui import QDesktopServices
-        from PySide6.QtCore import QUrl
-        QDesktopServices.openUrl(QUrl(url))
-
-    def _build(self):
-        v = QVBoxLayout(self)
-        v.setContentsMargins(24, 22, 24, 20)
-        v.setSpacing(12)
-
-        titulo = QLabel("💛  Apoyar IngePresupuestos")
-        f = QFont(); f.setPointSize(14); f.setBold(True)
-        titulo.setFont(f)
-        titulo.setStyleSheet(
-            f"color:{SLATE_700}; background:transparent; border:none;"
-        )
-        v.addWidget(titulo)
-
-        sub = QLabel(
-            "Es <b>software libre y gratuito</b>. Si te ayuda en tu trabajo, "
-            "puedes apoyar su desarrollo:"
-        )
-        sub.setWordWrap(True)
-        sub.setStyleSheet(
-            f"color:{SLATE_500}; font-size:12px; background:transparent; border:none;"
-        )
-        v.addWidget(sub)
-
-        # QR Yape + datos
-        fila = QHBoxLayout(); fila.setSpacing(16)
-        qr = QLabel()
-        # OJO: NADA de `padding` en un QLabel con pixmap → Qt recorta la imagen
-        # al content-rect (reducido por el padding) hasta que se redimensiona
-        # la ventana. Fijar el tamaño del label = tamaño del pixmap evita el
-        # recorte y hace que el layout reserve el espacio correcto desde el
-        # primer render. El QR de Yape ya trae su propia zona de silencio.
-        qr.setStyleSheet("background:white; border:none;")
-        qr.setAlignment(Qt.AlignCenter)
-        qr_path = BASE_DIR / "resources" / "qr_yape.png"
-        if qr_path.exists():
-            _pm = QPixmap(str(qr_path)).scaled(
-                240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            qr.setPixmap(_pm)
-            qr.setFixedSize(_pm.size())
-        fila.addWidget(qr)
-
-        datos = QLabel(
-            f"<b style='font-size:13px'>Yape</b><br>"
-            f"<span style='font-size:15px;color:{SLATE_700}'>{self.YAPE_NUMERO}</span><br>"
-            f"<span style='color:{SLATE_500}'>{self.YAPE_TITULAR}</span>"
-        )
-        datos.setStyleSheet(
-            f"color:{SLATE_700}; background:transparent; border:none;"
-        )
-        datos.setAlignment(Qt.AlignVCenter)
-        fila.addWidget(datos, 1)
-        v.addLayout(fila)
-
-        cci = QLabel(
-            "<b>Transferencia</b> (CCI Scotiabank — desde cualquier banco):<br>"
-            f"<span style='font-family:monospace;font-size:13px'>{self.CCI}</span>"
-        )
-        cci.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        cci.setStyleSheet(
-            f"color:{SLATE_700}; font-size:12px; background:transparent; border:none;"
-        )
-        v.addWidget(cci)
-
-        # Enlaces
-        links = QHBoxLayout(); links.setSpacing(8)
-        btn_gh = QPushButton("⭐  Estrella en GitHub")
-        btn_gh.setCursor(Qt.PointingHandCursor)
-        btn_gh.setStyleSheet(self._BTN_SS)
-        btn_gh.clicked.connect(lambda: self._abrir(self.GITHUB_URL))
-        links.addWidget(btn_gh)
-        btn_web = QPushButton("🌐  Donar en línea")
-        btn_web.setCursor(Qt.PointingHandCursor)
-        btn_web.setStyleSheet(self._BTN_SS)
-        btn_web.clicked.connect(lambda: self._abrir(self.WEB_APOYAR))
-        links.addWidget(btn_web)
-        v.addLayout(links)
-
-        btn_close = QPushButton("Cerrar")
-        btn_close.setCursor(Qt.PointingHandCursor)
-        btn_close.setStyleSheet(self._BTN_SS)
-        btn_close.clicked.connect(self.accept)
-        v.addWidget(btn_close, alignment=Qt.AlignRight)
-
-        # Abrir ya con el tamaño correcto (evita el primer render "apretado").
-        self.adjustSize()
 
 
 # ── Vista principal ──
@@ -431,23 +321,23 @@ class AcercaView(QWidget):
         btn_update.clicked.connect(self._buscar_actualizaciones)
         col.addWidget(btn_update)
 
-        # Software libre — botón de apoyo (donaciones) en lugar de licencia
-        btn_donar = QPushButton("💛  Apoyar el proyecto")
-        btn_donar.setCursor(Qt.PointingHandCursor)
-        btn_donar.setFixedHeight(36)
-        btn_donar.setStyleSheet(
+        # Estado de licencia y activación de clave
+        btn_licencia = QPushButton("🔑  Activar licencia…")
+        btn_licencia.setCursor(Qt.PointingHandCursor)
+        btn_licencia.setFixedHeight(36)
+        btn_licencia.setStyleSheet(
             f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
             f" border:1px solid {SILVER_300}; border-radius:6px;"
             f" padding:6px 14px; font-size:12px; font-weight:600; }}"
             f"QPushButton:hover {{ background:{ORANGE_SOFT};"
             f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
         )
-        btn_donar.clicked.connect(self._apoyar_proyecto)
-        col.addWidget(btn_donar)
+        btn_licencia.clicked.connect(self._abrir_licencia)
+        col.addWidget(btn_licencia)
 
         lbl_libre = QLabel(
-            "Software libre bajo licencia GPL-3.0.\n"
-            "© 2026 Marco Sumari · Sumari SAC"
+            "© 2026 Marco Sumari · Sumari SAC\n"
+            "Todos los derechos reservados."
         )
         lbl_libre.setWordWrap(True)
         lbl_libre.setStyleSheet(
@@ -467,9 +357,10 @@ class AcercaView(QWidget):
         from views.update_dialog import lanzar_check
         lanzar_check(self, silencioso=False)
 
-    def _apoyar_proyecto(self):
-        """Muestra el diálogo de apoyo/donaciones (Yape QR + CCI + GitHub)."""
-        _ApoyarDialog(self).exec()
+    def _abrir_licencia(self):
+        """Abre el diálogo de licencia — estado, activación de clave y compra."""
+        from views.licencia_dialog import mostrar_dialogo_licencia
+        mostrar_dialogo_licencia(self.window())
 
     # ── Columna derecha: contacto ──
     def _build_col_der(self) -> QWidget:

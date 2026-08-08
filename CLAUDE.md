@@ -2,11 +2,15 @@
 
 App de escritorio PySide6 (Qt 6) multiplataforma para la elaboración de **presupuestos de obra** (ingeniería y arquitectura): análisis de costos unitarios (ACU), cronograma Gantt valorizado con ruta crítica (CPM), metrados (incluido acero), fórmula polinómica e índices INEI, Control de Obra y 13 reportes profesionales.
 
-**Autor:** Ing. Marco Sumari · **Software libre — GPL-3.0-or-later** · Versión actual: **2.8.6**
+**Autor:** Ing. Marco Sumari · **Software propietario** (© Sumari SAC) · Versión actual: **2.8.6**
 
-> Software libre y gratuito desde 2.8.0: todas las funciones incluidas. El sistema de licencia es **vestigial** (`core/licencia.py::puede_premium()` → `True`; queda como limpieza opcional). El changelog detallado vive en `git log`.
+> **Código cerrado desde la 2.9.0.** Las versiones ≤2.8.8 se publicaron bajo GPL-3.0-or-later y siguen siéndolo (archivo en `backups/gpl-archivo-2.8.x/`; ver su `LEEME.md` — obligación GPLv3 §6 vigente hasta 2029). Repositorio PRIVADO.
+>
+> **Candado premium ACTIVO** (`core/licencia.py`): trial de 30 días full; luego se bloquean los **exports editables** (Excel/ODS/Word/ODT/MSProject, feature `export_editable`) y **TODOS los reportes de Control de Obra incluido PDF** (feature `reporte_control_obra`, gate único `_gate_reporte_editable` en `control_obra_view.py`; la VISTA sigue gratis) — el resto, incluidos los PDF del Centro de Reportes, es gratis para siempre. Claves firmadas RSA-2048 (RSA-PSS SHA-256), emitidas con `scripts/gen_license.py`; la privada vive en `~/.ingepresupuestos-licencias/`, NUNCA en el repo. `cargar()` re-verifica la firma en cada arranque: no basta editar `license.json`.
+>
+> Al tocar dependencias o recursos, actualizar `THIRD-PARTY-NOTICES.txt`. **El build DEBE seguir siendo `onedir`** — es requisito de la LGPL-3.0 de Qt (ver notas). El changelog detallado vive en `git log`.
 
-Repo: `github.com/ingelibre/ingepresupuestos` · Web: `ingepresupuestos.com` · Docs: `docs.ingepresupuestos.com`
+Web: `ingepresupuestos.com` · Docs: `docs.ingepresupuestos.com`
 
 ---
 
@@ -233,7 +237,7 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 ## Convenciones rápidas
 
 - **Diálogos modales:** `setWindowModality(Qt.WindowModal)` (NO `setModal(True)`); mejor anclar al `_root_stack`.
-- **Iconografía:** SVGs elementary OS vía `utils/icons.py::icon("alias")`. NO emojis para UI.
+- **Iconografía:** `utils/icons.py::icon("alias")`. NO emojis para UI. El set es **Tabler Icons (MIT)** con los NOMBRES de archivo históricos de elementary (la carpeta `elementary/24/` se llama así solo por compatibilidad). Icono nuevo = Tabler outline con `stroke="#37474F"`; **NUNCA copiar iconos de temas del sistema** (son GPL/CC-BY-SA — ya pasó y hubo que reemplazar 49). Ver `resources/icons/PROCEDENCIA.md`.
 - **Árboles: padre por prefijo de ítem SIEMPRE con dict ítem→nodo** (O(1); iterar es O(n²)).
 - **ProyectoView abre en 2 etapas:** pestaña visible con árbol → `_completar_panel_tabs` (30 ms después). NO acceder a widgets del panel tabs antes de esa cadena.
 - **`QT_SCALE_FACTOR`** leído ANTES de `QApplication()`. Stylesheet global + Inter registrados en `main.py` antes de las ventanas.

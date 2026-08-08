@@ -1,7 +1,7 @@
 ; Script Inno Setup para IngePresupuestos.
 ;
 ; Genera un instalador .exe profesional para Windows con wizard en español,
-; licencia (GNU GPL v3), accesos directos, registro en "Agregar o quitar
+; licencia (contrato de usuario final), accesos directos, registro en "Agregar o quitar
 ; programas" y desinstalador automático.
 ;
 ; Compilar local (necesita Inno Setup 6+ instalado):
@@ -48,7 +48,7 @@ DefaultGroupName={#MyAppName}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
-; Archivo de licencia que el usuario debe aceptar (software libre, GNU GPL v3).
+; Contrato de licencia que el usuario debe aceptar antes de instalar.
 LicenseFile=LICENCIA.txt
 
 ; Salida — donde queda el setup.exe compilado y cómo se llama.

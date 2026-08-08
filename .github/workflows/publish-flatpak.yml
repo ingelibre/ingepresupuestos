@@ -140,7 +140,7 @@ jobs:
           Branch=master
           Url=https://downloads.ingepresupuestos.com/flatpak/repo/
           Homepage=https://ingepresupuestos.com
-          Comment=Software libre de presupuestos de obra
+          Comment=Presupuestos de obra civil
           Icon=https://ingepresupuestos.com/images/logo.png
           IsRuntime=false
           GPGKey=$KEY

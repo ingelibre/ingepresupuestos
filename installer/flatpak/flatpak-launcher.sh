@@ -9,4 +9,4 @@
 PYVER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 export PYTHONPATH="/app/lib/python${PYVER}/site-packages:${PYTHONPATH}"
 cd /app/ingepresupuestos || exit 1
-exec python3 main.py "$@"
+exec python3 main.pyc "$@"

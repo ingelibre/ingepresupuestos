@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """Asistente local — análisis y tips sin IA.
 
 Funciona como fallback cuando no hay conexión / API key, y como
@@ -122,7 +122,7 @@ TIPS = [
     "En proyectos por contrata-suma alzada, el riesgo cae sobre el contratista; metrado exacto = $$.",
     "En precios unitarios, el riesgo cae sobre el Estado; ACU detallado y específico = sin discusiones.",
     # ── Curiosidades / mensajes culturales ───────────────────────────────
-    "ingePresupuestos nació para reemplazar S10 con software libre y mejor UX. ¡Estás contribuyendo a esa misión!",
+    "ingePresupuestos nació para darle a los ingenieros peruanos una alternativa a S10 con mejor UX. ¡Gracias por usarlo!",
     "Tux, la mascota de Linux, nació en 1996 dibujado por Larry Ewing. Soy su prima — tuxia.",
     "El 'oxidado' del concreto (carbonatación) es lo que nos da trabajo a los presupuestistas. Gracias, química.",
     "El precio del cobre afecta los conductores eléctricos del ACU — revisa monomio E si dudas.",

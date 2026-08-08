@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """Control de Obra — vista nivel-proyecto (Fase 1: Valorizaciones).
 
 Se ancla al `_root_stack` del proyecto (igual que Cronograma/Reportes) y se abre
@@ -175,13 +175,16 @@ class _GroupedHeader(QHeaderView):
 
 
 def _gate_reporte_editable(fmt, parent) -> bool:
-    """Los reportes EDITABLES (Word/Excel/ODS) de Control de Obra son premium
-    (libres durante el trial; el PDF es SIEMPRE gratis). Devuelve True si se
-    puede generar; si es editable y no hay premium, muestra el diálogo y False."""
-    if fmt == 'pdf':
-        return True
+    """TODOS los reportes de Control de Obra son premium — incluido el PDF
+    (decisión del autor, 2026-08-07: Control de Obra es el diferenciador del
+    producto y quien valoriza una obra es usuario profesional). Libres durante
+    el trial de 30 días. La VISTA (almacén, cuaderno, valorizaciones, curva S)
+    sigue siendo gratis: el candado es solo al generar el reporte.
+
+    ``fmt`` se conserva en la firma por los 5 call-sites, aunque ya no
+    distingue: PDF y editables se tratan igual."""
     from core.licencia import require_premium
-    return require_premium('export_editable', parent)
+    return require_premium('reporte_control_obra', parent)
 
 
 def _co_editable(proy) -> bool:

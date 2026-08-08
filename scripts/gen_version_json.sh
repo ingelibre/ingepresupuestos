@@ -48,7 +48,7 @@ if [ -z "$NOTAS" ]; then
     # texto que ponía release.sh antes de aceptar notas. Ninguno sirve.
     case "$NOTAS" in chore:*|"Release v${V}") NOTAS="" ;; esac
 fi
-[ -z "$NOTAS" ] && NOTAS="Versión ${V} — software libre y gratuito. Novedades en ingepresupuestos.com"
+[ -z "$NOTAS" ] && NOTAS="Versión ${V}. Novedades en ingepresupuestos.com"
 
 ICONV=$(jq -c 'if .ingeconverter then .ingeconverter else null end' _cur.json)
 jq -n --arg v "$V" --arg date "$(date +%F)" --arg cl "$NOTAS" --argjson ic "$ICONV" \

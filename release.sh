@@ -58,7 +58,7 @@ if [ "$NOTAS" = "-F" ]; then
     NOTAS="$(cat "$3")"
 fi
 if [ -z "$NOTAS" ]; then
-    NOTAS="Versión ${VERSION} — software libre y gratuito. Novedades en ingepresupuestos.com"
+    NOTAS="Versión ${VERSION}. Novedades en ingepresupuestos.com"
     echo -e "${Y}Aviso:${N} sin notas de versión; se usará el texto genérico."
     echo "       Para notas propias: ./release.sh ${VERSION} \"Lo nuevo…\"  |  -F notas.md"
 fi

@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Marco Sumari / Sumari SAC
+# SPDX-License-Identifier: LicenseRef-Proprietary
+# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Licensed under the GNU GPL v3.0 or later. See the LICENSE file.
+# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
 """Sistema de licencias premium de IngePresupuestos.
 
 Modelo (decidido sesión 2026-05-22):
@@ -9,15 +9,25 @@ Modelo (decidido sesión 2026-05-22):
 * **Trial 30 días full** desde el primer arranque — sin registro, sin email.
   Se crea ``license.json`` con ``tipo='trial'`` y ``expira=hoy+30``. Durante
   el trial los exports editables están desbloqueados.
-* Tras vencer el trial → solo se bloquean los **exports editables**. La app
-  sigue 100% funcional para crear/editar proyectos, importar de cualquier
-  software, generar reportes PDF, usar Tuxia con API key del usuario, etc.
-* **Siempre libre (sin trial, sin licencia):** todos los reportes PDF,
-  imágenes derivadas, importadores nativos (Delphin/PowerCost/S10), Tuxia
-  con la API key que configure el usuario, y la app entera.
-* **Requiere licencia activa (tras los 30 días de trial):** exports
-  editables — Excel (.xlsx), ODS, Word (.docx), ODT, MS Project (.xml).
-  Precios: **USD 30 anual / USD 150 perpetua**.
+* Tras vencer el trial → se bloquean los **exports editables** y los
+  **reportes de Control de Obra**. La app sigue funcional para crear/editar
+  proyectos, importar de cualquier software, generar los reportes PDF del
+  presupuesto, usar Tuxia con API key del usuario, etc.
+* **Siempre libre (sin trial, sin licencia):** los reportes PDF del Centro
+  de Reportes, imágenes derivadas, importadores nativos (Delphin/PowerCost/
+  S10), Tuxia con la API key que configure el usuario, y la app entera —
+  incluida la VISTA de Control de Obra (registrar en almacén/cuaderno/
+  valorizaciones es gratis; solo sus reportes son premium).
+* **Requiere licencia activa (tras los 30 días de trial):**
+  - exports editables — Excel (.xlsx), ODS, Word (.docx), ODT,
+    MS Project (.xml) (feature ``export_editable``);
+  - TODOS los reportes de Control de Obra, incluido el PDF (feature
+    ``reporte_control_obra``, decidido 2026-08-07) — la VISTA de Control
+    de Obra sigue siendo gratis, el candado es solo al generar reportes.
+  Precios (decididos 2026-08-07): **S/ 80 anual / S/ 300 perpetua**.
+  La perpetua desbloquea premium PARA SIEMPRE, pero solo recibe
+  **actualizaciones durante 2 años** desde la emisión (gate en
+  ``update_manager.can_download`` — no aquí: el premium no caduca).
 
 Validación de claves: **RSA-2048 firmada offline** con la clave privada
 de Marco (vive en su máquina, NUNCA en el repo). El binario tiene
@@ -264,11 +274,22 @@ class Licencia:
         return dr is not None and dr >= 0
 
     def puede_premium(self) -> bool:
-        """IngePresupuestos es SOFTWARE LIBRE (GPL-3.0-or-later): todas las
-        funciones están disponibles para todos, sin candado premium. Se
-        conserva el método por compatibilidad con los call-sites, que siempre
-        reciben acceso concedido."""
-        return True
+        """True si el usuario tiene acceso a las features premium.
+
+        Concede acceso mientras la licencia esté vigente, y eso cubre los
+        tres casos de una sola vez (ver ``vigente()``):
+
+        * **trial** — los primeros 30 días desde el primer arranque,
+        * **anual** — hasta la fecha de vencimiento de la clave,
+        * **perpetua** — siempre.
+
+        Vencido el trial sin clave activada, se bloquean los exports
+        editables y los reportes de Control de Obra (ver ``FEATURE_LABELS``).
+        El resto de la app —proyectos, ACU, cronograma, la vista de control
+        de obra, importadores y los reportes PDF del presupuesto— sigue
+        funcionando sin licencia.
+        """
+        return self.vigente()
 
     def estado_str(self) -> str:
         """Línea descriptiva del estado, para banner/diálogo."""
@@ -297,7 +318,17 @@ class Licencia:
 def cargar() -> Licencia:
     """Lee la licencia del disco. Si no existe o está corrupta, devuelve
     un objeto trial "vacío" (NO la persiste — eso lo hace
-    ``iniciar_trial_si_falta``)."""
+    ``iniciar_trial_si_falta``).
+
+    Las licencias de pago se RE-VERIFICAN en cada carga contra la clave
+    pública bundleada: sin esto, ``license.json`` sería una concesión de
+    premium editable a mano (basta poner ``tipo: "perpetua"``) y toda la
+    maquinaria RSA no protegería nada. Si la firma no valida, o la clave
+    está bindada a otra máquina, se degrada a trial vencido en memoria —
+    el archivo NO se reescribe, así que una clave legítima que falle por
+    una lectura transitoria de MACs se recupera sola en el próximo
+    arranque.
+    """
     if not LICENSE_FILE.exists():
         return Licencia()
     try:
@@ -305,7 +336,8 @@ def cargar() -> Licencia:
             d = json.load(f)
     except (OSError, json.JSONDecodeError):
         return Licencia()
-    return Licencia(
+
+    lic = Licencia(
         tipo=str(d.get('tipo', 'trial')),
         nombre=str(d.get('nombre', '')),
         email=str(d.get('email', '')),
@@ -314,6 +346,35 @@ def cargar() -> Licencia:
         expira=str(d.get('expira', '')),
         licencia_key=str(d.get('licencia_key', '')),
     )
+
+    if lic.tipo in ('anual', 'perpetua') and not _clave_respalda(lic):
+        # Fecha fija en el pasado: usar `lic.emitida` dejaba el estado
+        # degradado VIGENTE durante todo el día de la emisión (dr == 0),
+        # que es justo el caso de un license.json manipulado hoy.
+        return Licencia(tipo='trial', emitida=lic.emitida, expira='1970-01-01')
+    return lic
+
+
+def _clave_respalda(lic: "Licencia") -> bool:
+    """True si ``lic.licencia_key`` está firmada por el Titular y sus datos
+    coinciden con los del estado guardado."""
+    if not lic.licencia_key:
+        return False
+    try:
+        payload, firma = parsear_clave(lic.licencia_key)
+    except ValueError:
+        return False
+    if not _verificar_firma(payload, firma):
+        return False
+    # El estado guardado no puede decir más de lo que dice la clave firmada.
+    if str(payload.get('tipo', '')).lower() != lic.tipo:
+        return False
+    if str(payload.get('expira', '')) != lic.expira:
+        return False
+    mid_clave = str(payload.get('machine_id', ''))
+    if mid_clave and mid_clave != machine_id():
+        return False
+    return True
 
 
 def guardar(lic: Licencia) -> None:
@@ -462,7 +523,7 @@ def activar_clave(clave: str) -> tuple[bool, str, Optional[Licencia]]:
         return False, (
             "La firma de la clave no es válida. Verifica que la clave "
             "esté completa y sin modificaciones.\n\n"
-            "Si copiaste la clave, asegurate de no haber agregado o "
+            "Si copiaste la clave, asegúrate de no haber agregado o "
             "quitado caracteres."
         ), None
 
@@ -486,7 +547,7 @@ def activar_clave(clave: str) -> tuple[bool, str, Optional[Licencia]]:
             "Esta clave está bindada a otra máquina.\n\n"
             f"ID de tu máquina: {machine_id_pretty()}\n"
             f"ID de la clave:   {'-'.join(mid_clave[i:i+4] for i in range(0,len(mid_clave),4))}\n\n"
-            "Si compraste esta clave para esta PC, contactá al autor "
+            "Si compraste esta clave para esta PC, contacta al autor "
             "indicando tu ID de máquina para que te emita una clave "
             "actualizada."
         ), None
@@ -499,7 +560,7 @@ def activar_clave(clave: str) -> tuple[bool, str, Optional[Licencia]]:
             if fin < datetime.now().date():
                 return False, (
                     f"Esta clave ya venció el {expira}.\n\n"
-                    "Adquirí una renovación o una licencia perpetua."
+                    "Adquiere una renovación o una licencia perpetua."
                 ), None
         except ValueError:
             return False, f"Fecha de expiración con formato inválido: {expira}", None
@@ -528,7 +589,8 @@ def activar_clave(clave: str) -> tuple[bool, str, Optional[Licencia]]:
 #: Etiquetas user-facing para cada feature premium. Las llaves son los
 #: ``feature`` que se pasan a ``require_premium`` desde los handlers.
 FEATURE_LABELS = {
-    'export_editable':  "Exportar reportes editables (Excel · ODS · Word · ODT · MS Project)",
+    'export_editable':      "Exportar reportes editables (Excel · ODS · Word · ODT · MS Project)",
+    'reporte_control_obra': "Reportes de Control de Obra (PDF · Excel · Word · ODT)",
 }
 
 
@@ -577,7 +639,7 @@ def _mostrar_dialogo_bloqueo(feature: str, lic: Licencia, parent) -> None:
                 parent, "Licencia requerida",
                 f"«{label}» requiere una licencia activa.\n\n"
                 f"Estado actual: {lic.estado_str()}\n\n"
-                f"Adquirí una licencia en {URL_COMPRA}"
+                f"Adquiere una licencia en {URL_COMPRA}"
             )
         except ImportError:
             pass

@@ -1,15 +1,20 @@
 <!--
-SPDX-License-Identifier: GPL-3.0-or-later
-Copyright (C) 2026 Marco Sumari / Sumari SAC
+SPDX-License-Identifier: LicenseRef-Proprietary
+Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 -->
 
 # IngePresupuestos
 
-**Software libre de presupuestos de obra civil** — nativo, multiplataforma (Linux · Windows · macOS), pensado para ingenieros, arquitectos y contratistas peruanos.
+**Software de presupuestos de obra civil** — nativo, multiplataforma (Linux · Windows · macOS), pensado para ingenieros, arquitectos y contratistas peruanos.
 
 **Autor:** Ing. Marco Sumari · **Sumari · Arquitectura + Ingeniería**
-**Licencia:** [GPL-3.0-or-later](LICENSE) — software libre ✊
+**Licencia:** propietaria — ver [LICENSE](LICENSE)
 **Web:** https://ingepresupuestos.com · **Manual:** https://docs.ingepresupuestos.com
+
+> **Repositorio privado.** Este código es propiedad de Sumari SAC y no es de
+> distribución pública. Las versiones 2.8.8 y anteriores se publicaron bajo
+> GPL-3.0-or-later y conservan esa licencia; este repositorio corresponde a la
+> 2.9.0 en adelante y no está cubierto por ella.
 
 ---
 
@@ -58,20 +63,30 @@ python3 main.py
 | Base de datos | SQLite 3 |
 | Reportes | QTextDocument + QPdfWriter · python-docx · openpyxl · LibreOffice (ODT/ODS) |
 
-## Contribuir
+## Modelo de licencia
 
-¡Las contribuciones son bienvenidas! Reporta bugs, sugiere mejoras o traduce la app.
-Lee [CONTRIBUTING.md](CONTRIBUTING.md) para empezar.
+| | Gratis, sin límite de tiempo | Requiere licencia |
+|---|---|---|
+| Proyectos, presupuestos, ACU, cronograma, metrados, fórmula polinómica | ✅ | |
+| Vista de Control de Obra (registrar almacén, cuaderno, valorizaciones) | ✅ | |
+| Reportes del Centro de Reportes en **PDF** | ✅ | |
+| Importadores (S10, PowerCost, Delphin, Excel, IFC, `.db`) | ✅ | |
+| Asistente IA con la clave del propio usuario | ✅ | |
+| Exportar **Excel · ODS · Word · ODT · MS Project** | 30 días de prueba | ✅ |
+| **Reportes de Control de Obra** (todos, incluido PDF) | 30 días de prueba | ✅ |
 
-## Apoyar el proyecto
+Compra y activación: https://ingepresupuestos.com/licencia
 
-IngePresupuestos es gratis y libre. Si te resulta útil, puedes **apoyarlo**:
-- 💛 Yape / donación: https://ingepresupuestos.com/apoyar
-- ⭐ Dale una estrella al repositorio y compártelo con colegas.
+La emisión de claves se hace con `scripts/gen_license.py` (firma RSA-2048 con la
+clave privada, que vive fuera del repositorio en `~/.ingepresupuestos-licencias/`).
+
+## Reportar un problema
+
+Bugs y sugerencias a ing.sumari@gmail.com o por WhatsApp al +51 998 839 090.
 
 ## Licencia
 
-Distribuido bajo la **Licencia Pública General de GNU v3.0 o posterior (GPL-3.0-or-later)**.
-Eres libre de usar, estudiar, modificar y compartir este software; las obras derivadas deben permanecer libres bajo la misma licencia. Ver [LICENSE](LICENSE).
+Software propietario. Ver [LICENSE](LICENSE) para el contrato de usuario final y
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) para los componentes de terceros.
 
-© 2026 Marco Sumari · Sumari SAC
+© 2026 Marco Sumari · Sumari SAC. Todos los derechos reservados.
