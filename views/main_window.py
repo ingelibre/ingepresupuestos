@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Ventana principal — Elementary OS HIG style.
 
 Sidebar:  64px, Slate-700 (#273445), ítem activo Blueberry (#F37329)
@@ -50,103 +50,6 @@ _EDGE_QT_MAP = {
     'bottom-left':  Qt.BottomEdge | Qt.LeftEdge,
     'bottom-right': Qt.BottomEdge | Qt.RightEdge,
 }
-
-# ── Pill de estado de licencia ────────────────────────────────────────────────
-
-class _LicenciaPill(QPushButton):
-    """Pill compacta en el headerbar que muestra el estado de la licencia.
-
-    Visible **solo** cuando hay algo que reportar — trial vigente, trial
-    vencido o licencia anual próxima a vencer (≤30 días). Una vez activada
-    una licencia perpetua o anual con vencimiento lejano, queda oculta para
-    no agregar ruido visual.
-
-    Click → abre el diálogo de licencia (`mostrar_dialogo_licencia`).
-    Auto-refresh cada hora y manual tras cerrar el diálogo.
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFlat(True)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.clicked.connect(self._abrir_dialogo)
-        # Refresco automático cada hora — cubre el caso de la app abierta
-        # cuando justo cambia el día y vence el trial.
-        from PySide6.QtCore import QTimer
-        self._timer = QTimer(self)
-        self._timer.setInterval(60 * 60 * 1000)
-        self._timer.timeout.connect(self.refrescar)
-        self._timer.start()
-        self.refrescar()
-
-    def refrescar(self):
-        """Lee el estado actual y actualiza el texto + estilo + visibilidad."""
-        try:
-            from core import licencia as L
-        except ImportError:
-            self.setVisible(False)
-            return
-        lic = L.cargar()
-        # ¿Mostrar? Solo si trial, trial vencido o licencia anual ≤30 días.
-        mostrar = False
-        if lic.tipo == 'trial':
-            mostrar = True
-        elif not lic.vigente():
-            mostrar = True
-        else:
-            dr = lic.dias_restantes()
-            if dr is not None and dr <= 30:
-                mostrar = True
-        if not mostrar:
-            self.setVisible(False)
-            return
-        self.setVisible(True)
-        texto, bg, fg, border = self._estilo_para(lic)
-        self.setText(texto)
-        self.setToolTip(lic.estado_str() + "  ·  Clic para gestionar")
-        self.setStyleSheet(
-            f"QPushButton {{ background:{bg}; color:{fg};"
-            f" border:1px solid {border}; border-radius:11px;"
-            f" padding:2px 12px; font-size:11px; font-weight:700;"
-            f" font-family:'Inter'; }}"
-            f"QPushButton:hover {{ background:{border};"
-            f" color:white; }}"
-        )
-
-    @staticmethod
-    def _estilo_para(lic) -> tuple[str, str, str, str]:
-        """Devuelve (texto, bg, fg, border) según estado de la licencia."""
-        if not lic.vigente():
-            return ("Licencia vencida — Activar",
-                      "#FCE7E9", "#9D1A20", RED_500)
-        if lic.tipo == 'trial':
-            dr = lic.dias_restantes() or 0
-            if dr <= 3:
-                # Crítico — rojo suave
-                base = "1 día" if dr == 1 else ("hoy" if dr == 0 else f"{dr} días")
-                return (f"Prueba: {base}", "#FCE7E9", "#9D1A20", RED_500)
-            if dr <= 7:
-                # Advertencia — naranja
-                return (f"Prueba: {dr} días", "#FFF0DC", "#7A4615", ORANGE_500)
-            # Verde — todo bien
-            return (f"Prueba: {dr} días", "#E6F5D8", "#3E6E0B", GREEN_500)
-        # anual ≤30 días
-        dr = lic.dias_restantes() or 0
-        if dr <= 7:
-            return (f"Vence en {dr} días", "#FFF0DC", "#7A4615", ORANGE_500)
-        return (f"Vence en {dr} días", "#E6F5D8", "#3E6E0B", GREEN_500)
-
-    def _abrir_dialogo(self):
-        try:
-            from views.licencia_dialog import mostrar_dialogo_licencia
-            mostrar_dialogo_licencia(self.window())
-        except ImportError:
-            pass
-        # Tras cerrar el diálogo, refrescar (el usuario pudo haber activado
-        # una licencia).
-        self.refrescar()
-
 
 # ── Sidebar button ─────────────────────────────────────────────────────────────
 

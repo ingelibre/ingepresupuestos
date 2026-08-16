@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Diálogos y helper para el sistema de actualizaciones.
 
 * ``UpdateDialog``   — diálogo bonito con changelog + botón "Descargar ahora".
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from core.update_manager import (
     CURRENT_VERSION, CheckResult, chequear_actualizacion,
-    can_download, increment_download_count, skip_version,
+    skip_version,
     get_skipped_version, debe_chequear_silencioso,
     cached_version_info, is_newer, es_msix,
 )
@@ -110,26 +110,6 @@ class UpdateDialog(QDialog):
         )
         v.addWidget(txt, 1)
 
-        # Warning de trial (si aplica)
-        puede, razon = can_download()
-        if puede and razon:
-            warn = QLabel(razon)
-            warn.setStyleSheet(
-                f"color:{ORANGE_DARK}; font-size:11px; font-style:italic;"
-                f" padding:4px 2px;"
-            )
-            warn.setWordWrap(True)
-            v.addWidget(warn)
-        elif not puede:
-            warn = QLabel(razon)
-            warn.setStyleSheet(
-                "color:#C6262E; font-size:11px; padding:6px 10px;"
-                f" background:#FFF1F1; border:1px solid #FFD7D7;"
-                f" border-radius:6px;"
-            )
-            warn.setWordWrap(True)
-            v.addWidget(warn)
-
         # Footer con botones
         ftr = QHBoxLayout()
         ftr.setSpacing(8)
@@ -159,7 +139,6 @@ class UpdateDialog(QDialog):
 
         btn_dl = QPushButton("⬇  Descargar ahora")
         btn_dl.setCursor(Qt.PointingHandCursor)
-        btn_dl.setEnabled(puede)
         from utils.theme import BTN_PRIMARY_SS
         btn_dl.setStyleSheet(BTN_PRIMARY_SS)
         btn_dl.setDefault(True)
@@ -172,15 +151,6 @@ class UpdateDialog(QDialog):
         self.reject()
 
     def _descargar(self):
-        # Doble validación por si la licencia cambió mientras estaba abierto
-        puede, razon = can_download()
-        if not puede:
-            QMessageBox.warning(
-                self, "Descarga no disponible",
-                f"{razon}\n\nVisita ingepresupuestos.com para adquirir tu licencia."
-            )
-            return
-        increment_download_count()
         QDesktopServices.openUrl(QUrl(self.result.info.download_url))
         self.accept()
 

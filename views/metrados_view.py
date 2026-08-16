@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """metrados_view — Hoja de Metrados (≈ metrados.html de Flask).
 
 Vista standalone anclada al ``_root_stack`` de ProyectoView. Muestra
@@ -28,7 +28,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 
 from core.database import (get_db, get_decimales_ppto, get_decimales_metrado,
                            _rn, parcial_wysiwyg, partida_usa_acero)
-from utils.formatting import fmt
+from utils.formatting import fmt, parse_num, parse_num_opt
 from utils.icons import icon
 
 
@@ -622,13 +622,7 @@ class MetradosView(QWidget):
     # ── Edición de acero ─────────────────────────────────────────────────────
     @staticmethod
     def _ac_parse(text) -> float | None:
-        text = (text or '').strip()
-        if not text:
-            return None
-        try:
-            return float(text.replace(',', '.'))
-        except (ValueError, TypeError):
-            return None
+        return parse_num_opt(text)
 
     def _ac_detail_rows_of(self, partida_id: int) -> list[int]:
         return [r for r, (k, pid) in enumerate(zip(self._ac_kind, self._ac_partida))
@@ -767,10 +761,7 @@ class MetradosView(QWidget):
             if k == 'header':
                 it = t.item(r, 9)
                 if it and it.text().strip():
-                    try:
-                        grand += float(it.text().replace(',', ''))
-                    except ValueError:
-                        pass
+                    grand += parse_num(it.text())
             elif k == 'total':
                 total_row = r
         if total_row is not None and t.item(total_row, 9):
@@ -1046,13 +1037,8 @@ class MetradosView(QWidget):
 
     # ── Edición estilo Excel ───────────────────────────────────────────────
     def _parse_num(self, txt: str):
-        """Devuelve float o None. Acepta coma como separador decimal."""
-        if not txt or not txt.strip():
-            return None
-        try:
-            return float(txt.replace(',', '.'))
-        except ValueError:
-            return None
+        """Devuelve float o None. Acepta coma decimal Y separador de miles."""
+        return parse_num_opt(txt)
 
     def _find_header_row(self, partida_id: int) -> int | None:
         for r, (kind, pid) in enumerate(zip(self._row_kind, self._row_partida)):
@@ -1150,10 +1136,7 @@ class MetradosView(QWidget):
             for r2 in self._dim_rows_of(partida_id):
                 it = tbl.item(r2, 9)
                 if it and it.text().strip():
-                    try:
-                        total += float(it.text().replace(',', ''))
-                    except ValueError:
-                        pass
+                    total += parse_num(it.text())
             total = _rn(total, dec)
             conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                          (total, partida_id))
@@ -1329,10 +1312,7 @@ class MetradosView(QWidget):
                 for r2 in self._dim_rows_of(pid):
                     it = self.tbl.item(r2, 9)
                     if it and it.text().strip():
-                        try:
-                            total += float(it.text().replace(',', ''))
-                        except ValueError:
-                            pass
+                        total += parse_num(it.text())
                 total = _rn(total, dec)
                 conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                              (total, pid))
@@ -1478,9 +1458,11 @@ class MetradosView(QWidget):
                 if i > 0:
                     printer.newPage()
                 size = doc.pagePointSize(i)
+                # QPdfDocument.render() exige QSize: con una tupla lanza
+                # TypeError y la impresión no llegaba a salir.
                 page_image = doc.render(
                     i,
-                    (int(size.width() * 2), int(size.height() * 2))
+                    QSize(int(size.width() * 2), int(size.height() * 2))
                 )
                 target = printer.pageRect(QPrinter.DevicePixel)
                 painter.drawImage(target, page_image)

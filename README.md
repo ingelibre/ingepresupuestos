@@ -1,6 +1,6 @@
 <!--
-SPDX-License-Identifier: LicenseRef-Proprietary
-Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (C) 2026 Marco Sumari
 -->
 
 # IngePresupuestos
@@ -8,13 +8,13 @@ Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 **Software de presupuestos de obra civil** — nativo, multiplataforma (Linux · Windows · macOS), pensado para ingenieros, arquitectos y contratistas peruanos.
 
 **Autor:** Ing. Marco Sumari · **Sumari · Arquitectura + Ingeniería**
-**Licencia:** propietaria — ver [LICENSE](LICENSE)
+**Licencia:** [GPL-3.0-or-later](LICENSE) — software libre
 **Web:** https://ingepresupuestos.com · **Manual:** https://docs.ingepresupuestos.com
 
-> **Repositorio privado.** Este código es propiedad de Sumari SAC y no es de
-> distribución pública. Las versiones 2.8.8 y anteriores se publicaron bajo
-> GPL-3.0-or-later y conservan esa licencia; este repositorio corresponde a la
-> 2.9.0 en adelante y no está cubierto por ella.
+> **Software libre.** Todo el código está bajo GPL-3.0-or-later: puedes usarlo,
+> estudiarlo, modificarlo y redistribuirlo, también con fines comerciales y sin
+> límite de equipos. En agosto de 2026 el proyecto estuvo una semana camino de
+> volverse propietario; se revirtió antes de publicar ninguna versión cerrada.
 
 ---
 
@@ -35,8 +35,8 @@ Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
 
 Descárgalo desde **https://ingepresupuestos.com**:
 
-- **Windows** — instalador `.exe`, versión portable, o desde la **Microsoft Store** / `winget install ingepresupuestos`.
-- **Linux** — AppImage (Flatpak próximamente).
+- **Windows** — instalador `.exe` o desde la **Microsoft Store**.
+- **Linux** — AppImage o Flatpak.
 - **macOS** — próximamente.
 
 ## Ejecutar desde el código fuente
@@ -44,8 +44,8 @@ Descárgalo desde **https://ingepresupuestos.com**:
 Requiere **Python 3.11+**.
 
 ```bash
-git clone https://github.com/<usuario>/ingepresupuestos-pyside6.git
-cd ingepresupuestos-pyside6
+git clone https://github.com/ingelibre/ingepresupuestos.git
+cd ingepresupuestos
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -63,22 +63,23 @@ python3 main.py
 | Base de datos | SQLite 3 |
 | Reportes | QTextDocument + QPdfWriter · python-docx · openpyxl · LibreOffice (ODT/ODS) |
 
-## Modelo de licencia
+## Qué incluye
 
-| | Gratis, sin límite de tiempo | Requiere licencia |
-|---|---|---|
-| Proyectos, presupuestos, ACU, cronograma, metrados, fórmula polinómica | ✅ | |
-| Vista de Control de Obra (registrar almacén, cuaderno, valorizaciones) | ✅ | |
-| Reportes del Centro de Reportes en **PDF** | ✅ | |
-| Importadores (S10, PowerCost, Delphin, Excel, IFC, `.db`) | ✅ | |
-| Asistente IA con la clave del propio usuario | ✅ | |
-| Exportar **Excel · ODS · Word · ODT · MS Project** | 30 días de prueba | ✅ |
-| **Reportes de Control de Obra** (todos, incluido PDF) | 30 días de prueba | ✅ |
+**Todo.** No hay versión de pago, ni funciones bloqueadas, ni período de prueba,
+ni registro: proyectos, presupuestos, ACU, cronograma Gantt con ruta crítica,
+metrados, fórmula polinómica, Control de Obra completo, los 13 reportes en todos
+sus formatos (PDF · Excel · ODS · Word · ODT · MS Project), los importadores de
+S10, PowerCost, Delphin, Excel, IFC y `.db`, y el asistente IA con la clave del
+propio usuario.
 
-Compra y activación: https://ingepresupuestos.com/licencia
+Si el programa te sirve y estás en condiciones de aportar, eso es lo que lo
+mantiene vivo: <https://ingepresupuestos.com/apoyar>
 
-La emisión de claves se hace con `scripts/gen_license.py` (firma RSA-2048 con la
-clave privada, que vive fuera del repositorio en `~/.ingepresupuestos-licencias/`).
+## Contribuir
+
+Ver [CONTRIBUTING.md](CONTRIBUTING.md). Los reportes de errores y las ideas se
+agradecen tanto como el código, y no requieren firmar nada. Para enviar código
+hace falta aceptar el [CLA](CLA.md) una sola vez.
 
 ## Reportar un problema
 
@@ -86,7 +87,10 @@ Bugs y sugerencias a ing.sumari@gmail.com o por WhatsApp al +51 998 839 090.
 
 ## Licencia
 
-Software propietario. Ver [LICENSE](LICENSE) para el contrato de usuario final y
-[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) para los componentes de terceros.
+IngePresupuestos es **software libre**: puedes usarlo, estudiarlo, modificarlo y
+redistribuirlo bajo los términos de la **Licencia Pública General de GNU, versión 3
+o posterior**. Se distribuye sin ninguna garantía; ver [LICENSE](LICENSE) para el
+texto completo y [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) para los
+componentes de terceros.
 
-© 2026 Marco Sumari · Sumari SAC. Todos los derechos reservados.
+© 2026 Marco Sumari

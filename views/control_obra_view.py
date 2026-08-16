@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Control de Obra — vista nivel-proyecto (Fase 1: Valorizaciones).
 
 Se ancla al `_root_stack` del proyecto (igual que Cronograma/Reportes) y se abre
@@ -29,7 +29,7 @@ from PySide6.QtGui import (QColor, QFont, QPainter, QBrush, QKeySequence,
                            QTextCharFormat, QPolygonF)
 
 from core.database import get_db, get_decimales_metrado, get_config, set_config
-from utils.formatting import fmt_num, parse_num
+from utils.formatting import fmt_num, parse_num, parse_num_opt
 import core.valorizacion as V
 import core.parte_diario as PD
 import core.requerimientos as REQ
@@ -174,17 +174,6 @@ class _GroupedHeader(QHeaderView):
                        self._subs[i] if i < len(self._subs) else '')
 
 
-def _gate_reporte_editable(fmt, parent) -> bool:
-    """TODOS los reportes de Control de Obra son premium — incluido el PDF
-    (decisión del autor, 2026-08-07: Control de Obra es el diferenciador del
-    producto y quien valoriza una obra es usuario profesional). Libres durante
-    el trial de 30 días. La VISTA (almacén, cuaderno, valorizaciones, curva S)
-    sigue siendo gratis: el candado es solo al generar el reporte.
-
-    ``fmt`` se conserva en la firma por los 5 call-sites, aunque ya no
-    distingue: PDF y editables se tratan igual."""
-    from core.licencia import require_premium
-    return require_premium('reporte_control_obra', parent)
 
 
 def _co_editable(proy) -> bool:
@@ -1000,8 +989,6 @@ class _ValorizacionesPanel(QWidget):
 
     def _reporte(self, fmt='pdf'):
         if not self._val_id:
-            return
-        if not _gate_reporte_editable(fmt, self):
             return
         import os
         from PySide6.QtWidgets import QFileDialog
@@ -3063,8 +3050,6 @@ class _CuadernoPanel(QWidget):
                 if d.checkState(0) == Qt.Checked]
 
     def _reporte(self, fmt='pdf'):
-        if not _gate_reporte_editable(fmt, self):
-            return
         import os
         from PySide6.QtWidgets import QFileDialog
         ids = self._pedir_dias()
@@ -3373,8 +3358,6 @@ class _AlmacenPanel(QWidget):
         v.addWidget(self.lbl_vacio)
 
     def _reporte(self, fmt='pdf'):
-        if not _gate_reporte_editable(fmt, self):
-            return
         import os
         from PySide6.QtWidgets import QFileDialog
         ext = {'pdf': 'pdf', 'docx': 'docx', 'odt': 'odt'}[fmt]
@@ -4240,8 +4223,6 @@ class _CurvaSRealPanel(QWidget):
         self.cargar()
 
     def _reporte(self, fmt='pdf'):
-        if not _gate_reporte_editable(fmt, self):
-            return
         import os
         from PySide6.QtWidgets import QFileDialog
         ext = {'pdf': 'pdf', 'docx': 'docx', 'odt': 'odt'}[fmt]
@@ -4413,16 +4394,15 @@ class _CurvaSRealPanel(QWidget):
         campo = ('prog' if col in (CC_P_MON, CC_P_EJE)
                  else 'reprog' if col in (CC_R_MON, CC_R_EJE) else 'real')
         es_monto = col in (CC_P_MON, CC_R_MON, CC_X_MON)
-        raw = txt.replace('%', '').replace(',', '.')
-        for s in ('S/', 'S/.', '$', ' '):
-            raw = raw.replace(s, '')
-        if not raw:                       # celda vaciada → borra el override
+        if not txt:                       # celda vaciada → borra el override
             CS.set_override(self.pid, self._base, idx, campo, None)
             self.cargar()
             return
-        try:
-            num = float(raw)
-        except ValueError:
+        # parse_num entiende el separador de miles con que se pinta la celda
+        # ("1,234.56"); tratar esa coma como decimal descartaba todo monto de
+        # 4 cifras o más.
+        num = parse_num_opt(txt)
+        if num is None:
             self.cargar()                 # texto inválido → recarga, no toca la BD
             return
         total = getattr(self, '_total_general', 0) or 0
@@ -5020,8 +5000,6 @@ class _RequerimientosPanel(QWidget):
         if not texto:
             QMessageBox.information(self, "Exportar",
                 "No hay TDR para exportar. Genéralo primero con la IA.")
-            return
-        if not _gate_reporte_editable(fmt, self):
             return
         self._flush_tdr()
         import os

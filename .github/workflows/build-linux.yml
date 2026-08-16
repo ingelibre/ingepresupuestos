@@ -58,41 +58,6 @@ jobs:
       - name: Compilar con PyInstaller
         run: pyinstaller ingepresupuestos.spec --noconfirm
 
-      - name: Incluir installer y README en el bundle .tar.gz
-        run: |
-          cp install-linux.sh dist/ingepresupuestos/
-          chmod +x dist/ingepresupuestos/install-linux.sh
-          # Pequeño README dentro del .tar.gz con instrucciones
-          cat > dist/ingepresupuestos/LEEME.txt <<'EOF'
-          IngePresupuestos para Linux
-
-          Recomendado: usar el .AppImage (IngePresupuestos-vX.Y.Z-x86_64.AppImage).
-          Este .tar.gz es para usuarios técnicos / instalaciones del sistema.
-
-          === Modo portable (este .tar.gz) ===
-
-          Ejecutar sin instalar:
-            ./ingepresupuestos
-
-          Instalar en el sistema (recomendado para uso diario):
-            Para que aparezca en el menú de aplicaciones y dock:
-              ./install-linux.sh
-
-            Para desinstalar:
-              ./install-linux.sh --uninstall
-
-          Los datos del usuario se guardan en:
-            ~/.local/share/ingepresupuestos/
-
-          Soporte: https://github.com/tuxiasumari/ingepresupuestos-pyside6
-          EOF
-
-      - name: Crear tarball
-        run: |
-          cd dist
-          tar czf ingepresupuestos-linux.tar.gz ingepresupuestos
-          ls -la
-
       # ── Construir el AppImage ──────────────────────────────────────────────
       # Tras PyInstaller, armar AppDir + correr appimagetool.
       # El script `installer/build-appimage.sh` baja appimagetool
@@ -120,20 +85,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ingepresupuestos-linux
-          path: |
-            dist/ingepresupuestos-linux.tar.gz
-            dist/IngePresupuestos-*-x86_64.AppImage
+          path: dist/IngePresupuestos-*-x86_64.AppImage
           retention-days: 3
 
-      # Si el workflow se disparó por tag (v0.5.0, v1.0.0, etc.),
-      # publica AMBOS archivos en la sección Releases del repo.
+      # Si el workflow se disparó por tag (v0.5.0, v1.0.0, etc.), publica el
+      # AppImage en la sección Releases del repo. Linux se entrega SOLO como
+      # AppImage y como Flatpak (job de abajo): la 3.0 retiró el .tar.gz
+      # portable (decisión del autor, 2026-08-15).
       - name: Publicar en Releases (solo en tags)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/ingepresupuestos-linux.tar.gz
-            dist/IngePresupuestos-*-x86_64.AppImage
+          files: dist/IngePresupuestos-*-x86_64.AppImage
           generate_release_notes: true
 
       # ── Subir a Cloudflare R2 (opcional: requiere los secretos R2_*) ───────
@@ -150,13 +113,12 @@ jobs:
           set -e
           V="${{ steps.ver.outputs.version }}"
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "dist/ingepresupuestos-linux.tar.gz" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
           aws s3 cp "dist/IngePresupuestos-${V}-x86_64.AppImage" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
-          echo "✓ binarios Linux subidos a R2/v${V}/"
+          echo "✓ AppImage subido a R2/v${V}/"
 
       # Genera y sube version.json (lo que lee el auto-updater de la app).
-      # Espera a que los 4 binarios (Windows + Linux) estén en R2 para no
-      # publicar enlaces rotos, y PRESERVA el bloque `ingeconverter` del
+      # Espera a que los 2 binarios (instalador Windows + AppImage) estén en
+      # R2 para no publicar enlaces rotos, y PRESERVA el bloque `ingeconverter` del
       # version.json existente. Solo el job de Linux lo escribe (un solo autor).
       - name: Actualizar version.json en R2
         if: ${{ env.HAS_R2 == 'true' && startsWith(github.ref, 'refs/tags/') }}
@@ -169,14 +131,14 @@ jobs:
           set -e
           V="${{ steps.ver.outputs.version }}"
           BASE="https://downloads.ingepresupuestos.com"
-          FILES="v${V}/ingepresupuestos-setup-v${V}.exe v${V}/ingepresupuestos-windows.zip v${V}/IngePresupuestos-${V}-x86_64.AppImage v${V}/ingepresupuestos-linux.tar.gz"
-          # Esperar hasta ~20 min a que los binarios de Windows (otro job) suban.
+          FILES="v${V}/ingepresupuestos-setup-v${V}.exe v${V}/IngePresupuestos-${V}-x86_64.AppImage"
+          # Esperar hasta ~20 min a que el instalador de Windows (otro job) suba.
           ok=0
           for i in $(seq 1 40); do
             ok=1
             for f in $FILES; do curl -fsI "${BASE}/${f}" >/dev/null 2>&1 || ok=0; done
             [ "$ok" = "1" ] && break
-            echo "esperando los 4 binarios en R2… (intento $i/40)"; sleep 30
+            echo "esperando los 2 binarios en R2… (intento $i/40)"; sleep 30
           done
           if [ "$ok" != "1" ]; then
             echo "::warning::no todos los binarios están en R2 tras ~20 min — NO actualizo version.json (evita enlaces rotos)"
@@ -191,7 +153,7 @@ jobs:
           echo "✓ version.json actualizado en R2 → v${V}"
 
   # ── Publicar el repositorio Flatpak ──────────────────────────────────────
-  # Encadenado aquí por el mismo motivo que winget en build-windows.yml: el
+  # Encadenado aquí porque el Release lo crea el paso anterior con el
   # Release lo crea el paso de arriba con el GITHUB_TOKEN por defecto y GitHub
   # no dispara workflows nuevos desde eventos generados con ese token.
   # Antes se generaba a mano y se quedó un mes atrás (ver publish-flatpak.yml).

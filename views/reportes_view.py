@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Centro de Reportes — vista anclada con vista previa PDF + acciones de exportación.
 
 Layout:
@@ -1605,9 +1605,6 @@ class ReportesView(QWidget):
     def _guardar_excel(self):
         if not self._tipo_actual:
             return
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Excel", self._ruta_default('xlsx'), "Excel (*.xlsx)"
         )
@@ -1657,9 +1654,6 @@ class ReportesView(QWidget):
     def _guardar_word(self):
         if not self._tipo_actual:
             return
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Word", self._ruta_default('docx'),
             "Word (*.docx)"
@@ -1693,9 +1687,6 @@ class ReportesView(QWidget):
 
     def _guardar_odt(self):
         if not self._tipo_actual:
-            return
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar ODT", self._ruta_default('odt'),
@@ -1758,9 +1749,6 @@ class ReportesView(QWidget):
 
     def _guardar_ods(self):
         if not self._tipo_actual:
-            return
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar ODS", self._ruta_default('ods'),
@@ -1826,9 +1814,6 @@ class ReportesView(QWidget):
     def _guardar_mpp(self):
         """Exporta el cronograma actual a Microsoft Project XML (.xml)."""
         if self._tipo_actual != 'cronograma':
-            return
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
             return
         import os
         sugerido = os.path.join(self._dir_descargas(),
@@ -2249,9 +2234,6 @@ class ReportesView(QWidget):
     def _guardar_pack_office(self):
         """Descarga todos los archivos editables Office (Word/Excel/MPP) en
         una carpeta. Reporta al final qué se generó y qué falló."""
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         carpeta = self._pedir_carpeta("Carpeta para Pack Office")
         if not carpeta:
             return
@@ -2340,9 +2322,6 @@ class ReportesView(QWidget):
     def _guardar_pack_libre(self):
         """Descarga todos los archivos editables LibreOffice (ODT/ODS).
         Convierte vía LibreOffice headless."""
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import subprocess
         from core.soffice import find_soffice, mensaje_instalacion
         soffice = find_soffice()

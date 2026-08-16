@@ -62,41 +62,6 @@ jobs:
           ls -la dist/
           du -sh dist/ingepresupuestos/
 
-      - name: Incluir README en el bundle
-        shell: bash
-        run: |
-          cat > dist/ingepresupuestos/LEEME.txt <<'EOF'
-          IngePresupuestos para Windows
-
-          Recomendado: usar el INSTALADOR (ingepresupuestos-setup-vX.Y.Z.exe).
-          Este .zip es solo para usuarios técnicos que prefieran versión portable.
-
-          === Modo portable (este .zip) ===
-
-          1. Descomprimí esta carpeta donde quieras (ej. C:\IngePresupuestos\)
-          2. Doble click en ingepresupuestos.exe
-          3. Si Windows muestra "Windows protegió tu PC" → "Más información"
-             → "Ejecutar de todas formas" (falta firma digital, se agrega
-             cuando salgamos de beta).
-
-          Crear acceso directo en el menú Inicio:
-            Click derecho sobre ingepresupuestos.exe → "Anclar al menú Inicio"
-
-          Los datos del usuario se guardan en:
-            %APPDATA%\ingepresupuestos\
-
-          Si al abrir aparece "Failed to load python312.dll", instalá:
-            https://aka.ms/vs/17/release/vc_redist.x64.exe
-            (Visual C++ Redistributable, oficial de Microsoft).
-
-          Soporte: https://github.com/tuxiasumari/ingepresupuestos-pyside6
-          EOF
-
-      - name: Crear ZIP portable
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/ingepresupuestos -DestinationPath dist/ingepresupuestos-windows.zip
-
       # ── Construir el INSTALADOR con Inno Setup ─────────────────────────────
       # Windows runner trae Inno Setup 6 preinstalado en C:\Program Files (x86)\Inno Setup 6\
       # Compilamos installer\ingepresupuestos.iss pasando la versión desde el tag.
@@ -149,9 +114,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ingepresupuestos-windows
-          path: |
-            dist/ingepresupuestos-windows.zip
-            dist/ingepresupuestos-setup-v*.exe
+          path: dist/ingepresupuestos-setup-v*.exe
           retention-days: 3
 
       # El .msix va SOLO a Partner Center (Microsoft Store) — no es un binario
@@ -168,19 +131,19 @@ jobs:
           retention-days: 7
 
       # Si el workflow se disparó por tag (v0.5.0, v1.0.0, etc.),
-      # publica AMBOS archivos en la sección Releases del repo.
+      # publica el instalador en la sección Releases del repo. Windows se
+      # entrega SOLO como instalador .exe y como .msix de la Store: la 3.0
+      # retiró el .zip portable (decisión del autor, 2026-08-15).
       - name: Publicar en Releases (solo en tags)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/ingepresupuestos-windows.zip
-            dist/ingepresupuestos-setup-v*.exe
+          files: dist/ingepresupuestos-setup-v*.exe
           generate_release_notes: true
 
       # ── Subir a Cloudflare R2 (opcional: requiere los secretos R2_*) ───────
-      # Sube el instalador y el portable Windows. El job de Linux es el que
-      # arma y sube version.json (espera a que estos archivos existan en R2).
+      # Sube el instalador Windows. El job de Linux es el que arma y sube
+      # version.json (espera a que estos archivos existan en R2).
       - name: Subir binarios Windows a R2
         if: ${{ env.HAS_R2 == 'true' && startsWith(github.ref, 'refs/tags/') }}
         shell: bash
@@ -194,20 +157,6 @@ jobs:
           V="${{ steps.ver.outputs.version }}"
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp "dist/ingepresupuestos-setup-v${V}.exe" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
-          aws s3 cp "dist/ingepresupuestos-windows.zip" "s3://ingepresupuestos-downloads/v${V}/" --endpoint-url "$EP"
           # El .msix NO se sube a R2 ni al Release: es solo para Partner Center
           # (Microsoft Store). Queda como artifact de la corrida (ver retención).
-          echo "✓ binarios Windows subidos a R2/v${V}/"
-
-  # ── Publicar en winget ──────────────────────────────────────────────────
-  # Encadenado AQUÍ y no vía `on: release` en publish-winget.yml: el Release lo
-  # crea el paso de arriba con el GITHUB_TOKEN por defecto, y GitHub no dispara
-  # workflows nuevos desde eventos generados con ese token, así que el evento
-  # `release: released` no llegaba nunca (0 ejecuciones hasta la v2.8.6).
-  winget:
-    needs: build-windows
-    if: ${{ startsWith(github.ref, 'refs/tags/') && github.repository == 'ingelibre/ingepresupuestos' }}
-    uses: ./.github/workflows/publish-winget.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
+          echo "✓ instalador Windows subido a R2/v${V}/"

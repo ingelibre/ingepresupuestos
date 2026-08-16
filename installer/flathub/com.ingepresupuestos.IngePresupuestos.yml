@@ -58,7 +58,7 @@ modules:
     buildsystem: simple
     build-commands:
       - mkdir -p ${FLATPAK_DEST}/ingepresupuestos
-      - cp -a core models utils views widgets worker resources main.py presupuestos_seed.db ${FLATPAK_DEST}/ingepresupuestos/
+      - cp -a core models utils views widgets worker resources main.py presupuestos_seed.db LICENSE THIRD-PARTY-NOTICES.txt ${FLATPAK_DEST}/ingepresupuestos/
       - install -Dm755 flathub-launcher.sh ${FLATPAK_DEST}/bin/ingepresupuestos
       - install -Dm644 ${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 resources/icons/elementary/24/ingepresupuestos.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png

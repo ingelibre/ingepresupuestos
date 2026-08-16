@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Vista de Cronograma — Diagrama Gantt + Valorizado + Curva S + Insumos.
 
 Equivalente a templates/cronograma.html del Flask, adaptado a PySide6.
@@ -4676,9 +4676,6 @@ class GanttWidget(QWidget):
         Incluye: metadata del proyecto, calendario con domingos no laborables
         y feriados como excepciones, milestones, ruta crítica, dependencias
         con lag, y notas con color personalizado de barra + spec resumida."""
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os
         sugerido = os.path.join(self._dir_descargas_gantt(),
                                   f"cronograma_{self._cv.pid}.xml")
@@ -7768,9 +7765,6 @@ class ValorizadoWidget(QWidget):
         que el reporte PDF: mismas columnas, fondos sutiles para títulos y
         las 4 filas de resumen al pie, bordes finos en todas las celdas,
         freeze panes después de % Total."""
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os
         sugerido = os.path.join(self._dir_descargas(),
                                   f"valorizado_{self._cv.pid}.xlsx")
@@ -7792,9 +7786,6 @@ class ValorizadoWidget(QWidget):
     def _exportar_ods(self):
         """Exporta a OpenDocument Spreadsheet (.ods). Genera primero .xlsx
         y lo convierte vía `libreoffice --headless --convert-to ods`."""
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os, subprocess, tempfile
         from core.soffice import find_soffice, mensaje_instalacion
         soffice = find_soffice()
@@ -9488,9 +9479,6 @@ class CurvaSWidget(QWidget):
         return bytes(buf.data())
 
     def _exportar_word(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os
         if not self._last_data or (self._last_data.get('total_general', 0) <= 0):
             QMessageBox.information(self, "Exportar Word",
@@ -9781,9 +9769,6 @@ class CurvaSWidget(QWidget):
         doc.save(path)
 
     def _exportar_odt(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os, subprocess, tempfile
         from core.soffice import find_soffice, mensaje_instalacion
         soffice = find_soffice()
@@ -9831,9 +9816,6 @@ class CurvaSWidget(QWidget):
             except Exception: pass
 
     def _exportar_excel(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os
         if not self._last_data or (self._last_data.get('total_general', 0) <= 0):
             QMessageBox.information(self, "Exportar Excel",
@@ -10025,9 +10007,6 @@ class CurvaSWidget(QWidget):
         wb.save(path)
 
     def _exportar_ods(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os, subprocess, tempfile
         from core.soffice import find_soffice, mensaje_instalacion
         soffice = find_soffice()
@@ -10992,9 +10971,6 @@ class InsumosWidget(QWidget):
             except Exception: pass
 
     def _exportar_excel(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os
         sugerido = os.path.join(self._dir_descargas(),
                                   f"adquisiciones_{self._cv.pid}.xlsx")
@@ -11012,9 +10988,6 @@ class InsumosWidget(QWidget):
             QMessageBox.warning(self, "Error", f"{e}")
 
     def _exportar_ods(self):
-        from core.licencia import require_premium
-        if not require_premium('export_editable', self):
-            return
         import os, subprocess, tempfile
         from core.soffice import find_soffice, mensaje_instalacion
         soffice = find_soffice()

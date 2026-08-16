@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """acerca_view — Acerca de + contacto (≈ acerca_de.html de Flask).
 
 Layout:
@@ -62,17 +62,7 @@ def _email_valido(s: str) -> bool:
 
 def _app_info() -> list[tuple[str, str]]:
     """Ficha técnica del programa. Función (no constante) para que la
-    versión y licencia se lean siempre actualizadas."""
-    from core import licencia as L
-    lic = L.cargar()
-    # Forma corta: el estado completo (con titular) no cabe en la fila de la
-    # ficha — el detalle vive en el diálogo «Activar licencia…».
-    if lic.tipo == 'perpetua' and lic.vigente():
-        lic_str = "Perpetua · activa"
-    elif lic.tipo == 'anual' and lic.vigente():
-        lic_str = f"Anual · hasta {lic.expira}"
-    else:
-        lic_str = lic.estado_str()
+    versión se lea siempre actualizada."""
     return [
         ("Versión",          CURRENT_VERSION),
         ("Desarrollado por", "Ing. Marco Sumari"),
@@ -81,7 +71,7 @@ def _app_info() -> list[tuple[str, str]]:
         ("Backend",          "Python 3 + SQLite 3"),
         ("UI",               "PySide6 (Qt 6)"),
         ("Reportes",         "PDF · Excel · ODS · Word · ODT"),
-        ("Licencia",         lic_str),
+        ("Licencia",         "GPL-3.0-or-later · software libre"),
     ]
 
 
@@ -321,23 +311,10 @@ class AcercaView(QWidget):
         btn_update.clicked.connect(self._buscar_actualizaciones)
         col.addWidget(btn_update)
 
-        # Estado de licencia y activación de clave
-        btn_licencia = QPushButton("🔑  Activar licencia…")
-        btn_licencia.setCursor(Qt.PointingHandCursor)
-        btn_licencia.setFixedHeight(36)
-        btn_licencia.setStyleSheet(
-            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-            f" border:1px solid {SILVER_300}; border-radius:6px;"
-            f" padding:6px 14px; font-size:12px; font-weight:600; }}"
-            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-            f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-        )
-        btn_licencia.clicked.connect(self._abrir_licencia)
-        col.addWidget(btn_licencia)
-
+        # Aviso de licencia (GPL §4: el programa debe mostrar el aviso)
         lbl_libre = QLabel(
-            "© 2026 Marco Sumari · Sumari SAC\n"
-            "Todos los derechos reservados."
+            "© 2026 Marco Sumari\n"
+            "Software libre bajo la GNU GPL v3 o posterior."
         )
         lbl_libre.setWordWrap(True)
         lbl_libre.setStyleSheet(
@@ -356,11 +333,6 @@ class AcercaView(QWidget):
         """Chequeo manual de actualizaciones (no silencioso)."""
         from views.update_dialog import lanzar_check
         lanzar_check(self, silencioso=False)
-
-    def _abrir_licencia(self):
-        """Abre el diálogo de licencia — estado, activación de clave y compra."""
-        from views.licencia_dialog import mostrar_dialogo_licencia
-        mostrar_dialogo_licencia(self.window())
 
     # ── Columna derecha: contacto ──
     def _build_col_der(self) -> QWidget:

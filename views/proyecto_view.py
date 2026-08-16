@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Vista principal de proyecto — fiel a las capturas Flask.
 
 Layout:
@@ -44,7 +44,7 @@ from core.database import (
     partidas_pu_inconsistente, partida_usa_acero
 )
 from models.usuario import Usuario
-from utils.formatting import fmt, fmt_num, parse_num
+from utils.formatting import fmt, fmt_num, parse_num, parse_num_opt
 from utils.icons import icon as load_icon, icon_colored
 from utils import partidas_clipboard as _pclip
 
@@ -523,20 +523,7 @@ class _EditarRecursoDialog(QDialog):
 
 def _parse_precio(texto: str) -> float:
     """Extrae float de un texto formateado tipo 'S/ 1,234.56' o '1.234,56'."""
-    import re as _re
-    limpio = _re.sub(r'[^\d,\.]', '', texto)
-    # Detectar si la coma es separador de miles o decimal
-    if ',' in limpio and '.' in limpio:
-        if limpio.rindex('.') > limpio.rindex(','):
-            limpio = limpio.replace(',', '')         # 1,234.56 → 1234.56
-        else:
-            limpio = limpio.replace('.', '').replace(',', '.')  # 1.234,56 → 1234.56
-    elif ',' in limpio:
-        limpio = limpio.replace(',', '.')
-    try:
-        return float(limpio)
-    except ValueError:
-        return 0.0
+    return parse_num(texto)
 
 
 
@@ -841,9 +828,8 @@ class _InputCellDelegate(QStyledItemDelegate):
         acu_id = view._acu_row_ids[row]
         if acu_id <= 0:
             return
-        try:
-            val = float(editor.text().replace(',', '.'))
-        except ValueError:
+        val = parse_num_opt(editor.text())
+        if val is None:
             return
         save_col = self._save_col
         # Diferir el guardado para que el editor se cierre antes de recargar la tabla
@@ -1432,13 +1418,11 @@ class _MetradoDelegate(QStyledItemDelegate):
         editor.selectAll()
 
     def setModelData(self, editor, model, index):
-        text = editor.text().strip().replace(',', '.')
-        try:
-            val = float(text)
-            dec = get_decimales_metrado()
-            model.setData(index, f"{val:,.{dec}f}", Qt.EditRole)
-        except ValueError:
-            pass
+        val = parse_num_opt(editor.text())
+        if val is None:
+            return
+        dec = get_decimales_metrado()
+        model.setData(index, f"{val:,.{dec}f}", Qt.EditRole)
 
 
 
@@ -3805,8 +3789,7 @@ class ProyectoView(QWidget):
                         def _txt(col, defv=None):
                             c = tbl.item(r, col)
                             if not c or not c.text().strip(): return defv
-                            try: return float(c.text().replace(',','.'))
-                            except: return defv
+                            return parse_num_opt(c.text())
                         e.update({'unidad': (tbl.item(r,1).text() if tbl.item(r,1) else ''),
                                   'pct_participacion': _txt(2), 'cantidad': _txt(3),
                                   'precio': _txt(4)})
@@ -3857,8 +3840,7 @@ class ProyectoView(QWidget):
                         def _txt(col):
                             c = tbl.item(r, col)
                             if not c or not c.text().strip(): return None
-                            try: return float(c.text().replace(',', '.'))
-                            except: return None
+                            return parse_num_opt(c.text())
                         e.update({'unidad': (tbl.item(r,1).text() if tbl.item(r,1) else ''),
                                   'pct_participacion': _txt(2), 'cantidad': _txt(3),
                                   'precio': _txt(4)})
@@ -4446,9 +4428,8 @@ class ProyectoView(QWidget):
                         QLineEdit.focusInEvent(base, ev)
                     inp_pct.focusInEvent = _sel_pct
                     def _pct_done(idx=i, w=inp_pct):
-                        try:
-                            val = float(w.text().replace(',', '.'))
-                        except ValueError:
+                        val = parse_num_opt(w.text())
+                        if val is None:
                             return
                         _save_field(idx, 'pct', val)
                         self._render_pie()
@@ -5487,11 +5468,7 @@ class ProyectoView(QWidget):
             done[0] = True
             self._ins_ed = None
             ed.hide()
-            txt = ed.text().strip().replace(',', '.')
-            try:
-                nuevo = float(txt)
-            except ValueError:
-                nuevo = None
+            nuevo = parse_num_opt(ed.text())
             if nuevo is not None:
                 dec = get_decimales_ppto()
                 it_precio.setText(fmt(nuevo, self._moneda))
@@ -6531,7 +6508,24 @@ class ProyectoView(QWidget):
                     f"Eliminar {n_sel} partidas seleccionadas",
                     lambda: self._eliminar_partidas_multiple(ids)
                 )
+        # Imprimir la selección — vale con una o con varias. Solo cuenta las
+        # partidas reales: un título no tiene ACU ni metrado que imprimir.
+        pids_impr = [it.data(0, Qt.UserRole) for it in seleccionados
+                     if it.data(0, Qt.UserRole)
+                     and not it.data(0, Qt.UserRole + 1)]
+        if pids_impr:
+            menu.addSeparator()
+            _n = len(pids_impr)
+            menu.addAction(
+                tr("Imprimir") + f" {_n} partida{'s' if _n != 1 else ''}…",
+                lambda: self._imprimir_seleccion(pids_impr)
+            )
         menu.exec(self.tree.mapToGlobal(pos))
+
+    def _imprimir_seleccion(self, pids: list):
+        """Abre el flujo de impresión de las partidas seleccionadas."""
+        from views.imprimir_seleccion_dialog import imprimir_seleccion
+        imprimir_seleccion(self, self.pid, pids)
 
     def _copiar_partidas_seleccionadas(self):
         """Copia las partidas seleccionadas del árbol al clipboard global.
@@ -6944,9 +6938,11 @@ class ProyectoView(QWidget):
         part_id = item.data(0, Qt.UserRole)
         if not part_id:
             return
-        try:
-            met = float(item.text(3).replace(",", ".").strip())
-        except ValueError:
+        # El delegate ya dejó el texto formateado ("1,000.00"): parsearlo con
+        # parse_num, no tratando la coma como decimal (rompía todo metrado de
+        # 4 cifras o más y el valor no llegaba a guardarse).
+        met = parse_num_opt(item.text(3))
+        if met is None:
             return
         conn = get_db()
         conn.execute("UPDATE partidas SET metrado=? WHERE id=?", (met, part_id))
@@ -6955,10 +6951,15 @@ class ProyectoView(QWidget):
             "SELECT precio_unitario FROM partidas WHERE id=?", (part_id,)
         ).fetchone()
         conn.close()
-        pu = (pu_row['precio_unitario'] or 0) if pu_row else 0
+        pu  = (pu_row['precio_unitario'] or 0) if pu_row else 0
+        dec     = get_decimales_metrado()
+        dec_p   = get_decimales_ppto()
+        parcial = parcial_wysiwyg(met, pu, dec_p)
         self.tree.blockSignals(True)
-        item.setText(3, f"{met:,.3f}")
-        item.setText(5, fmt(_r2(met * pu), self._moneda))
+        item.setText(3, f"{met:,.{dec}f}")
+        item.setText(5, fmt_num(parcial, self._moneda, dec_p))
+        # Valor numérico para los subtotales de los títulos padre
+        item.setData(5, Qt.UserRole, float(parcial))
         # Si tenía planilla (normal o de acero), borrarla y quitar el indicador ✓
         if part_id in getattr(self, '_con_planilla', set()):
             conn2 = get_db()
@@ -6990,6 +6991,7 @@ class ProyectoView(QWidget):
             if hasattr(self, 'lbl_met_total'):
                 self.lbl_met_total.setText(f"{0:,.{get_decimales_metrado()}f}")
             self._metrado_nueva_fila()
+        self._calcular_totales_titulos(self.tree.invisibleRootItem())
         self.tree.blockSignals(False)
         self.actualizar_total()
 
@@ -7739,11 +7741,8 @@ class ProyectoView(QWidget):
             return
         if not self._ed_presupuesto:
             return
-        try:
-            rend = float(self.inp_rend.text().replace(',', '.'))
-            if rend <= 0:
-                rend = 1.0
-        except ValueError:
+        rend = parse_num(self.inp_rend.text())
+        if rend <= 0:
             rend = 1.0
         conn = get_db()
         conn.execute("UPDATE partidas SET rendimiento=? WHERE id=?",
@@ -7881,8 +7880,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = tbl.item(_r, c)
                 if it and it.text().strip():
-                    try: return float(it.text().replace(',', '.'))
-                    except: return None
+                    return parse_num_opt(it.text())
                 return None
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
             llong = _v(6); kgml = _v(8)
@@ -7915,8 +7913,7 @@ class ProyectoView(QWidget):
         if tw:
             tw.setText(3, f"{total_kg:,.{dec}f}")
             tw.setData(3, Qt.UserRole, True)
-            try: pu = float(tw.text(4).replace(',', ''))
-            except: pu = 0.0
+            pu = parse_num(tw.text(4))
             parcial_tree = parcial_wysiwyg(total_kg, pu, dec)
             tw.setText(5, fmt(parcial_tree, self._moneda, dec))
             tw.setData(5, Qt.UserRole, float(parcial_tree))
@@ -7935,8 +7932,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = tbl.item(_r, c)
                 if it and it.text().strip():
-                    try: return float(it.text().replace(',', '.'))
-                    except: return None
+                    return parse_num_opt(it.text())
                 return None
             result.append({
                 'descripcion':   (tbl.item(r, 1).text() if tbl.item(r, 1) else '').strip(),
@@ -8229,10 +8225,7 @@ class ProyectoView(QWidget):
         def val(c):
             it = tbl.item(r, c)
             if it and it.text().strip():
-                try:
-                    return float(it.text().replace(',', '.'))
-                except ValueError:
-                    return None
+                return parse_num_opt(it.text())
             return None
 
         dims  = [v for v in (val(3), val(4), val(5), val(6)) if v is not None]
@@ -8259,10 +8252,7 @@ class ProyectoView(QWidget):
         for r in range(self.tbl_acero.rowCount()):
             it = self.tbl_acero.item(r, 9)
             if it and it.text().strip():
-                try:
-                    total += float(it.text().replace(',', ''))
-                except ValueError:
-                    pass
+                total += parse_num(it.text())
         self.lbl_met_total.setText(f"{total:,.{dec}f}")
 
     def _acero_guardar_impl(self):
@@ -8288,8 +8278,7 @@ class ProyectoView(QWidget):
             def _v(c):
                 it = tbl.item(r, c)
                 if it and it.text().strip():
-                    try: return float(it.text().replace(',', '.'))
-                    except: return None
+                    return parse_num_opt(it.text())
                 return None
 
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
@@ -8333,8 +8322,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = self.tbl_met.item(_r, c)
                 if it and it.text().strip():
-                    try: return float(it.text().replace(',', '.'))
-                    except: return None
+                    return parse_num_opt(it.text())
                 return None
             result.append({
                 'descripcion':  (self.tbl_met.item(r, 0).text()
@@ -8548,10 +8536,7 @@ class ProyectoView(QWidget):
         for rr in range(self.tbl_met.rowCount()):
             it2 = self.tbl_met.item(rr, 7)
             if it2:
-                try:
-                    total += float(it2.text().replace(',', ''))
-                except ValueError:
-                    pass
+                total += parse_num(it2.text())
         self.lbl_met_total.setText(f"{total:,.{dec}f}")
         self._metrado_guardar_silencioso()
 
@@ -8572,10 +8557,7 @@ class ProyectoView(QWidget):
         for r in range(self.tbl_met.rowCount()):
             def _val(c):
                 it = self.tbl_met.item(r, c)
-                try:
-                    return float(it.text().replace(',', '.')) if it and it.text().strip() else None
-                except ValueError:
-                    return None
+                return parse_num_opt(it.text() if it else '')
 
             desc  = (self.tbl_met.item(r, 0).text() if self.tbl_met.item(r, 0) else "").strip()
             n_est = _val(1); n_el = _val(2)
@@ -8649,8 +8631,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = self.tbl_met.item(_r, c)
                 if it and it.text().strip():
-                    try: return float(it.text().replace(',', '.'))
-                    except: return None
+                    return parse_num_opt(it.text())
                 return None
             desc  = (self.tbl_met.item(r, 0).text() if self.tbl_met.item(r, 0) else '').strip()
             n_est = _v(1); n_el = _v(2); area = _v(3)
@@ -8690,10 +8671,7 @@ class ProyectoView(QWidget):
         if tw:
             tw.setText(3, f"{total:,.{dec}f}")
             tw.setData(3, Qt.UserRole, True)   # ✓ planilla
-            try:
-                pu = float(tw.text(4).replace(',', ''))
-            except ValueError:
-                pu = 0.0
+            pu = parse_num(tw.text(4))
             parcial_tree = parcial_wysiwyg(total, pu, dec)
             tw.setText(5, fmt(parcial_tree, self._moneda, dec))
             tw.setData(5, Qt.UserRole, float(parcial_tree))
@@ -8720,8 +8698,9 @@ class ProyectoView(QWidget):
             dims = []
             for c in range(1, 7):   # cols 1-6: N°Est, N°Elem, Área, Largo, Ancho, Alto
                 it = self.tbl_met.item(r, c)
-                if it and it.text().strip():
-                    dims.append(float(it.text().replace(',', '.')))
+                v = parse_num_opt(it.text() if it else '')
+                if v is not None:
+                    dims.append(v)
             parc = 1.0
             for d in dims:
                 parc *= d
@@ -8736,10 +8715,7 @@ class ProyectoView(QWidget):
             for rr in range(self.tbl_met.rowCount()):
                 it2 = self.tbl_met.item(rr, 7)
                 if it2:
-                    try:
-                        total += float(it2.text().replace(',', ''))
-                    except ValueError:
-                        pass
+                    total += parse_num(it2.text())
             self.lbl_met_total.setText(f"{total:,.{dec}f}")
             # Añadir fila vacía si el usuario llenó la última
             last = self.tbl_met.rowCount() - 1
@@ -10462,10 +10438,6 @@ class ProyectoView(QWidget):
         )
         menu.addAction(a_web)
 
-        a_lic = QAction("Licencia…", self)
-        a_lic.triggered.connect(self._ayuda_licencia)
-        menu.addAction(a_lic)
-
         a_upd = QAction("Comprobar actualizaciones…", self)
         a_upd.triggered.connect(self._ayuda_buscar_actualizaciones)
         menu.addAction(a_upd)
@@ -10485,10 +10457,6 @@ class ProyectoView(QWidget):
             "Mientras tanto: F1 muestra los atajos de teclado, y Tuxia "
             "(asistente IA) responde dudas sobre cualquier pantalla."
         )
-
-    def _ayuda_licencia(self):
-        from views.licencia_dialog import mostrar_dialogo_licencia
-        mostrar_dialogo_licencia(self)
 
     def _ayuda_buscar_actualizaciones(self):
         from views.update_dialog import lanzar_check

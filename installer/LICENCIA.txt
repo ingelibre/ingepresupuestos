@@ -1,248 +1,83 @@
-CONTRATO DE LICENCIA DE USUARIO FINAL — IngePresupuestos
-=========================================================
+LICENCIA DE SOFTWARE LIBRE — IngePresupuestos
 
-Versión 1.0 · Agosto de 2026 · Aplica a IngePresupuestos 2.9.0 y posteriores
+ÚLTIMA ACTUALIZACIÓN: Agosto 2026
 
-Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+IngePresupuestos es SOFTWARE LIBRE. Se distribuye bajo los términos de la
+Licencia Pública General de GNU (GNU GPL), versión 3 o, a su elección,
+cualquier versión posterior, publicada por la Free Software Foundation.
 
+Al instalar y utilizar el Software usted acepta los términos de dicha
+licencia. El texto completo y legalmente vinculante de la GNU GPL v3 se
+incluye en el archivo LICENSE distribuido con el Software y está también
+disponible en: https://www.gnu.org/licenses/gpl-3.0.html
 
-IMPORTANTE — LEER ANTES DE INSTALAR
-------------------------------------
 
-Este Contrato de Licencia de Usuario Final ("Contrato") es un acuerdo legal
-entre usted, sea persona natural o jurídica ("el Usuario"), y Marco Sumari /
-Sumari SAC ("el Titular"), respecto del programa IngePresupuestos, sus
-archivos asociados, bases de datos de ejemplo, documentación y
-actualizaciones ("el Software").
+1. SUS LIBERTADES
 
-Al instalar, copiar o usar el Software, el Usuario acepta quedar obligado por
-este Contrato. Si no está de acuerdo con sus términos, no instale ni use el
-Software.
+La GNU GPL le garantiza cuatro libertades esenciales:
 
-IngePresupuestos es SOFTWARE PROPIETARIO. Las versiones 2.8.8 y anteriores
-fueron distribuidas bajo la licencia GNU GPL-3.0-or-later y conservan esa
-condición; este Contrato NO las alcanza ni modifica retroactivamente sus
-términos. Este Contrato rige exclusivamente para la versión 2.9.0 en adelante.
+   - Usar el Software con cualquier propósito.
+   - Estudiar cómo funciona el Software y adaptarlo a sus necesidades;
+     el acceso al código fuente es condición para ello.
+   - Redistribuir copias del Software para ayudar a otras personas.
+   - Mejorar el Software y publicar sus mejoras, de modo que toda la
+     comunidad se beneficie.
 
+El código fuente completo está disponible en:
+https://github.com/ingelibre/ingepresupuestos
 
-1. CONCESIÓN DE LICENCIA
--------------------------
 
-El Titular concede al Usuario una licencia no exclusiva, intransferible y
-revocable para instalar y usar el Software conforme a las modalidades
-siguientes.
+2. CONDICIÓN DE COPYLEFT
 
-1.1. USO LIBRE DE COSTO (sin licencia adquirida)
+Usted puede copiar, distribuir y modificar el Software libremente, siempre
+que cualquier obra derivada o copia que distribuya se publique también
+bajo la GNU GPL v3 (o posterior) y conserve los avisos de copyright y de
+licencia. Consulte el archivo LICENSE para conocer todas las condiciones.
 
-El Software puede instalarse y usarse sin costo, sin límite de tiempo y sin
-registro, con acceso a:
 
-  a) La creación, edición y gestión de proyectos, presupuestos, análisis de
-     costos unitarios, cronogramas, metrados y fórmula polinómica, sin
-     restricción de cantidad ni de tamaño, así como el registro y consulta
-     del módulo de Control de Obra (requerimientos, almacén, cuaderno de
-     obra, valorizaciones y curva S);
-  b) Los reportes del Centro de Reportes en formato PDF y sus imágenes
-     derivadas;
-  c) Los importadores de archivos de otros programas (S10, PowerCost,
-     Delphin, Excel, IFC y base de datos nativa);
-  d) El asistente de inteligencia artificial, empleando la clave de API que
-     el propio Usuario configure y pague.
+3. SIN RESTRICCIONES DE PAGO NI DE ACTIVACIÓN
 
-1.2. PERÍODO DE PRUEBA
+Todas las funcionalidades del Software están disponibles sin costo y sin
+restricción. El Software NO requiere períodos de prueba, claves de
+licencia, activación por hardware ni pagos de ningún tipo.
 
-Desde el primer arranque, el Software habilita automáticamente treinta (30)
-días calendario de acceso completo a las funciones premium descritas en 1.3,
-sin necesidad de registro, pago ni entrega de datos personales.
 
-1.3. FUNCIONES PREMIUM
+4. AUSENCIA DE GARANTÍA
 
-Vencido el período de prueba, requieren una licencia vigente:
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO,
+EXPRESA O IMPLÍCITA, INCLUYENDO PERO NO LIMITÁNDOSE A LAS GARANTÍAS DE
+COMERCIABILIDAD E IDONEIDAD PARA UN PROPÓSITO PARTICULAR, CONFORME A LAS
+SECCIONES 15 Y 16 DE LA GNU GPL v3.
 
-  a) La exportación de reportes en formatos editables — Microsoft Excel
-     (.xlsx), OpenDocument (.ods, .odt), Microsoft Word (.docx) y Microsoft
-     Project (MSPDI .xml);
-  b) La generación de los reportes del módulo de Control de Obra
-     (valorizaciones, cuaderno de obra, control de materiales, curva S y
-     términos de referencia), en cualquier formato, incluido PDF. El
-     registro y la consulta de datos en dicho módulo permanecen libres
-     conforme a 1.1.a.
+ES RESPONSABILIDAD DEL USUARIO verificar la exactitud de los cálculos y
+resultados generados por el Software antes de su uso en obras,
+licitaciones o documentos oficiales. El Software es una herramienta de
+apoyo, no un sustituto del criterio profesional.
 
-Ninguna otra función del Software se restringe: lo descrito en 1.1
-permanece disponible de forma indefinida y sin costo.
 
-1.4. MODALIDADES DE LICENCIA
+5. PRIVACIDAD
 
-  a) LICENCIA ANUAL: habilita las funciones premium por el plazo indicado en
-     la clave de activación, contado desde su emisión.
-  b) LICENCIA PERPETUA: habilita las funciones premium sin vencimiento sobre
-     las versiones del Software a las que el Usuario tenga acceso. Incluye
-     las actualizaciones publicadas durante los veinticuatro (24) meses
-     siguientes a la emisión de la clave; vencido ese plazo, las versiones ya
-     instaladas y sus funciones premium continúan operativas sin límite de
-     tiempo, y el acceso a versiones nuevas requiere renovar el
-     mantenimiento.
+El Software almacena sus datos (proyectos, presupuestos, configuración)
+LOCALMENTE en su computador. No se transmiten al autor ni a terceros sin
+su consentimiento expreso. El Software puede consultar periódicamente si
+existen actualizaciones disponibles; esa comunicación no transmite
+información personal.
 
-1.5. ALCANCE POR EQUIPO
 
-Salvo pacto expreso en contrario, cada clave de licencia habilita un (1)
-equipo, identificado mediante un identificador de hardware. El Usuario puede
-solicitar al Titular la reemisión de su clave en caso de cambio, reparación o
-reemplazo del equipo, sin costo adicional y sin límite razonable de
-solicitudes.
+6. CONTACTO
 
-1.6. LICENCIAS PARA ORGANIZACIONES
+Para consultas, soporte técnico o para contribuir al proyecto:
 
-Las licencias adquiridas por una persona jurídica habilitan la cantidad de
-equipos pactada por escrito al momento de la compra, y pueden ser
-redistribuidas entre el personal de la organización.
+  Autor:     Ing. Marco Sumari Tellez / Sumari SAC
+  Email:     ing.sumari@gmail.com
+  WhatsApp:  +51 998 839 090
+  Web:       https://ingepresupuestos.com
+  Código:    https://github.com/ingelibre/ingepresupuestos
 
 
-2. RESTRICCIONES
------------------
+Copyright (C) 2026 Marco Sumari Tellez
 
-El Usuario no podrá:
-
-  a) Eludir, desactivar, alterar o intentar vulnerar el sistema de licencias,
-     el control del período de prueba o la verificación de firma de claves;
-  b) Distribuir, publicar, vender, alquilar, sublicenciar o poner a
-     disposición de terceros claves de licencia emitidas a su nombre;
-  c) Descompilar, desensamblar o aplicar ingeniería inversa al Software,
-     salvo en la medida en que la ley aplicable lo permita expresamente pese
-     a esta prohibición;
-  d) Retirar o alterar los avisos de propiedad intelectual, marcas o
-     atribuciones contenidos en el Software;
-  e) Redistribuir el Software modificado, o presentarlo como obra propia o de
-     un tercero distinto del Titular.
-
-La instalación y redistribución del instalador original sin modificar, con
-fines de facilitar su acceso, está permitida siempre que se conserve íntegro,
-se atribuya su autoría y no se cobre por él.
-
-
-3. PROPIEDAD INTELECTUAL
--------------------------
-
-El Software se licencia, no se vende. El Titular conserva la totalidad de los
-derechos de propiedad intelectual sobre el Software, su código fuente, su
-diseño, su documentación y sus bases de datos de ejemplo.
-
-La denominación «IngePresupuestos», el logotipo, la identidad visual y el
-dominio ingepresupuestos.com son signos distintivos de titularidad de Marco
-Sumari / Sumari SAC. Ninguna licencia sobre el Software otorga derecho alguno
-sobre ellos.
-
-
-4. DATOS DEL USUARIO
----------------------
-
-Los proyectos, presupuestos, precios, análisis de costos unitarios y todo
-contenido creado o incorporado por el Usuario son de su exclusiva propiedad.
-El Titular no reclama derecho alguno sobre ellos.
-
-El Software funciona íntegramente en el equipo del Usuario y no transmite sus
-datos de proyecto a ningún servidor del Titular. La activación de licencia se
-realiza sin conexión, mediante verificación local de firma criptográfica. Si
-el Usuario configura el asistente de inteligencia artificial, las consultas
-que formule se envían al proveedor de IA que él mismo haya elegido y
-configurado, bajo los términos y la política de privacidad de dicho proveedor.
-
-
-5. COMPONENTES DE TERCEROS
----------------------------
-
-El Software incorpora componentes de terceros distribuidos bajo sus propias
-licencias, entre ellos Qt/PySide6 bajo LGPL-3.0. El detalle completo de estos
-componentes, sus titulares y sus licencias consta en el archivo
-THIRD-PARTY-NOTICES.txt que acompaña a esta distribución.
-
-Nada en este Contrato restringe los derechos que dichas licencias de terceros
-otorgan al Usuario respecto de esos componentes. En caso de conflicto entre
-este Contrato y la licencia de un componente de terceros, prevalece esta
-última respecto de ese componente.
-
-
-6. AUSENCIA DE GARANTÍA
-------------------------
-
-EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O
-IMPLÍCITA, INCLUYENDO SIN LIMITARSE A LAS GARANTÍAS DE COMERCIABILIDAD,
-IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN.
-
-ADVERTENCIA PROFESIONAL: el Software es una herramienta de apoyo al cálculo.
-Los presupuestos, metrados, cronogramas, valorizaciones y fórmulas
-polinómicas que produce deben ser revisados y validados por el profesional
-responsable antes de su uso en licitaciones, contrataciones, valorizaciones o
-cualquier acto con efectos legales o económicos. El Titular no sustituye ni
-asume el criterio, la revisión ni la responsabilidad profesional del Usuario.
-
-
-7. LIMITACIÓN DE RESPONSABILIDAD
----------------------------------
-
-En la máxima medida permitida por la ley aplicable, el Titular no será
-responsable por daños indirectos, incidentales, especiales, punitivos o
-consecuentes, ni por lucro cesante, pérdida de datos, pérdida de
-oportunidades de negocio, sanciones contractuales o administrativas, o
-perjuicios derivados de errores de cálculo, presupuestos observados o
-decisiones tomadas sobre la base de los resultados del Software.
-
-La responsabilidad total y acumulada del Titular por cualquier concepto
-derivado de este Contrato no excederá el monto efectivamente pagado por el
-Usuario por la licencia durante los doce (12) meses anteriores al hecho que
-origine el reclamo.
-
-Ninguna disposición de este Contrato excluye o limita la responsabilidad del
-Titular por dolo o culpa inexcusable, ni los derechos irrenunciables que la
-legislación peruana de protección al consumidor reconozca al Usuario cuando
-este actúe como consumidor final.
-
-
-8. ACTUALIZACIONES
--------------------
-
-El Titular puede publicar actualizaciones del Software, sin estar obligado a
-hacerlo. Las licencias anuales incluyen las actualizaciones publicadas
-durante su vigencia. Las licencias perpetuas incluyen las actualizaciones
-publicadas durante los veinticuatro (24) meses siguientes a la emisión de la
-clave, conforme a la cláusula 1.4.b.
-
-El Titular puede modificar los términos de este Contrato para versiones
-futuras. Los términos aceptados al momento de la compra rigen la licencia
-adquirida; ninguna modificación posterior reduce retroactivamente los
-derechos ya adquiridos por el Usuario.
-
-
-9. VIGENCIA Y RESOLUCIÓN
--------------------------
-
-Este Contrato rige desde la instalación del Software y hasta su desinstalación
-o hasta la resolución por incumplimiento.
-
-El Titular puede resolver este Contrato si el Usuario incumple gravemente lo
-establecido en la cláusula 2, previa comunicación al correo registrado. La
-resolución obliga al Usuario a cesar el uso y desinstalar el Software; no
-genera derecho a devolución cuando el incumplimiento sea imputable al
-Usuario.
-
-
-10. LEY APLICABLE Y JURISDICCIÓN
----------------------------------
-
-Este Contrato se rige por las leyes de la República del Perú. Las
-controversias que se deriven de él se someten a la jurisdicción de los jueces
-y tribunales del Cercado de Lima, salvo que la ley imponga un fuero distinto
-en favor del consumidor.
-
-Si alguna disposición de este Contrato fuese declarada inválida o
-inaplicable, las restantes conservarán plena vigencia.
-
-
-11. CONTACTO
--------------
-
-Marco Sumari / Sumari SAC — Arquitectura + Ingeniería
-Correo:    ing.sumari@gmail.com
-WhatsApp:  +51 998 839 090
-Web:       https://ingepresupuestos.com
-Licencias: https://ingepresupuestos.com/licencia
+Este programa es software libre: usted puede redistribuirlo y/o
+modificarlo bajo los términos de la GNU General Public License publicada
+por la Free Software Foundation, ya sea la versión 3 de la Licencia o
+(a su elección) cualquier versión posterior. Véase el archivo LICENSE.

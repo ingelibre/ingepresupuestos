@@ -26,6 +26,13 @@ ROOT = Path(SPECPATH).resolve()
 # ── Assets que se bundlean dentro del ejecutable ─────────────────────────────
 # Cada tupla = (origen_relativo_al_repo, destino_relativo_al_bundle).
 datas = [
+    # Licencia y avisos de terceros — NO son opcionales: la GPLv3 §4 obliga a
+    # entregar copia de la licencia junto al programa, y el aviso del
+    # instalador remite explícitamente a este archivo. Al copiarlos aquí
+    # llegan solos al instalador Windows, al .msix y al AppImage, porque los
+    # tres empaquetan el output de PyInstaller.
+    ('LICENSE',                 '.'),
+    ('THIRD-PARTY-NOTICES.txt',  '.'),
     ('resources/icons/elementary/24/*.svg',  'resources/icons/elementary/24'),
     ('resources/icons/elementary/24/*.png',  'resources/icons/elementary/24'),
     ('resources/icons/elementary/24/*.ico',  'resources/icons/elementary/24'),
@@ -39,9 +46,6 @@ datas = [
     ('resources/styles/*.qss',               'resources/styles'),
     ('presupuestos_seed.db',                 '.'),
     ('ingepresupuesto-icon.svg',             '.'),
-    # Clave pública para verificar firmas de licencias. La privada NUNCA
-    # se incluye (vive solo en la máquina de Marco).
-    ('resources/license_public.pem',         'resources'),
     # Base UBIGEO del Perú (INEI) para autocompletar la ubicación.
     ('resources/ubigeo_peru.json',           'resources'),
     # Mapa QML (QtLocation/OSM) para marcar la ubicación del proyecto.
@@ -108,7 +112,7 @@ hiddenimports = [
     'werkzeug',
     'PIL',
     'PIL.Image',
-    # Sistema de licencias premium — RSA-PSS verify.
+    # Lo pide pdfminer.six (importador de PDF) para los PDF cifrados.
     'cryptography',
     'cryptography.hazmat.primitives.serialization',
     'cryptography.hazmat.primitives.asymmetric.padding',

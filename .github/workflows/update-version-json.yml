@@ -3,7 +3,7 @@
 # Para qué sirve: el changelog de version.json es lo que la app muestra en el
 # aviso de actualización. Si sale mal (o quieres reescribirlo después de
 # publicar), reconstruir toda la release son ~13 min y arriesga duplicar el PR
-# de winget. Esto tarda segundos y solo toca el JSON.
+# del feed de actualizaciones. Esto tarda segundos y solo toca el JSON.
 #
 #   gh workflow run update-version-json.yml -f version=2.8.6 -f notas="Lo nuevo…"
 #

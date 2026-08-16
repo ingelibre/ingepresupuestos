@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>com.ingepresupuestos.IngePresupuestos</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>LicenseRef-proprietary</project_license>
+  <project_license>GPL-3.0-or-later</project_license>
 
   <name>IngePresupuestos</name>
   <summary>Presupuestos de obra, ACU y cronogramas para ingeniería civil</summary>
@@ -85,6 +85,11 @@
   </branding>
 
   <releases>
+    <release version="3.0.0" date="2026-08-15">
+      <description>
+        <p>IngePresupuestos es software libre (GPL-3.0): todas las funciones disponibles, sin pagos ni registro. Corregido el cálculo de las cantidades de cuatro cifras o más, que se perdían al escribirlas.</p>
+      </description>
+    </release>
     <release version="2.8.4" date="2026-07-20">
       <description>
         <p>Icono de documento propio para los archivos .db también en Linux. Importación de bases PowerCost (.prs) corregida en la edición Flatpak. Los botones ODT/ODS se ocultan cuando LibreOffice no está disponible en el sandbox.</p>

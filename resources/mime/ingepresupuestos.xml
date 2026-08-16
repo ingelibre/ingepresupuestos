@@ -11,7 +11,7 @@
   Lo instala install-linux.sh en ~/.local/share/mime/packages/ y luego
   ejecuta update-mime-database.
   SPDX-License-Identifier: GPL-3.0-or-later
-  Copyright (C) 2026 Marco Sumari / Sumari SAC
+  Copyright (C) 2026 Marco Sumari
 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-ingepresupuestos-db">

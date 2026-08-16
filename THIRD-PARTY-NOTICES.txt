@@ -1,13 +1,13 @@
 AVISOS DE COMPONENTES DE TERCEROS — IngePresupuestos
 =====================================================
 
-IngePresupuestos 2.9.0 y posteriores es software propietario
-(Copyright (C) 2026 Marco Sumari / Sumari SAC), pero incorpora y distribuye
+IngePresupuestos es software libre bajo la GNU GPL v3 o posterior
+(Copyright (C) 2026 Marco Sumari), e incorpora y distribuye
 componentes de terceros que se rigen por sus propias licencias.
 
 Este archivo cumple las obligaciones de atribución de dichas licencias. Nada
-en el Contrato de Licencia de Usuario Final de IngePresupuestos restringe los
-derechos que estas licencias otorgan al Usuario sobre estos componentes.
+en la licencia de IngePresupuestos restringe los derechos que estas licencias
+otorgan al Usuario sobre estos componentes.
 
 
 1. Qt / PySide6 — LGPL-3.0  (IMPORTANTE)

@@ -17,11 +17,12 @@ NOTAS="${2:-}"
 BASE="${BASE_URL:-https://downloads.ingepresupuestos.com}"
 OUT="${OUT_FILE:-version.json}"
 
-# ── Los 4 binarios deben existir ya en R2 o publicaríamos enlaces rotos ──────
+# ── Los 2 binarios deben existir ya en R2 o publicaríamos enlaces rotos ──────
+# Desde la 3.0 solo se publican el instalador Windows y el AppImage: los
+# paquetes portables (.zip y .tar.gz) se retiraron. Los otros dos canales
+# —Microsoft Store y Flatpak— se actualizan solos y no van en version.json.
 FILES="v${V}/ingepresupuestos-setup-v${V}.exe
-v${V}/ingepresupuestos-windows.zip
-v${V}/IngePresupuestos-${V}-x86_64.AppImage
-v${V}/ingepresupuestos-linux.tar.gz"
+v${V}/IngePresupuestos-${V}-x86_64.AppImage"
 faltan=""
 for f in $FILES; do
     curl -fsI "${BASE}/${f}" >/dev/null 2>&1 || faltan="${faltan} ${f}"
@@ -55,9 +56,7 @@ jq -n --arg v "$V" --arg date "$(date +%F)" --arg cl "$NOTAS" --argjson ic "$ICO
   '{version:$v, release_date:$date, changelog:$cl, minimum_version:null,
     downloads:{
       windows_installer:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-setup-v"+$v+".exe"),
-      windows_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-windows.zip"),
-      linux_appimage:("https://downloads.ingepresupuestos.com/v"+$v+"/IngePresupuestos-"+$v+"-x86_64.AppImage"),
-      linux_portable:("https://downloads.ingepresupuestos.com/v"+$v+"/ingepresupuestos-linux.tar.gz")
+      linux_appimage:("https://downloads.ingepresupuestos.com/v"+$v+"/IngePresupuestos-"+$v+"-x86_64.AppImage")
     },
     download_url:"https://ingepresupuestos.com/#descargar"}
    + (if $ic==null then {} else {ingeconverter:$ic} end)' > "$OUT"

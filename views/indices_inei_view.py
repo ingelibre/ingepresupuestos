@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """indices_inei_view — Histórico de Índices Unificados de Precios INEI.
 
 Layout:
@@ -36,7 +36,7 @@ from core.indices_inei import (
     buscar_ultimo_excel_inei, descargar_ultimo_inei,
 )
 from utils.icons import icon
-from utils.formatting import parse_num
+from utils.formatting import parse_num, parse_num_opt
 
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
@@ -577,10 +577,9 @@ class IndicesINEIView(QWidget):
         for c in range(12):
             it = self.tbl.item(row, c)
             if it and it.text().strip():
-                try:
-                    valores.append(float(it.text().strip()))
-                except Exception:
-                    pass
+                v = parse_num_opt(it.text())
+                if v is not None:
+                    valores.append(v)
         it_avg = self.tbl.item(row, 12)
         if not it_avg:
             return

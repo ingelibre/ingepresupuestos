@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """ingePresupuestos — PySide6 entry point."""
 import sys
 import os
@@ -171,16 +171,6 @@ def main():
         if not es_flatpak():
             from core.fonts_installer import instalar_fuentes_si_falta
             instalar_fuentes_si_falta()
-    except Exception:
-        pass
-
-    # Trial de 30 días al primer arranque (no-op si ya existe license.json).
-    # El trial es full: el usuario tiene 30 días de todo premium sin tocar
-    # nada. Tras vencer, los exports editables / cronogramas / Gantt PDF
-    # quedan bloqueados; PDF queda libre siempre.
-    try:
-        from core.licencia import iniciar_trial_si_falta
-        iniciar_trial_si_falta()
     except Exception:
         pass
 

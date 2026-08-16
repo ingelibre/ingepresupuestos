@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Sistema simple y profesional de actualizaciones.
 
 Funcionalidad:
@@ -10,9 +10,7 @@ Funcionalidad:
   instalado, ``urllib`` como fallback de stdlib).
 * Compara versiones semver (``1.2.3`` vs ``2.0.0``).
 * Persiste estado local en ``USER_DATA_DIR``:
-    - ``license.json``      → tipo de licencia + clave (trial/perpetual/...).
     - ``update_state.json`` → contador de descargas, versión saltada, último check.
-* Limita descargas para usuarios trial; perpetuos/suscripción tienen ilimitado.
 
 Para hostear ``version.json`` ver el docstring abajo. Bumpea ``CURRENT_VERSION``
 en cada release del binario.
@@ -40,11 +38,7 @@ CURRENT_VERSION = "2.9.0"
 #: Servido desde Cloudflare R2 (bucket público vía custom domain).
 VERSION_URL = "https://downloads.ingepresupuestos.com/version.json"
 
-#: Cuántas descargas permite el plan trial antes de exigir licencia.
-TRIAL_MAX_DOWNLOADS = 6
-
 #: Archivos locales de estado.
-LICENSE_FILE = USER_DATA_DIR / "license.json"
 UPDATE_STATE_FILE = USER_DATA_DIR / "update_state.json"
 
 
@@ -87,58 +81,6 @@ class VersionInfo:
             minimum_version=d.get('minimum_version'),
         )
 
-
-@dataclass
-class LicenseInfo:
-    """Información de licencia del usuario.
-
-    Tipos soportados:
-        * ``trial``        — limitada (TRIAL_MAX_DOWNLOADS descargas)
-        * ``perpetual``/``perpetua`` — licencia perpetua, descargas ilimitadas
-        * ``subscription``/``anual`` — suscripción activa, descargas ilimitadas
-    """
-    tipo: str = 'trial'
-    licencia_key: str = ''
-    expira: str = ''        # fecha ISO, vacío = sin vencimiento
-    emitida: str = ''       # fecha ISO de emisión (ventana de updates perpetua)
-    activo: bool = True
-
-    _TIPOS_ILIMITADOS = frozenset({
-        'perpetual', 'perpetua', 'subscription', 'anual',
-    })
-
-    #: La licencia perpetua desbloquea premium para siempre, pero solo
-    #: recibe ACTUALIZACIONES durante este plazo desde su emisión
-    #: (S/ 300 · 2 años de updates — decidido 2026-08-07).
-    MANT_PERPETUA_DIAS = 730
-
-    def mantenimiento_vigente(self) -> bool:
-        """True si una perpetua aún está dentro de su ventana de updates.
-        Sin ``emitida`` (licencias viejas o license.json degradado) se
-        concede el beneficio de la duda — nunca bloquear por dato faltante."""
-        if self.tipo not in ('perpetual', 'perpetua') or not self.emitida:
-            return True
-        try:
-            ini = datetime.fromisoformat(self.emitida)
-        except ValueError:
-            return True
-        return datetime.now() <= ini + timedelta(days=self.MANT_PERPETUA_DIAS)
-
-    def es_ilimitada(self) -> bool:
-        """True si la licencia permite descargas ilimitadas."""
-        if not self.activo:
-            return False
-        if self.tipo not in self._TIPOS_ILIMITADOS:
-            return False
-        # Si tiene fecha de vencimiento, validarla
-        if self.expira:
-            try:
-                fin = datetime.fromisoformat(self.expira)
-                if fin < datetime.now():
-                    return False
-            except ValueError:
-                pass
-        return True
 
 
 @dataclass
@@ -211,35 +153,6 @@ def es_msix() -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Licencia (lectura/escritura)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cargar_licencia() -> LicenseInfo:
-    """Carga la licencia desde disco. Si el archivo no existe o está corrupto,
-    devuelve un trial por defecto."""
-    if not LICENSE_FILE.exists():
-        return LicenseInfo()
-    try:
-        with LICENSE_FILE.open('r', encoding='utf-8') as f:
-            d = json.load(f)
-        return LicenseInfo(
-            tipo=str(d.get('tipo', 'trial')),
-            licencia_key=str(d.get('licencia_key', '')),
-            expira=str(d.get('expira', '')),
-            emitida=str(d.get('emitida', '')),
-            activo=bool(d.get('activo', True)),
-        )
-    except (OSError, json.JSONDecodeError):
-        return LicenseInfo()
-
-
-# NOTA: aquí solo se LEE license.json. La única escritura vive en
-# ``core.licencia.guardar()`` — hubo un ``guardar_licencia()`` local (sin
-# callers) que persistía un subconjunto de campos y habría destruido
-# ``emitida``/``machine_id``/``nombre`` al usarse; se eliminó a propósito.
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Estado (descargas, versión saltada)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -278,17 +191,6 @@ def _guardar_state(state: UpdateState) -> None:
         }, f, indent=2)
 
 
-def get_download_count() -> int:
-    """Cuántas descargas ha iniciado el usuario."""
-    return _cargar_state().downloads_count
-
-
-def increment_download_count() -> int:
-    """Aumenta el contador (llamar al lanzar la descarga). Returns nuevo total."""
-    state = _cargar_state()
-    state.downloads_count += 1
-    _guardar_state(state)
-    return state.downloads_count
 
 
 def skip_version(version: str) -> None:
@@ -348,40 +250,6 @@ def _horas_desde_ultimo_check() -> float:
 # ─────────────────────────────────────────────────────────────────────────────
 # Permisos de descarga
 # ─────────────────────────────────────────────────────────────────────────────
-
-def can_download(licencia: Optional[LicenseInfo] = None) -> tuple[bool, str]:
-    """Determina si el usuario puede descargar la actualización.
-
-    Returns:
-        ``(puede, razon_si_no_puede)``
-    """
-    info = licencia if licencia is not None else cargar_licencia()
-    if info.es_ilimitada():
-        if not info.mantenimiento_vigente():
-            return False, (
-                "Tu licencia perpetua incluyó 2 años de actualizaciones y "
-                "ese período ya venció. El programa y todas tus funciones "
-                "premium siguen funcionando con normalidad — solo las "
-                "versiones nuevas requieren renovar el mantenimiento.\n\n"
-                "Escríbenos por WhatsApp o visita ingepresupuestos.com/licencia."
-            )
-        return True, ""
-    count = get_download_count()
-    if count >= TRIAL_MAX_DOWNLOADS:
-        return False, (
-            f"Tu plan trial permite hasta {TRIAL_MAX_DOWNLOADS} descargas de "
-            f"actualizaciones. Ya has descargado {count} veces. "
-            "Adquiere una licencia perpetua o suscripción para descargas "
-            "ilimitadas."
-        )
-    restantes = TRIAL_MAX_DOWNLOADS - count
-    razon_warning = (
-        f"(plan trial — te quedan {restantes} descarga"
-        f"{'s' if restantes != 1 else ''})"
-    )
-    # Permite pero deja el warning como segunda parte del tuple para que la
-    # UI pueda mostrarlo como advertencia opcional.
-    return True, razon_warning
 
 
 # ─────────────────────────────────────────────────────────────────────────────

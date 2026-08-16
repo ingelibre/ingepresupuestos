@@ -18,7 +18,8 @@
 #   4. Crea tag anotado vX.Y.Z.
 #   5. Pushea commit y tag a GitHub.
 #   6. GitHub Actions detecta el tag y arranca los builds Linux+Windows.
-#   7. Cuando terminan (~10 min), los .zip aparecen en la página Releases.
+#   7. Cuando terminan (~10 min), el instalador .exe y el AppImage aparecen
+#      en la página Releases (y en R2, junto con el version.json del updater).
 #
 # Si algo falla, lee el mensaje y arregla — el script NO continúa por su cuenta.
 
@@ -130,4 +131,9 @@ echo "  1. Abre https://github.com/ingelibre/ingepresupuestos/actions"
 echo "  2. Verás dos workflows corriendo: 'Build Linux' y 'Build Windows'"
 echo "  3. Cuando ambos terminen, los binarios aparecen en:"
 echo "     https://github.com/ingelibre/ingepresupuestos/releases/tag/${TAG}"
-echo "  4. Descarga ingepresupuestos-windows.zip y pásaselo a los beta testers."
+echo "     (instalador .exe de Windows y AppImage de Linux — no hay portables)"
+echo "  4. El repo Flatpak se publica solo al terminar el build Linux."
+echo "  5. A mano: bajar el .msix con 'gh run download' y subirlo a Partner"
+echo "     Center (Microsoft Store) DENTRO DE LA SEMANA — el artifact caduca"
+echo "     a los 7 días."
+echo "  6. A mano: publicar la web (cd ../web && npx wrangler deploy)."

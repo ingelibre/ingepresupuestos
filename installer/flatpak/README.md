@@ -49,7 +49,8 @@ flatpak install --user flathub org.flatpak.Builder \
 - Reemplazar el `pip install` con red por un módulo pip **offline** con hashes
   (`flatpak-pip-generator`).
 - Capturas (`<screenshots>`) en el `.metainfo.xml`.
-- Resolver la licencia: Flathub exige que el manifiesto sea reproducible; el
-  código puede seguir siendo propietario, pero conviene revisar los términos.
+- ~~Resolver la licencia~~ — **resuelto**: el código es GPL-3.0-or-later desde
+  la 3.0, que es justo lo que Flathub espera. Queda solo el requisito de
+  manifiesto reproducible (el `pip install` offline de arriba).
 - Empaquetar **mdbtools** dentro (para no depender del host) si se quiere que
   la importación `.prs` funcione sin instalar nada extra.

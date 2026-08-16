@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LicenseRef-Proprietary
-# Copyright (C) 2026 Marco Sumari / Sumari SAC. Todos los derechos reservados.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
-# Software propietario. Uso sujeto al Contrato de Licencia (archivo LICENSE).
+# Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Generación nativa de reportes PDF con QTextDocument + QPdfWriter.
 
 Diseño profesional Elementary OS:
@@ -582,7 +582,8 @@ def _html_meta_proyecto(proy: dict) -> str:
 
 
 def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
-                     incluir_meta=True, todo_costo=False) -> str:
+                     incluir_meta=True, todo_costo=False,
+                     extracto=False) -> str:
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
     dec = get_decimales_ppto()
     _o_hp, _od_hp, _os_hp = _brand_colors()
@@ -761,7 +762,14 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     # Pie de presupuesto — refleja exactamente el pie configurado en la
     # pestaña «Pie» del proyecto (lee `pie_rubros` activos + `gastos_generales`).
     # En modo «precio cerrado» se usa el pie reducido (Sub Total + IGV + Total).
-    if pie_override is not None:
+    if extracto:
+        # Extracto de una selección de partidas: NO se emite el pie del
+        # proyecto. GG, utilidad e IGV son porcentajes sobre el costo directo
+        # COMPLETO; aplicarlos a una selección parcial daría un «total» que no
+        # corresponde a nada. Se cierra con el subtotal de lo seleccionado.
+        pie_rows = [("Subtotal de las partidas seleccionadas",
+                     totales.get('cd', 0) or 0, 'total')]
+    elif pie_override is not None:
         pie_rows = pie_override
     else:
         pie_rows = _build_pie_rows(pid, totales.get('cd', 0) or 0)
@@ -779,6 +787,17 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         '<table class="totales" align="right" width="55%">'
         f'{"".join(tot_html)}</table>'
     )
+    if extracto:
+        # Aviso explícito: que nadie confunda el extracto con el presupuesto.
+        parts.append('<p style="margin-top:14pt">&nbsp;</p>')
+        parts.append(
+            f'<p style="margin-top:0;font-style:italic;color:{SLATE_700};'
+            f' font-size:9pt">Extracto: incluye únicamente las partidas '
+            f'seleccionadas. No es el presupuesto del proyecto y no lleva '
+            f'gastos generales, utilidad ni IGV.</p>'
+        )
+        return "\n".join(parts)
+
     # Monto total en letras — debajo del pie, alineado a la derecha
     total_letras = _monto_en_letras(totales.get('total', 0) or 0,
                                      proy.get('moneda') or 'Soles')
@@ -4362,10 +4381,69 @@ def _html_formula_polinomica(pid: int, proy: dict) -> str:
     )
 
 
-def _build_html_for(tipo: str, pid: int) -> tuple[str, str, dict]:
-    """Devuelve (titulo, body_html, proy) para el tipo de reporte solicitado."""
+def filtrar_items_por_pids(items: list, solo_pids) -> list:
+    """Recorta `items` a las partidas indicadas, **conservando los títulos
+    padre** para que el extracto no pierda el contexto de sección, y con el
+    subtotal de cada título **recalculado sobre lo que queda**.
+
+    Se trabaja por POSICIÓN, no por código de ítem: en proyectos con varios
+    sub-presupuestos los códigos se repiten (verificado en el seed: un
+    proyecto con 1028 filas y solo 957 ítems únicos). Buscar por código
+    arrastraría partidas homónimas de otro sub-presupuesto y sumaría sus
+    montos en el título equivocado. Para cada partida elegida se toma el
+    título ANTERIOR más cercano cuyo código sea prefijo del suyo.
+
+    Con `solo_pids` vacío o None devuelve `items` tal cual.
+    """
+    if not solo_pids:
+        return items
+    solo_pids = set(solo_pids)
+
+    conservar: set[int] = set()
+    #: índice del título → total acumulado de las partidas elegidas que cuelgan
+    aporte: dict[int, float] = {}
+
+    for i, e in enumerate(items):
+        p = e['partida']
+        if p.get('es_titulo') or p['id'] not in solo_pids:
+            continue
+        conservar.add(i)
+        partes = (p.get('item') or '').split('.')
+        pendientes = {'.'.join(partes[:k]) for k in range(1, len(partes))}
+        for j in range(i - 1, -1, -1):          # hacia atrás: el más cercano
+            if not pendientes:
+                break
+            q = items[j]['partida']
+            code = q.get('item') or ''
+            if q.get('es_titulo') and code in pendientes:
+                conservar.add(j)
+                pendientes.discard(code)
+                aporte[j] = aporte.get(j, 0) + (e.get('total') or 0)
+
+    return [dict(e, total=aporte.get(i, 0)) if e['partida'].get('es_titulo')
+            else dict(e)
+            for i, e in enumerate(items) if i in conservar]
+
+
+def _build_html_for(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict]:
+    """Devuelve (titulo, body_html, proy) para el tipo de reporte solicitado.
+
+    `solo_pids` restringe el reporte a un subconjunto de partidas (impresión
+    de la selección del árbol). El presupuesto pasa a modo **extracto**: sin
+    pie de GG/utilidad/IGV, porque esos porcentajes son del proyecto entero y
+    aplicarlos a una selección parcial daría un total que no existe.
+    """
     proy = _proyecto_info(pid)
     items, totales = calcular_totales(pid)
+
+    if solo_pids:
+        # filtrar_items_por_pids ya deja los subtotales de los títulos
+        # recalculados sobre las partidas que de verdad se imprimen.
+        items = filtrar_items_por_pids(items, solo_pids)
+        cd_sel = sum((e.get('total') or 0) for e in items
+                     if not e['partida'].get('es_titulo'))
+        totales = {'cd': cd_sel, 'gf': 0, 'utilidad': 0,
+                   'subtotal': cd_sel, 'igv': 0, 'total': cd_sel}
 
     if tipo == 'memoria_descriptiva':
         return ('Memoria Descriptiva',
@@ -4376,8 +4454,9 @@ def _build_html_for(tipo: str, pid: int) -> tuple[str, str, dict]:
                 _html_resumen_ejecutivo(pid, proy, items, totales),
                 proy)
     if tipo == 'presupuesto':
-        return ('Presupuesto',
-                _html_presupuesto(pid, proy, items, totales),
+        return ('Presupuesto' if not solo_pids else 'Presupuesto — extracto',
+                _html_presupuesto(pid, proy, items, totales,
+                                  extracto=bool(solo_pids)),
                 proy)
     if tipo == 'presupuesto_cerrado':
         # Título neutro «Presupuesto» a propósito: el documento que el usuario
@@ -4540,8 +4619,12 @@ def _especificaciones_chunked(pid: int, with_cover: bool,
 
 
 def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
-                  paper: str = 'A4', orient: str = 'portrait') -> io.BytesIO:
-    """Genera un PDF en memoria para el tipo y proyecto dado."""
+                  paper: str = 'A4', orient: str = 'portrait',
+                  solo_pids=None) -> io.BytesIO:
+    """Genera un PDF en memoria para el tipo y proyecto dado.
+
+    `solo_pids` restringe el reporte a esas partidas (ver `_build_html_for`).
+    """
     _BUILD_HTML_PAPER['paper'] = paper
     _BUILD_HTML_PAPER['orient'] = orient
     if tipo == 'especificaciones':
@@ -4549,7 +4632,7 @@ def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
         if prep is not None:
             renderer, title_html, chunks = prep
             return renderer.render_chunks_to_buffer(title_html, chunks)
-    titulo, body, proy = _build_html_for(tipo, pid)
+    titulo, body, proy = _build_html_for(tipo, pid, solo_pids)
     renderer = _PdfRenderer(proy, titulo, with_cover=with_cover,
                               paper=paper, orient=orient)
     return renderer.render_to_buffer(body)
@@ -4558,7 +4641,8 @@ def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
 def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
                           with_cover: bool = True,
                           paper: str = 'A4', orient: str = 'portrait',
-                          pie_offset: int = 0, pie_total: int | None = None):
+                          pie_offset: int = 0, pie_total: int | None = None,
+                          solo_pids=None):
     """Genera un PDF y lo guarda en disco.
 
     `pie_offset` / `pie_total` permiten numeración continua cuando este PDF
@@ -4575,7 +4659,7 @@ def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
             renderer.pie_total  = int(pie_total) if pie_total else None
             renderer.render_chunks_to_file(title_html, chunks, out_path)
             return
-    titulo, body, proy = _build_html_for(tipo, pid)
+    titulo, body, proy = _build_html_for(tipo, pid, solo_pids)
     renderer = _PdfRenderer(proy, titulo, with_cover=with_cover,
                               paper=paper, orient=orient,
                               pie_offset=pie_offset, pie_total=pie_total)
