@@ -8707,9 +8707,12 @@ class CurvaSWidget(QWidget):
             self.tbl_ftr.setItem(0, c, it)
         self.tbl_ftr.setFixedHeight(self.tbl_ftr.verticalHeader().defaultSectionSize() + 2)
 
-        # Sincronizar scroll horizontal de tabla y footer
-        self.tbl.horizontalScrollBar().valueChanged.connect(
-            self.tbl_ftr.horizontalScrollBar().setValue)
+        # Sincronizar scroll horizontal de tabla y footer — UNA sola vez:
+        # cargar() corre en cada recarga y apilaba una conexión más por pasada.
+        if not getattr(self, '_scroll_sync_conectado', False):
+            self.tbl.horizontalScrollBar().valueChanged.connect(
+                self.tbl_ftr.horizontalScrollBar().setValue)
+            self._scroll_sync_conectado = True
 
         # ── Dibujar gráfico ──
         self._dibujar_chart()

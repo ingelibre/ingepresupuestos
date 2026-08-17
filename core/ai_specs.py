@@ -257,19 +257,30 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
 # ── Llamada unificada ──────────────────────────────────────────────────────
 
 def _llamar_ia(prompt: str, api_key: str, max_tokens: int = 1500):
-    """Despacha al proveedor activo configurado en la BD."""
+    """Despacha al proveedor activo configurado en la BD.
+
+    Garantiza el contrato «(texto, None) o (None, error)»: una respuesta
+    VACÍA sin error (filtro de contenido, completion en blanco) se convierte
+    aquí en error. Sin esta normalización, los callers que guardan el texto
+    escribían NULL en la BD (borrando la especificación o la memoria que el
+    usuario ya tenía) y los que hacen re.search(texto) morían con TypeError.
+    """
     proveedor = _proveedor_activo()
     if proveedor == 'ollama':
-        return _llamar_ollama(prompt, max_tokens)
-    if proveedor == 'groq':
-        return _llamar_groq(prompt, api_key, max_tokens)
-    if proveedor == 'openai':
-        return _llamar_openai(prompt, api_key, max_tokens)
-    if proveedor == 'gemini':
-        return _llamar_gemini(prompt, api_key, max_tokens)
-    if proveedor == 'openrouter':
-        return _llamar_openrouter(prompt, api_key, max_tokens)
-    return _llamar_anthropic(prompt, api_key, max_tokens)
+        texto, error = _llamar_ollama(prompt, max_tokens)
+    elif proveedor == 'groq':
+        texto, error = _llamar_groq(prompt, api_key, max_tokens)
+    elif proveedor == 'openai':
+        texto, error = _llamar_openai(prompt, api_key, max_tokens)
+    elif proveedor == 'gemini':
+        texto, error = _llamar_gemini(prompt, api_key, max_tokens)
+    elif proveedor == 'openrouter':
+        texto, error = _llamar_openrouter(prompt, api_key, max_tokens)
+    else:
+        texto, error = _llamar_anthropic(prompt, api_key, max_tokens)
+    if error is None and not (texto and str(texto).strip()):
+        return None, 'La IA no devolvió contenido. Intenta de nuevo.'
+    return texto, error
 
 
 # ── Probar conexión ────────────────────────────────────────────────────────

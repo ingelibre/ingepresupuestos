@@ -690,8 +690,8 @@ class MetradosView(QWidget):
         parc_m = 1.0
         for d in dims:
             parc_m *= d
-        parc_m = round(parc_m, 4) if dims else 0.0
-        parc_kg = round(parc_m * kgml, 4) if (dims and kgml) else 0.0
+        parc_m = _rn(parc_m, 4) if dims else 0.0
+        parc_kg = _rn(parc_m * kgml, 4) if (dims and kgml) else 0.0
         self._ac_loading = True
         if t.item(row, 7):
             t.item(row, 7).setText(self._nf(parc_m, dec) if dims else '')
@@ -722,11 +722,11 @@ class MetradosView(QWidget):
             parc_m = 1.0
             for d in dims:
                 parc_m *= d
-            parc_m = round(parc_m, 4) if dims else 0.0
-            parc_kg = round(parc_m * kgml, 4) if kgml else 0.0
+            parc_m = _rn(parc_m, 4) if dims else 0.0
+            parc_kg = _rn(parc_m * kgml, 4) if kgml else 0.0
             total_kg += parc_kg
             registros.append((desc, diam, n_est, n_el, n_var, llong, kgml, parc_kg))
-        total_kg = round(total_kg, dec)
+        total_kg = _rn(total_kg, dec)
 
         conn = get_db()
         try:

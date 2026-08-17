@@ -7901,8 +7901,8 @@ class ProyectoView(QWidget):
             dims    = [v for v in (n_est, n_el, n_var, llong) if v is not None]
             parc_m  = 1.0
             for d in dims: parc_m *= d
-            parc_m  = round(parc_m, 4) if dims else 0.0
-            parc_kg = round(parc_m * kgml, 4) if kgml else 0.0
+            parc_m  = _rn(parc_m, 4) if dims else 0.0
+            parc_kg = _rn(parc_m * kgml, 4) if kgml else 0.0
             total_kg += parc_kg
             orden += 1
             conn.execute(
@@ -7913,7 +7913,7 @@ class ProyectoView(QWidget):
                 (pid, orden, desc, diametro,
                  n_est, n_el, n_var, llong, kgml, parc_kg)
             )
-        total_kg = round(total_kg, dec)
+        total_kg = _rn(total_kg, dec)
         conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                      (total_kg, pid))
         conn.commit()
@@ -8242,10 +8242,10 @@ class ProyectoView(QWidget):
 
         dims  = [v for v in (val(3), val(4), val(5), val(6)) if v is not None]
         kgml  = val(8)
-        parc_m = round(
+        parc_m = _rn(
             __import__('functools').reduce(lambda a, b: a * b, dims, 1.0), 4
         ) if dims else 0.0
-        parc_kg = round(parc_m * kgml, 4) if kgml else 0.0
+        parc_kg = _rn(parc_m * kgml, 4) if kgml else 0.0
 
         dec = get_decimales_metrado()
         self._acero_loading = True
@@ -8299,10 +8299,10 @@ class ProyectoView(QWidget):
             # Saltar filas totalmente vacías (evita blancos intercalados)
             if not desc and not diametro and not dims:
                 continue
-            parc_m  = round(
+            parc_m  = _rn(
                 __import__('functools').reduce(lambda a, b: a*b, dims, 1.0), 4
             ) if dims else 0.0
-            parc_kg = round(parc_m * kgml, 4) if kgml else 0.0
+            parc_kg = _rn(parc_m * kgml, 4) if kgml else 0.0
             total_kg += parc_kg
             orden += 1
             conn.execute(
@@ -8314,7 +8314,7 @@ class ProyectoView(QWidget):
                  n_est, n_el, n_var, llong, kgml, parc_kg)
             )
 
-        total_kg = round(total_kg, 4)
+        total_kg = _rn(total_kg, 4)
         conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                      (total_kg, pid))
         conn.commit()
@@ -11957,7 +11957,11 @@ class _DialogSugerirPartidas(QDialog):
                 it.setForeground(2, _QB(_QC2("#1F2A38")))
             self.tree.addTopLevelItem(it)
         self._actualizar_count()
-        self.tree.itemChanged.connect(lambda *_: self._actualizar_count())
+        # Conectar UNA vez: _poblar corre en cada búsqueda y cada pasada
+        # apilaba otra conexión (el contador se recalculaba N veces por clic).
+        if not getattr(self, '_count_conectado', False):
+            self.tree.itemChanged.connect(lambda *_: self._actualizar_count())
+            self._count_conectado = True
 
     def _marcar_todas(self, on: bool):
         st = Qt.Checked if on else Qt.Unchecked
