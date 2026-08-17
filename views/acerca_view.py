@@ -72,6 +72,7 @@ def _app_info() -> list[tuple[str, str]]:
         ("UI",               "PySide6 (Qt 6)"),
         ("Reportes",         "PDF · Excel · ODS · Word · ODT"),
         ("Licencia",         "GPL-3.0-or-later · software libre"),
+        ("Sitio web",        "<a href='https://ingepresupuestos.com'>ingepresupuestos.com</a>"),
     ]
 
 
@@ -285,6 +286,12 @@ class AcercaView(QWidget):
             lk.setMinimumWidth(120)
             rl.addWidget(lk)
             lv = QLabel(v)
+            if '<a ' in v:
+                # Valor con enlace (p.ej. el sitio web): clicable y abre en
+                # el navegador del sistema.
+                lv.setTextFormat(Qt.RichText)
+                lv.setOpenExternalLinks(True)
+                lv.setTextInteractionFlags(Qt.TextBrowserInteraction)
             lv.setStyleSheet(
                 f"color:{SLATE_700}; font-size:12px; font-weight:600; "
                 f"background:transparent; border:none;"
