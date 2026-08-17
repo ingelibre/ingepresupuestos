@@ -3247,7 +3247,9 @@ class _TDRWorker(QThread):
 
     def run(self):
         try:
-            texto, error = AR.generar_tdr_ia(self._req_id, self._datos)
+            texto, error = AR.generar_tdr_ia(
+                self._req_id, self._datos,
+                self._datos.get('prompt_extra', ''))
             self.done.emit(self._req_id, texto or '', error or '')
         except Exception as e:   # noqa: BLE001
             import traceback; traceback.print_exc()
@@ -5549,18 +5551,17 @@ class _DatosTDRDialog(QDialog):
     como predeterminados; el resto se ajusta por requerimiento. Si dejas vacíos
     los de entidad pública, la IA usa el formato privado (membrete simple)."""
 
+    # Afinado 2026-08-17 (pedido del autor): fuera «N° de requerimiento» (se
+    # toma solo del número de la pestaña — generar_tdr_ia ya cae a q['numero']),
+    # «Cargo del destinatario», «Unidad orgánica», «Meta presupuestal» y
+    # «Objetivo» (los render de PDF/Word ya los tratan como opcionales).
     _CAMPOS = [   # (clave_config, etiqueta, placeholder)
-        ('numero', "N° de requerimiento", "p.ej. 001-2026"),
         ('destinatario', "Destinatario (A)", "solo sector público — dejar vacío si privado"),
-        ('cargo_destinatario', "Cargo del destinatario", "p.ej. Gerente Municipal"),
         ('atencion', "Atención", "p.ej. Oficina de Logística"),
         ('solicitante', "Solicitante (DE) / membrete", "tu nombre o empresa"),
         ('cargo_solicitante', "Cargo del solicitante", "p.ej. Residente de Obra"),
         ('entidad', "Entidad / institución", "p.ej. Municipalidad Distrital de…"),
-        ('unidad_organica', "Unidad orgánica / área", "p.ej. Subgerencia de Infraestructura"),
         ('lugar', "Lugar (entrega/prestación)", "p.ej. distrito, provincia"),
-        ('meta', "Meta presupuestal", "opcional"),
-        ('objetivo', "Objetivo", "opcional — breve"),
     ]
 
     def __init__(self, req_id, parent=None):
@@ -5584,15 +5585,12 @@ class _DatosTDRDialog(QDialog):
         _ss = (f"QLineEdit, QComboBox {{ border:1px solid {SILVER_300};"
                f" border-radius:6px; padding:4px 8px; font-size:12px; background:white; }}")
         self._inp = {}
-        q = REQ.get_requerimiento(req_id)
         from core.pdf_reports import empresa_info
         empresa = empresa_info()['nombre']
         for clave, etiqueta, ph in self._CAMPOS:
             le = QLineEdit(); le.setPlaceholderText(ph); le.setStyleSheet(_ss)
             prev = get_config(f'req_tdr_{clave}', '')
-            if clave == 'numero':
-                prev = prev or (str(q['numero']) if q else '')
-            elif clave == 'solicitante':
+            if clave == 'solicitante':
                 prev = prev or empresa
             le.setText(prev)
             self._inp[clave] = le
@@ -5627,6 +5625,19 @@ class _DatosTDRDialog(QDialog):
         self.d.setCalendarPopup(True); self.d.setDisplayFormat("dd/MM/yyyy")
         self.d.setStyleSheet(_ss)
         form.addRow("Fecha:", self.d)
+
+        # Instrucciones libres para la IA (el prompt extra que faltaba:
+        # generar_tdr_ia ya lo aceptaba pero la UI nunca lo mandaba).
+        self.txt_prompt = QPlainTextEdit()
+        self.txt_prompt.setPlaceholderText(
+            "p.ej. tono formal; incluir garantía de 1 año; citar la norma "
+            "técnica del insumo; el plazo cuenta desde la orden de compra…")
+        self.txt_prompt.setPlainText(get_config('req_tdr_prompt_extra', ''))
+        self.txt_prompt.setFixedHeight(64)
+        self.txt_prompt.setStyleSheet(
+            f"QPlainTextEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:4px 8px; font-size:12px; background:white; }}")
+        form.addRow("Instrucciones a la IA:", self.txt_prompt)
         v.addLayout(form)
 
         botones = QHBoxLayout(); botones.addStretch()
@@ -5644,8 +5655,10 @@ class _DatosTDRDialog(QDialog):
         d['plazo_unidad'] = self.cmb_plazo_u.currentData()
         d['forma_pago'] = self.cmb_pago.currentData()
         d['fecha'] = self.d.date().toString("dd/MM/yyyy")
+        d['prompt_extra'] = self.txt_prompt.toPlainText().strip()
         # Recordar para la próxima vez (todo salvo la fecha).
-        for k in list(self._inp.keys()) + ['plazo', 'plazo_unidad', 'forma_pago']:
+        for k in (list(self._inp.keys())
+                  + ['plazo', 'plazo_unidad', 'forma_pago', 'prompt_extra']):
             set_config(f'req_tdr_{k}', d.get(k, ''))
         return d
 
