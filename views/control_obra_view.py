@@ -3224,9 +3224,16 @@ class _ReqCellDelegate(QStyledItemDelegate):
         else:
             ed.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         ed.setStyleSheet(
-            "QLineEdit { font-size:11px; padding:0 3px; margin:0;"
-            f" border:1px solid {ORANGE}; background:white; color:#1A2535; }}")
+            "QLineEdit { font-size:11px; padding:0 4px; margin:0;"
+            f" border:2px solid {ORANGE}; border-radius:3px;"
+            " background:white; color:#1A2535; }")
         return ed
+
+    def updateEditorGeometry(self, editor, option, index):
+        # El editor SOBRESALE 2px de la celda (estilo Excel): ajustado al rect
+        # exacto, el borde se comía el interior y el texto se veía encogido
+        # respecto a la celda de al lado.
+        editor.setGeometry(option.rect.adjusted(-1, -2, 1, 2))
 
 
 class _TDRWorker(QThread):
@@ -5237,7 +5244,10 @@ class _RequerimientosPanel(QWidget):
         iti = QTableWidgetItem("")
         iti.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         iti.setForeground(QColor(SLATE_500))
-        iti.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+        # ItemIsDragEnabled: sin él Qt NUNCA inicia el arrastre de la fila
+        # (los flags a mano lo dejaban fuera y el reordenar no arrancaba).
+        iti.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled
+                     | Qt.ItemIsDragEnabled)
         self.tbl.setItem(r, REQ_ITEM, iti)
         it0 = QTableWidgetItem(f.get('descripcion') or '')
         if rid is not None:
@@ -5253,7 +5263,8 @@ class _RequerimientosPanel(QWidget):
         fb = it3.font(); fb.setBold(True); it3.setFont(fb)
         for c, it, ed in ((REQ_DESC, it0, True), (REQ_UND, it1, True),
                           (REQ_PRES, it2, False), (REQ_REQ, it3, True)):
-            flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
+            flags = (Qt.ItemIsSelectable | Qt.ItemIsEnabled
+                     | Qt.ItemIsDragEnabled)
             if abierto and ed:
                 flags |= Qt.ItemIsEditable
             it.setFlags(flags)
