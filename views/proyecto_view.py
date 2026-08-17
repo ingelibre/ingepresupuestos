@@ -6528,11 +6528,11 @@ class ProyectoView(QWidget):
                     f"Eliminar {n_sel} partidas seleccionadas",
                     lambda: self._eliminar_partidas_multiple(ids)
                 )
-        # Imprimir la selección — vale con una o con varias. Solo cuenta las
-        # partidas reales: un título no tiene ACU ni metrado que imprimir.
-        pids_impr = [it.data(0, Qt.UserRole) for it in seleccionados
-                     if it.data(0, Qt.UserRole)
-                     and not it.data(0, Qt.UserRole + 1)]
+        # Imprimir la selección — vale con una o con varias. Un título
+        # seleccionado arrastra TODAS sus partidas descendientes (mismo
+        # criterio que Copiar); lo que se imprime son las partidas reales,
+        # que son las que tienen ACU/metrado/spec.
+        pids_impr = self._pids_imprimibles(seleccionados)
         if pids_impr:
             menu.addSeparator()
             _n = len(pids_impr)
@@ -6541,6 +6541,28 @@ class ProyectoView(QWidget):
                 lambda: self._imprimir_seleccion(pids_impr)
             )
         menu.exec(self.tree.mapToGlobal(pos))
+
+    def _pids_imprimibles(self, seleccionados) -> list:
+        """Partidas reales a imprimir de la selección del árbol: las partidas
+        seleccionadas directamente + los descendientes de cada TÍTULO
+        seleccionado (bajando por el árbol en pantalla), sin duplicados y en
+        orden de aparición."""
+        pids: list = []
+        vistos: set = set()
+
+        def _bajar(it):
+            if it.data(0, Qt.UserRole + 1):         # título → sus hijos
+                for c in range(it.childCount()):
+                    _bajar(it.child(c))
+            else:
+                pid = it.data(0, Qt.UserRole)
+                if pid and pid not in vistos:
+                    vistos.add(pid)
+                    pids.append(pid)
+
+        for it in seleccionados:
+            _bajar(it)
+        return pids
 
     def _imprimir_seleccion(self, pids: list):
         """Abre el flujo de impresión de las partidas seleccionadas."""
