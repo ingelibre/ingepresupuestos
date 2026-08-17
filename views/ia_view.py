@@ -324,7 +324,7 @@ class IAView(QWidget):
         vl.setSpacing(8)
 
         nota = QLabel(
-            "Groq ofrece LLaMA 3.3 70B de forma gratuita con límite de tokens/minuto.<br>"
+            "Groq ofrece modelos abiertos (GPT-OSS 120B, Qwen…) gratis con límite de tokens/minuto.<br>"
             "Obtén tu clave en  <a href='https://console.groq.com/keys'>console.groq.com/keys</a>"
         )
         nota.setWordWrap(True)

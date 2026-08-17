@@ -82,16 +82,39 @@ def _llamar_ollama(prompt: str, max_tokens: int = 1500):
 
 # ── Llamadas por proveedor ────────────────────────────────────────────────
 
+# Groq decomisionó llama-3.3-70b-versatile en agosto de 2026 (el default
+# histórico de la app). Su reemplazo recomendado por Groq, con free tier:
+_GROQ_MODELO_DEFAULT = 'openai/gpt-oss-120b'
+
+
 def _llamar_groq(prompt: str, api_key: str, max_tokens: int):
     try:
         from groq import Groq
-        client   = Groq(api_key=api_key)
-        modelo   = get_config('groq_modelo', 'llama-3.3-70b-versatile')
-        response = client.chat.completions.create(
-            model=modelo, max_tokens=max_tokens,
-            messages=[{'role': 'user', 'content': prompt}]
-        )
-        return response.choices[0].message.content, None
+        client = Groq(api_key=api_key)
+        modelo = get_config('groq_modelo', _GROQ_MODELO_DEFAULT)
+        try:
+            response = client.chat.completions.create(
+                model=modelo, max_tokens=max_tokens,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            return response.choices[0].message.content, None
+        except Exception as e_mod:
+            # Modelo decomisionado o inexistente (Groq retira modelos con
+            # frecuencia): auto-repararse con el default vigente y GUARDARLO,
+            # igual que hace Gemini. Sin esto, quien tenía guardado
+            # llama-3.3-70b-versatile quedaba roto para siempre.
+            em = str(e_mod).lower()
+            if modelo != _GROQ_MODELO_DEFAULT and any(
+                    t in em for t in ('decommissioned', 'deprecated',
+                                      'does not exist', 'not found',
+                                      'model_not_found')):
+                response = client.chat.completions.create(
+                    model=_GROQ_MODELO_DEFAULT, max_tokens=max_tokens,
+                    messages=[{'role': 'user', 'content': prompt}]
+                )
+                set_config('groq_modelo', _GROQ_MODELO_DEFAULT)
+                return response.choices[0].message.content, None
+            raise
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or 'invalid' in err.lower():
