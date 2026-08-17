@@ -164,8 +164,38 @@ def _llamar_openai(prompt: str, api_key: str, max_tokens: int):
 
 
 # Los :free de OpenRouter rotan seguido (llama-3.3-70b-instruct:free, el
-# default histórico, ya no existe). Default vigente + auto-reparación abajo.
+# default histórico, ya no existe). Defensa en TRES capas: el modelo
+# guardado → el default de fábrica → uno gratuito elegido del catálogo EN
+# VIVO (el endpoint /models es público, no requiere clave), así el binario
+# nunca depende de que un nombre fijo siga existiendo.
 _OPENROUTER_MODELO_DEFAULT = 'openai/gpt-oss-20b:free'
+
+# Familias preferidas al elegir del catálogo, en orden de calidad conocida.
+_OPENROUTER_FREE_PREFERIDOS = ('gpt-oss', 'glm', 'nemotron-3-super',
+                               'gemma', 'nemotron')
+
+
+def _openrouter_free_del_catalogo() -> str | None:
+    """Elige un modelo :free VIGENTE consultando el catálogo público de
+    OpenRouter. Devuelve el id o None si no se pudo consultar."""
+    try:
+        import json
+        import urllib.request
+        req = urllib.request.Request(
+            'https://openrouter.ai/api/v1/models',
+            headers={'User-Agent': 'ingePresupuestos'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        libres = [m['id'] for m in data.get('data', [])
+                  if m.get('id', '').endswith(':free')
+                  and 'safety' not in m['id']]
+        for patron in _OPENROUTER_FREE_PREFERIDOS:
+            for mid in libres:
+                if patron in mid:
+                    return mid
+        return libres[0] if libres else None
+    except Exception:
+        return None
 
 
 def _llamar_openrouter(prompt: str, api_key: str, max_tokens: int):
@@ -173,29 +203,44 @@ def _llamar_openrouter(prompt: str, api_key: str, max_tokens: int):
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url='https://openrouter.ai/api/v1')
         modelo = get_config('openrouter_modelo', _OPENROUTER_MODELO_DEFAULT)
-        try:
-            response = client.chat.completions.create(
-                model=modelo, max_tokens=max_tokens,
+
+        def _completar(mid):
+            r = client.chat.completions.create(
+                model=mid, max_tokens=max_tokens,
                 messages=[{'role': 'user', 'content': prompt}],
                 extra_headers={'X-Title': 'ingePresupuestos'},
             )
-            return response.choices[0].message.content, None
+            return r.choices[0].message.content
+
+        def _es_modelo_muerto(exc) -> bool:
+            em = str(exc)
+            return ('404' in em or 'No endpoints found' in em
+                    or 'not a valid model' in em.lower())
+
+        # Capa 1: el modelo guardado.
+        try:
+            return _completar(modelo), None
         except Exception as e_mod:
-            # Modelo retirado del catálogo: reintentar con el default vigente
-            # y GUARDARLO (mismo criterio que Groq/Gemini). El usuario puede
-            # elegir otro con «↺ Actualizar lista».
-            em = str(e_mod)
-            if modelo != _OPENROUTER_MODELO_DEFAULT and (
-                    '404' in em or 'No endpoints found' in em
-                    or 'not a valid model' in em.lower()):
-                response = client.chat.completions.create(
-                    model=_OPENROUTER_MODELO_DEFAULT, max_tokens=max_tokens,
-                    messages=[{'role': 'user', 'content': prompt}],
-                    extra_headers={'X-Title': 'ingePresupuestos'},
-                )
+            if not _es_modelo_muerto(e_mod):
+                raise
+        # Capa 2: el default de fábrica (rápido, sin petición extra).
+        if modelo != _OPENROUTER_MODELO_DEFAULT:
+            try:
+                texto = _completar(_OPENROUTER_MODELO_DEFAULT)
                 set_config('openrouter_modelo', _OPENROUTER_MODELO_DEFAULT)
-                return response.choices[0].message.content, None
-            raise
+                return texto, None
+            except Exception as e_def:
+                if not _es_modelo_muerto(e_def):
+                    raise
+        # Capa 3: elegir uno gratuito del catálogo EN VIVO y guardarlo.
+        alt = _openrouter_free_del_catalogo()
+        if alt and alt not in (modelo, _OPENROUTER_MODELO_DEFAULT):
+            texto = _completar(alt)
+            set_config('openrouter_modelo', alt)
+            return texto, None
+        return None, ('El modelo configurado ya no existe en OpenRouter y no '
+                      'se pudo elegir un reemplazo automático. Use «↺ '
+                      'Actualizar lista» en Configuración para escoger uno.')
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or 'invalid' in err.lower() or '401' in err:
