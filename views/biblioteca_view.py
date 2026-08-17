@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from core.database import get_db
 from utils.formatting import fmt, parse_num
+from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
 
@@ -560,13 +561,13 @@ class BibliotecaView(QWidget):
 
                 rend = float(r['rendimiento'] or 0)
                 rend_txt = f"{rend:.4f}".rstrip('0').rstrip('.') or '0'
-                it_r = QTableWidgetItem(rend_txt)
+                it_r = NumItem(rend_txt, rend)
                 it_r.setTextAlignment(align_right)
                 it_r.setFlags(flag)
                 self.tbl.setItem(row, 2, it_r)
 
                 cu_val = float(r['costo_unitario'] or 0)
-                it_c = QTableWidgetItem(fmt(cu_val))
+                it_c = NumItem(fmt(cu_val), cu_val)
                 it_c.setTextAlignment(align_right)
                 it_c.setFlags(flag)
                 it_c.setFont(font_pre)
@@ -579,7 +580,7 @@ class BibliotecaView(QWidget):
                 self.tbl.setItem(row, 4, it_g)
 
                 n_acu = r['n_acu'] or 0
-                it_a = QTableWidgetItem(str(n_acu) if n_acu else '—')
+                it_a = NumItem(str(n_acu) if n_acu else '—', n_acu)
                 it_a.setTextAlignment(align_center)
                 it_a.setFlags(flag)
                 if n_acu == 0:
@@ -587,7 +588,7 @@ class BibliotecaView(QWidget):
                 self.tbl.setItem(row, 5, it_a)
 
                 usos = r['usos'] or 0
-                it_us = QTableWidgetItem(str(usos) if usos else '—')
+                it_us = NumItem(str(usos) if usos else '—', usos)
                 it_us.setTextAlignment(align_center)
                 it_us.setFlags(flag)
                 if usos == 0:

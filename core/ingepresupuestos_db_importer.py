@@ -123,9 +123,17 @@ def importar_proyecto_db_directo(filepath: str, pid_origen: int) -> int:
         # ATTACH del archivo origen como 'src'
         conn.execute(f"ATTACH DATABASE ? AS src", (filepath,))
         try:
-            return _do_import(conn, pid_origen)
-        finally:
+            pid_dst = _do_import(conn, pid_origen)
             conn.commit()
+            return pid_dst
+        except BaseException:
+            # Sin esto, el commit del finally persistía el proyecto A MEDIAS
+            # cuando _do_import fallaba a mitad de la copia: quedaba un
+            # proyecto fantasma incompleto en la lista.
+            conn.rollback()
+            raise
+        finally:
+            # El DETACH necesita la transacción cerrada (commit o rollback).
             conn.execute("DETACH DATABASE src")
     finally:
         conn.close()

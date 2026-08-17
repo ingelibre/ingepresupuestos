@@ -25,6 +25,7 @@ from PySide6.QtGui import (QFont, QColor, QCursor, QPainter, QPainterPath,
 from core.config import DB_PATH, ESTADOS_PROYECTO
 from core.database import get_db, calcular_totales
 from models.usuario import Usuario
+from widgets.num_item import NumItem
 from utils.formatting import fmt
 from utils.session import get_ultimo_proyecto, set_ultimo_proyecto
 
@@ -1710,8 +1711,10 @@ class _ListView(QWidget):
             it_est.setFont(f_est)
             self.tbl.setItem(r, 6, it_est)
 
-            # Col 7 — Total
-            it = QTableWidgetItem(total_str)
+            # Col 7 — Total (clave de orden numérica extraída del texto:
+            # el valor llega formateado del caché, y «…» → 0 mientras carga)
+            from utils.formatting import parse_num as _pn
+            it = NumItem(total_str, _pn(total_str))
             it.setForeground(QColor(SLATE_700))
             it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             it.setBackground(bg_fila)
@@ -1719,7 +1722,7 @@ class _ListView(QWidget):
             self._items_total[pid] = it   # referencia viva: sobrevive al sort
 
             # Col 8 — Partidas
-            it = QTableWidgetItem(str(n_part))
+            it = NumItem(str(n_part), n_part)
             it.setForeground(QColor(SLATE_300))
             it.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
             it.setBackground(bg_fila)
@@ -2590,6 +2593,8 @@ class DashboardView(QWidget):
         if it is not None:
             try:
                 it.setText(total_str)
+                from utils.formatting import parse_num as _pn
+                it.setData(Qt.UserRole, _pn(total_str))   # clave de orden
             except RuntimeError:
                 pass   # la tabla fue reconstruida; el caché ya quedó listo
 

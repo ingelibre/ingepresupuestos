@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from core.database import get_db, _siguiente_codigo_inei
 from core.config import TIPOS_RECURSO, INEI_DEFAULT
 from utils.formatting import fmt, parse_num
+from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
 
@@ -693,8 +694,7 @@ class RecursosView(QWidget):
                 self.tbl.setItem(row, 3, it_und)
 
                 precio = float(r['precio'] or 0)
-                it_pre = QTableWidgetItem(fmt(precio))
-                it_pre.setData(Qt.UserRole, precio)
+                it_pre = NumItem(fmt(precio), precio)
                 it_pre.setTextAlignment(align_right)
                 es_overhead = (r['unidad'] or '').startswith('%')
                 if es_overhead:
@@ -712,7 +712,7 @@ class RecursosView(QWidget):
                 self.tbl.setItem(row, 5, it_inei)
 
                 usos = r['usos'] or 0
-                it_usos = QTableWidgetItem(str(usos) if usos else '—')
+                it_usos = NumItem(str(usos) if usos else '—', usos)
                 it_usos.setTextAlignment(align_center)
                 it_usos.setFlags(flag_no_edit)
                 if usos == 0:
