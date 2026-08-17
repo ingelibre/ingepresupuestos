@@ -92,7 +92,20 @@ class _WorkerModelos(QThread):
                 es_gratis = (price_in == 0 and price_out == 0)
                 modelos.append((mid, name, es_gratis, price_in, price_out))
 
-            modelos.sort(key=lambda x: (not x[2], x[1].lower()))
+            # Gratuitos primero, y dentro de ellos por familias de calidad
+            # conocida (igual criterio que la auto-reparación del runtime):
+            # el primer :free de la lista es una opción RECOMENDABLE, no el
+            # primero del alfabeto (LiquidAI 2.6B quedaba arriba y es
+            # demasiado chico para redactar especificaciones).
+            _PREF = ('gpt-oss', 'glm', 'nemotron-3-super', 'gemma', 'nemotron')
+
+            def _rango(mid: str) -> int:
+                for i, fam in enumerate(_PREF):
+                    if fam in mid:
+                        return i
+                return len(_PREF)
+
+            modelos.sort(key=lambda x: (not x[2], _rango(x[0]), x[1].lower()))
             self.terminado.emit(modelos, '')
         except urllib.error.URLError as e:
             self.terminado.emit([], f'Sin conexión: {e.reason}')

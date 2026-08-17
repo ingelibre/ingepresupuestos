@@ -470,6 +470,23 @@ def probar_conexion(api_key: str = '', ia_proveedor: str = '') -> tuple[bool, st
         return True, f'Ollama conectado · modelo: {modelo}', nombre
 
     if not api_key:
+        # Decir DÓNDE se crea la clave (y si es gratis) — «no hay clave» a
+        # secas dejaba al usuario sin saber cuál es el siguiente paso.
+        _DONDE = {
+            'groq':       ('console.groq.com/keys', True),
+            'openrouter': ('openrouter.ai/keys', True),
+            'gemini':     ('aistudio.google.com/apikey', True),
+            'anthropic':  ('console.anthropic.com', False),
+            'openai':     ('platform.openai.com/api-keys', False),
+            'deepseek':   ('platform.deepseek.com/api_keys', False),
+            'qwen':       ('modelstudio.console.alibabacloud.com', False),
+        }
+        donde = _DONDE.get(ia_proveedor)
+        if donde:
+            url, gratis = donde
+            extra = 'gratis ' if gratis else ''
+            return False, (f'Falta la clave API. Créala {extra}en {url} '
+                           'y pégala en el campo de arriba.'), ''
         return False, 'No hay clave API configurada.', ''
 
     nombre = _NOMBRES.get(ia_proveedor, ia_proveedor.capitalize())
