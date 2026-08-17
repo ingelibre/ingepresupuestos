@@ -434,6 +434,12 @@ El texto debe ser formal, técnico y ajustado a la normativa peruana (RNE, norma
 Máximo 600 palabras. No uses markdown, usa texto plano con las secciones en MAYÚSCULAS.
 {f"INSTRUCCIONES ADICIONALES DEL USUARIO: {prompt_extra}" if prompt_extra and prompt_extra.strip() else ""}"""
 
+    # Fichas técnicas adjuntas a la partida: sus datos reales (norma, tipo,
+    # resistencia…) entran al prompt por encima de lo genérico.
+    from core import adjuntos as ADJ
+    prompt += ADJ.bloque_prompt_fichas(
+        ADJ.spec_adjuntos(partida_id), "la especificación de esta partida")
+
     texto, error = _llamar_ia(prompt, api_key, max_tokens=1500)
     if error:
         return None, error

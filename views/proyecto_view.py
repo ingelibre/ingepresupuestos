@@ -3045,6 +3045,21 @@ class ProyectoView(QWidget):
         btn_todo.setMenu(menu_todo)
         hl.addWidget(btn_todo)
 
+        self.btn_spec_fichas = QPushButton("📎")
+        self.btn_spec_fichas.setFixedHeight(24)
+        self.btn_spec_fichas.setToolTip(_tr_spec(
+            "Fichas técnicas en PDF de esta partida: la IA usa su contenido al "
+            "generar la especificación y se anexan al final del reporte de "
+            "Especificaciones en PDF"))
+        self.btn_spec_fichas.setStyleSheet(
+            "QPushButton { background:white; color:#485A6C;"
+            " border:1px solid #D4D4D4; border-radius:4px;"
+            " padding:0 8px; font-size:10px; font-weight:600; }"
+            "QPushButton:hover { border-color:#F37329; color:#C0621A; }"
+        )
+        self.btn_spec_fichas.clicked.connect(self._spec_fichas_dialog)
+        hl.addWidget(self.btn_spec_fichas)
+
         btn_ia = QPushButton("✨  IA")
         btn_ia.setFixedHeight(24)
         btn_ia.setToolTip(_tr_spec("Generar especificación con IA para la partida seleccionada"))
@@ -5132,6 +5147,7 @@ class ProyectoView(QWidget):
         self._spec_modificada = False
         self.lbl_spec_estado.setText("")
         self._chat_acu.set_partida(part_id)
+        self._upd_btn_spec_fichas()
 
         conn = get_db()
         items, totales_tipo = get_acu_items(conn, part_id)
@@ -7079,6 +7095,8 @@ class ProyectoView(QWidget):
         conn = get_db()
         for part_id, _ in ids:
             conn.execute("DELETE FROM partidas WHERE id=?", (part_id,))
+            from core.adjuntos import limpiar_carpeta as _lc
+            _lc('especificaciones', part_id)
             if self._partida_actual_id == part_id:
                 self._partida_actual_id = None
                 self.tbl_acu.setRowCount(0)
@@ -7107,6 +7125,8 @@ class ProyectoView(QWidget):
         conn.execute("DELETE FROM partidas WHERE id=?", (part_id,))
         conn.commit()
         conn.close()
+        from core.adjuntos import limpiar_carpeta as _lc
+        _lc('especificaciones', part_id)
         if self._partida_actual_id == part_id:
             self._partida_actual_id = None
             self.tbl_acu.setRowCount(0)
@@ -8880,6 +8900,37 @@ class ProyectoView(QWidget):
                 _buscar(item.child(i))
         for i in range(self.tree.topLevelItemCount()):
             _buscar(self.tree.topLevelItem(i))
+
+    def _spec_fichas_dialog(self):
+        if self._partida_actual_id is None:
+            QMessageBox.information(self, "Fichas técnicas",
+                                    "Seleccione una partida primero.")
+            return
+        from widgets.fichas_dialog import FichasDialog
+        from core import adjuntos as ADJ
+        pid = self._partida_actual_id
+        dlg = FichasDialog(
+            listar=lambda: ADJ.spec_adjuntos(pid),
+            agregar=lambda ruta: ADJ.spec_agregar(pid, ruta),
+            quitar=lambda nombre: ADJ.spec_quitar(pid, nombre),
+            intro=("Adjunta fichas técnicas en PDF del producto de esta "
+                   "partida. Al generar la especificación con IA, sus datos "
+                   "reales (norma, tipo, resistencia…) entran al texto; el "
+                   "reporte de Especificaciones en PDF las lleva como anexos "
+                   "al final. Un PDF escaneado (imagen) solo puede ir como "
+                   "anexo."),
+            parent=self)
+        dlg.exec()
+        self._upd_btn_spec_fichas()
+
+    def _upd_btn_spec_fichas(self):
+        if not hasattr(self, 'btn_spec_fichas'):
+            return
+        n = 0
+        if self._partida_actual_id is not None:
+            from core import adjuntos as ADJ
+            n = len(ADJ.spec_adjuntos(self._partida_actual_id))
+        self.btn_spec_fichas.setText(f"📎 {n}" if n else "📎")
 
     def _ia_generar_spec(self):
         if self._partida_actual_id is None:

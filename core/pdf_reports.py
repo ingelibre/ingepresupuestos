@@ -4658,12 +4658,64 @@ def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
             renderer.pie_offset = int(pie_offset or 0)
             renderer.pie_total  = int(pie_total) if pie_total else None
             renderer.render_chunks_to_file(title_html, chunks, out_path)
+            _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total)
             return
     titulo, body, proy = _build_html_for(tipo, pid, solo_pids)
     renderer = _PdfRenderer(proy, titulo, with_cover=with_cover,
                               paper=paper, orient=orient,
                               pie_offset=pie_offset, pie_total=pie_total)
     renderer.render_to_file(body, out_path)
+    if tipo == 'especificaciones':
+        _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total)
+
+
+def _anexar_fichas_especificaciones(pid: int, out_path: str,
+                                    pie_offset=0, pie_total=None):
+    """Fusiona al final del reporte de Especificaciones las fichas técnicas
+    (PDF) adjuntas a las partidas, en orden de ítem y sin repetir archivo.
+
+    SOLO en el export suelto: dentro del Reporte Completo (pie_offset/
+    pie_total puestos) los anexos caerían en MEDIO del documento merged y
+    además romperían la numeración global de páginas, que se calcula antes.
+    """
+    if pie_offset or pie_total:
+        return
+    import os
+    from core import adjuntos as ADJ
+    conn = get_db()
+    try:
+        partidas = conn.execute(
+            """SELECT id FROM partidas
+               WHERE proyecto_id=? AND es_titulo=0
+                 AND COALESCE(spec_adjuntos, '') != ''
+               ORDER BY item""", (pid,)).fetchall()
+    finally:
+        conn.close()
+    rutas, vistas = [], set()
+    for p in partidas:
+        for f in ADJ.spec_adjuntos(p['id']):
+            ruta = f.get('ruta') or ''
+            if ruta and ruta not in vistas and os.path.exists(ruta):
+                vistas.add(ruta)
+                rutas.append(ruta)
+    if not rutas:
+        return
+    try:
+        from pypdf import PdfWriter
+        writer = PdfWriter()
+        writer.append(out_path)
+        anexadas = 0
+        for ruta in rutas:
+            try:
+                writer.append(ruta)
+                anexadas += 1
+            except Exception:
+                continue
+        if anexadas:
+            with open(out_path, 'wb') as fh:
+                writer.write(fh)
+    except Exception:
+        pass  # sin anexos antes que sin reporte
 
 
 # ── Control de Obra · reporte de Valorización (generado DESDE la vista, no en

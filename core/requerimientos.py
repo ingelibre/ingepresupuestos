@@ -363,84 +363,28 @@ def guardar_tdr(req_id: int, texto: str, datos_json: str = None):
 
 
 # ── Fichas técnicas adjuntas (PDF) ───────────────────────────────────────────
-# Se copian a USER_DATA_DIR/uploads/requerimientos/<req_id>/ (la ruta original
-# del usuario puede moverse o vivir en un USB) y la lista viaja en la columna
-# `adjuntos` como JSON [{nombre, ruta}, …].
+# Mecánica compartida en core/adjuntos.py (también la usan las
+# especificaciones técnicas de las partidas). API pública intacta.
 
 def get_adjuntos(req_id: int) -> list[dict]:
-    import json
-    conn = get_db()
-    try:
-        r = conn.execute("SELECT adjuntos FROM requerimientos WHERE id=?",
-                         (req_id,)).fetchone()
-    finally:
-        conn.close()
-    if not r or not (r['adjuntos'] or '').strip():
-        return []
-    try:
-        lista = json.loads(r['adjuntos'])
-        return lista if isinstance(lista, list) else []
-    except (ValueError, TypeError):
-        return []
-
-
-def _set_adjuntos(req_id: int, lista: list[dict]):
-    import json
-    conn = get_db()
-    try:
-        conn.execute("UPDATE requerimientos SET adjuntos=? WHERE id=?",
-                     (json.dumps(lista, ensure_ascii=False), req_id))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _dir_adjuntos(req_id: int):
-    from core.config import UPLOADS_DIR
-    d = UPLOADS_DIR / "requerimientos" / str(req_id)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    from core import adjuntos as ADJ
+    return ADJ.get_adjuntos('requerimientos', 'adjuntos', req_id)
 
 
 def agregar_adjunto(req_id: int, ruta_origen: str) -> dict:
-    """Copia el PDF junto al requerimiento y lo registra. Devuelve la entrada
-    {nombre, ruta}. Si ya existe un adjunto con el mismo nombre, lo pisa."""
-    import shutil, os
-    nombre = os.path.basename(ruta_origen)
-    destino = _dir_adjuntos(req_id) / nombre
-    shutil.copyfile(ruta_origen, destino)
-    lista = [a for a in get_adjuntos(req_id) if a.get('nombre') != nombre]
-    lista.append({'nombre': nombre, 'ruta': str(destino)})
-    _set_adjuntos(req_id, lista)
-    return {'nombre': nombre, 'ruta': str(destino)}
+    from core import adjuntos as ADJ
+    return ADJ.agregar_adjunto('requerimientos', 'adjuntos', req_id,
+                               'requerimientos', ruta_origen)
 
 
 def quitar_adjunto(req_id: int, nombre: str):
-    import os
-    lista = get_adjuntos(req_id)
-    for a in lista:
-        if a.get('nombre') == nombre:
-            try:
-                os.remove(a.get('ruta') or '')
-            except OSError:
-                pass
-    _set_adjuntos(req_id, [a for a in lista if a.get('nombre') != nombre])
+    from core import adjuntos as ADJ
+    ADJ.quitar_adjunto('requerimientos', 'adjuntos', req_id, nombre)
 
 
 def texto_adjunto_pdf(ruta: str, max_pags: int = 6, max_chars: int = 6000) -> str:
-    """Texto de la ficha técnica (PDF digital). Un PDF escaneado —solo
-    imagen, sin capa de texto— devuelve ''. Import perezoso: pdfplumber
-    tarda en cargar y solo hace falta aquí y en el importador de PDF."""
-    try:
-        import pdfplumber
-        partes = []
-        with pdfplumber.open(ruta) as pdf:
-            for pagina in pdf.pages[:max_pags]:
-                partes.append(pagina.extract_text() or '')
-        texto = '\n'.join(partes).strip()
-        return texto[:max_chars]
-    except Exception:
-        return ''
+    from core import adjuntos as ADJ
+    return ADJ.texto_adjunto_pdf(ruta, max_pags, max_chars)
 
 
 def recursos_en_requerimientos(proyecto_id: int) -> set:

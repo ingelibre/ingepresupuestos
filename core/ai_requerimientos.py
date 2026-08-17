@@ -145,27 +145,14 @@ def generar_tdr_ia(req_id: int, datos: dict, prompt_extra: str = '') -> tuple:
     bloque_ctx = '\n'.join(ctx)
 
     # ── Fichas técnicas adjuntas (PDF con texto) ─────────────────────────
-    # El texto de cada ficha entra al prompt para que las especificaciones
-    # citen las propiedades REALES del producto (norma, tipo, resistencia…).
-    # Un PDF escaneado no aporta texto: igual se lista, porque va como anexo
-    # físico en el PDF exportado y la IA debe referenciarlo.
+    # El texto de cada ficha entra al prompt (bloque compartido en
+    # core/adjuntos.py); un PDF escaneado igual se lista porque va como
+    # anexo físico en el PDF exportado y la IA debe referenciarlo.
+    from core import adjuntos as ADJ
     fichas = REQ.get_adjuntos(req_id)
-    bloque_fichas = ''
     nombres_fichas = [f.get('nombre') or '' for f in fichas if f.get('nombre')]
-    if fichas:
-        partes = []
-        for f in fichas:
-            t = REQ.texto_adjunto_pdf(f.get('ruta') or '')
-            if t:
-                partes.append(f"--- FICHA TÉCNICA: {f.get('nombre')} ---\n{t}")
-            else:
-                partes.append(f"--- FICHA TÉCNICA: {f.get('nombre')} "
-                              f"(sin texto legible; solo anexo) ---")
-        bloque_fichas = (
-            "\n\nFICHAS TÉCNICAS ADJUNTAS (al redactar las especificaciones del "
-            "insumo correspondiente, usa ESTOS datos reales — norma, tipo, "
-            "resistencia, presentación — por encima de lo genérico):\n"
-            + '\n\n'.join(partes))
+    bloque_fichas = ADJ.bloque_prompt_fichas(
+        fichas, "las especificaciones del insumo correspondiente")
 
     prompt = f"""{_SYSTEM}
 

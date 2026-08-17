@@ -20,8 +20,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate, QLineEdit, QPlainTextEdit, QSplitter, QTabWidget,
     QTextBrowser,
     QApplication, QMenu, QTableView, QScrollArea, QTreeWidget, QTreeWidgetItem,
-    QTabBar, QCheckBox, QFormLayout, QColorDialog, QListWidget,
-    QListWidgetItem,
+    QTabBar, QCheckBox, QFormLayout, QColorDialog,
 )
 from PySide6.QtCore import (Qt, QDate, QRect, QRectF, QSize, QPointF, QTimer,
                             QEvent, QThread, Signal, QSettings)
@@ -5124,7 +5123,18 @@ class _RequerimientosPanel(QWidget):
     def _fichas_dialog(self):
         if self._req_id is None:
             return
-        dlg = _FichasDialog(self._req_id, self)
+        from widgets.fichas_dialog import FichasDialog
+        rid = self._req_id
+        dlg = FichasDialog(
+            listar=lambda: REQ.get_adjuntos(rid),
+            agregar=lambda ruta: REQ.agregar_adjunto(rid, ruta),
+            quitar=lambda nombre: REQ.quitar_adjunto(rid, nombre),
+            intro=("Adjunta fichas técnicas en PDF (la del cemento, del "
+                   "geotanque…). Al generar el TDR, la IA usa sus datos reales "
+                   "en las especificaciones; al exportar el PDF, van como "
+                   "anexos al final. Un PDF escaneado (imagen) solo puede ir "
+                   "como anexo."),
+            parent=self)
         dlg.exec()
         self._upd_btn_fichas()
 
@@ -5679,106 +5689,6 @@ class _DatosTDRDialog(QDialog):
                   + ['plazo', 'plazo_unidad', 'forma_pago', 'prompt_extra']):
             set_config(f'req_tdr_{k}', d.get(k, ''))
         return d
-
-
-class _FichasDialog(QDialog):
-    """Fichas técnicas (PDF) adjuntas al requerimiento. La IA lee su texto al
-    generar el TDR y el PDF exportado las lleva como anexos al final."""
-
-    def __init__(self, req_id: int, parent=None):
-        super().__init__(parent)
-        self._req_id = req_id
-        self.setWindowTitle("Fichas técnicas del requerimiento")
-        self.setWindowModality(Qt.WindowModal)
-        self.setMinimumSize(480, 320)
-        v = QVBoxLayout(self)
-        v.setContentsMargins(18, 16, 18, 16); v.setSpacing(8)
-
-        intro = QLabel(
-            "Adjunta fichas técnicas en PDF (la del cemento, del geotanque…). "
-            "Al generar el TDR, la IA usa sus datos reales en las "
-            "especificaciones; al exportar el PDF, van como anexos al final. "
-            "Un PDF escaneado (imagen) solo puede ir como anexo.")
-        intro.setWordWrap(True)
-        intro.setStyleSheet(f"color:{SLATE_500}; font-size:11px;"
-            " background:transparent; border:none;")
-        v.addWidget(intro)
-
-        self.lista = QListWidget()
-        self.lista.setStyleSheet(
-            f"QListWidget {{ background:white; border:1px solid {SILVER_300};"
-            f" border-radius:6px; font-size:12px; }}"
-            f"QListWidget::item {{ padding:5px 8px;"
-            f" border-bottom:1px solid {SILVER_200}; }}"
-            f"QListWidget::item:selected {{ background:{SELECT_BG};"
-            f" color:{SLATE_700}; }}")
-        self.lista.itemDoubleClicked.connect(self._abrir)
-        v.addWidget(self.lista, 1)
-
-        fila = QHBoxLayout(); fila.setSpacing(6)
-        b_add = QPushButton("＋ Agregar PDF…")
-        b_add.setStyleSheet(
-            f"QPushButton {{ background:{ORANGE}; color:white; border:none;"
-            f" border-radius:6px; padding:6px 14px; font-weight:600; }}")
-        b_add.clicked.connect(self._agregar)
-        b_del = QPushButton("Quitar")
-        b_del.clicked.connect(self._quitar)
-        b_ok = QPushButton("Cerrar")
-        b_ok.clicked.connect(self.accept)
-        for b in (b_del, b_ok):
-            b.setStyleSheet(
-                f"QPushButton {{ background:white; color:{SLATE_700};"
-                f" border:1px solid {SILVER_300}; border-radius:6px;"
-                f" padding:6px 14px; }}")
-        fila.addWidget(b_add); fila.addWidget(b_del)
-        fila.addStretch(); fila.addWidget(b_ok)
-        v.addLayout(fila)
-        self._recargar()
-
-    def _recargar(self):
-        self.lista.clear()
-        for a in REQ.get_adjuntos(self._req_id):
-            legible = bool(REQ.texto_adjunto_pdf(a.get('ruta') or '',
-                                                 max_pags=1, max_chars=200))
-            marca = "📄" if legible else "🖼"
-            extra = "" if legible else "   (escaneado: solo anexo, la IA no lo lee)"
-            it = QListWidgetItem(f"{marca}  {a.get('nombre')}{extra}")
-            it.setData(Qt.UserRole, a.get('nombre'))
-            it.setToolTip(a.get('ruta') or '')
-            self.lista.addItem(it)
-
-    def _agregar(self):
-        from PySide6.QtWidgets import QFileDialog
-        rutas, _ = QFileDialog.getOpenFileNames(
-            self, "Fichas técnicas (PDF)", "", "PDF (*.pdf)")
-        escaneadas = []
-        for ruta in rutas:
-            a = REQ.agregar_adjunto(self._req_id, ruta)
-            if not REQ.texto_adjunto_pdf(a['ruta'], max_pags=1, max_chars=200):
-                escaneadas.append(a['nombre'])
-        if escaneadas:
-            QMessageBox.information(self, "Ficha escaneada",
-                "Estas fichas no tienen texto legible (parecen escaneadas):\n\n"
-                + "\n".join(f"• {n}" for n in escaneadas)
-                + "\n\nIrán como ANEXO en el PDF, pero la IA no podrá leer su "
-                  "contenido. Si quieres que la IA las use, busca la versión "
-                  "digital del fabricante.")
-        self._recargar()
-
-    def _quitar(self):
-        it = self.lista.currentItem()
-        if not it:
-            return
-        REQ.quitar_adjunto(self._req_id, it.data(Qt.UserRole))
-        self._recargar()
-
-    def _abrir(self, it):
-        for a in REQ.get_adjuntos(self._req_id):
-            if a.get('nombre') == it.data(Qt.UserRole):
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-                QDesktopServices.openUrl(QUrl.fromLocalFile(a.get('ruta') or ''))
-                return
 
 
 class _FechaDialog(QDialog):

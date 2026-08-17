@@ -546,6 +546,8 @@ def init_db():
         ('req_tdr_datos', "ALTER TABLE requerimientos ADD COLUMN tdr_datos TEXT DEFAULT ''"),
         # Fichas técnicas adjuntas al requerimiento: JSON [{nombre, ruta}, …].
         ('req_adjuntos',  "ALTER TABLE requerimientos ADD COLUMN adjuntos TEXT DEFAULT ''"),
+        # Fichas técnicas de la especificación de la partida (mismo formato).
+        ('part_spec_adj', "ALTER TABLE partidas ADD COLUMN spec_adjuntos TEXT DEFAULT ''"),
         ('rec_categoria', "ALTER TABLE recursos ADD COLUMN categoria TEXT DEFAULT ''"),
         ('curva_prog_ov', "ALTER TABLE curva_reprogramada ADD COLUMN pct_prog REAL"),
         ('curva_real_ov', "ALTER TABLE curva_reprogramada ADD COLUMN pct_real REAL"),
