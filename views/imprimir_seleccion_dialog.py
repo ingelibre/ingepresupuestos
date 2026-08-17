@@ -17,8 +17,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
     QFrame, QMessageBox, QFileDialog, QWidget, QApplication,
@@ -218,17 +217,8 @@ class VistaPreviaDialog(QDialog):
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            painter = QPainter(printer)
-            for i in range(self._doc.pageCount()):
-                if i > 0:
-                    printer.newPage()
-                tam = self._doc.pagePointSize(i)
-                # ×2 para que el raster no se vea blando en papel.
-                # OJO: render() exige QSize — una tupla lanza TypeError.
-                imagen = self._doc.render(
-                    i, QSize(int(tam.width() * 2), int(tam.height() * 2)))
-                painter.drawImage(printer.pageRect(QPrinter.DevicePixel), imagen)
-            painter.end()
+            from utils.impresion import pintar_pdf_en_printer
+            pintar_pdf_en_printer(printer, self._pdf_path)
         except Exception as e:                      # noqa: BLE001
             QMessageBox.warning(self, "Error de impresión", str(e))
         finally:

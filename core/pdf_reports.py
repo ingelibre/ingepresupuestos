@@ -4602,10 +4602,16 @@ def _build_html_for(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict
 
 
 def _especificaciones_chunked(pid: int, with_cover: bool,
-                                  paper: str = 'A4', orient: str = 'portrait'):
+                                  paper: str = 'A4', orient: str = 'portrait',
+                                  solo_pids=None):
     """Helper común para especificaciones: prepara proy + chunks + renderer."""
     proy = _proyecto_info(pid)
     items, _ = calcular_totales(pid)
+    if solo_pids:
+        # Impresión de la selección del árbol: sin este filtro, el camino
+        # chunked imprimía las especificaciones del proyecto ENTERO aunque
+        # el resto de reportes sí respetara la selección.
+        items = filtrar_items_por_pids(items, solo_pids)
     chunks = chunks_especificaciones(pid, proy, items)
     if not chunks:
         # Fallback al render normal para mostrar el mensaje "sin specs"
@@ -4628,7 +4634,8 @@ def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
     _BUILD_HTML_PAPER['paper'] = paper
     _BUILD_HTML_PAPER['orient'] = orient
     if tipo == 'especificaciones':
-        prep = _especificaciones_chunked(pid, with_cover, paper=paper, orient=orient)
+        prep = _especificaciones_chunked(pid, with_cover, paper=paper,
+                                         orient=orient, solo_pids=solo_pids)
         if prep is not None:
             renderer, title_html, chunks = prep
             return renderer.render_chunks_to_buffer(title_html, chunks)
@@ -4652,13 +4659,15 @@ def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
     _BUILD_HTML_PAPER['paper'] = paper
     _BUILD_HTML_PAPER['orient'] = orient
     if tipo == 'especificaciones':
-        prep = _especificaciones_chunked(pid, with_cover, paper=paper, orient=orient)
+        prep = _especificaciones_chunked(pid, with_cover, paper=paper,
+                                         orient=orient, solo_pids=solo_pids)
         if prep is not None:
             renderer, title_html, chunks = prep
             renderer.pie_offset = int(pie_offset or 0)
             renderer.pie_total  = int(pie_total) if pie_total else None
             renderer.render_chunks_to_file(title_html, chunks, out_path)
-            _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total)
+            _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total,
+                                            solo_pids=solo_pids)
             return
     titulo, body, proy = _build_html_for(tipo, pid, solo_pids)
     renderer = _PdfRenderer(proy, titulo, with_cover=with_cover,
@@ -4666,17 +4675,22 @@ def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
                               pie_offset=pie_offset, pie_total=pie_total)
     renderer.render_to_file(body, out_path)
     if tipo == 'especificaciones':
-        _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total)
+        _anexar_fichas_especificaciones(pid, out_path, pie_offset, pie_total,
+                                        solo_pids=solo_pids)
 
 
 def _anexar_fichas_especificaciones(pid: int, out_path: str,
-                                    pie_offset=0, pie_total=None):
+                                    pie_offset=0, pie_total=None,
+                                    solo_pids=None):
     """Fusiona al final del reporte de Especificaciones las fichas técnicas
     (PDF) adjuntas a las partidas, en orden de ítem y sin repetir archivo.
 
     SOLO en el export suelto: dentro del Reporte Completo (pie_offset/
     pie_total puestos) los anexos caerían en MEDIO del documento merged y
     además romperían la numeración global de páginas, que se calcula antes.
+
+    `solo_pids` (impresión de la selección del árbol) limita las fichas a
+    las partidas seleccionadas — igual que el cuerpo del reporte.
     """
     if pie_offset or pie_total:
         return
@@ -4691,6 +4705,9 @@ def _anexar_fichas_especificaciones(pid: int, out_path: str,
                ORDER BY item""", (pid,)).fetchall()
     finally:
         conn.close()
+    if solo_pids:
+        solo_pids = set(solo_pids)
+        partidas = [p for p in partidas if p['id'] in solo_pids]
     rutas, vistas = [], set()
     for p in partidas:
         for f in ADJ.spec_adjuntos(p['id']):

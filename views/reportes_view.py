@@ -2517,48 +2517,11 @@ class ReportesView(QWidget):
         dlg.exec()
 
     def _paint_pdf_a_printer(self, printer: QPrinter):
-        """Renderiza cada página del PDF temporal sobre el QPrinter.
-        Usa pageLayout().paintRect en puntos (Qt6) y centra cada página
-        en el área imprimible respetando aspect ratio."""
+        """Renderiza el PDF temporal sobre el QPrinter (helper compartido)."""
         if not self._tmp_pdf:
             return
-        from PySide6.QtGui import QPageLayout
-        doc = QPdfDocument()
-        doc.load(self._tmp_pdf)
-        n = doc.pageCount()
-        if n <= 0:
-            return
-        painter = QPainter(printer)
-        try:
-            layout = printer.pageLayout()
-            paint_pts = layout.paintRect(QPageLayout.Unit.Point)
-            dpi = printer.resolution()
-            # En Qt6 el QPainter sobre QPrinter trabaja en device pixels;
-            # convertimos el área imprimible de puntos → px.
-            target_w_px = int(paint_pts.width()  * dpi / 72.0)
-            target_h_px = int(paint_pts.height() * dpi / 72.0)
-            if target_w_px <= 0 or target_h_px <= 0:
-                return
-            for i in range(n):
-                if i > 0:
-                    printer.newPage()
-                page_size_pts = doc.pagePointSize(i)
-                pw, ph = page_size_pts.width(), page_size_pts.height()
-                if pw <= 0 or ph <= 0:
-                    continue
-                # Escala que cabe en el área imprimible (aspect ratio)
-                scale = min(paint_pts.width() / pw, paint_pts.height() / ph)
-                render_w = int(pw * scale * dpi / 72.0)
-                render_h = int(ph * scale * dpi / 72.0)
-                if render_w <= 0 or render_h <= 0:
-                    continue
-                img = doc.render(i, QSize(render_w, render_h))
-                # Centrar la página en el área imprimible
-                ox = max(0, (target_w_px - render_w) // 2)
-                oy = max(0, (target_h_px - render_h) // 2)
-                painter.drawImage(ox, oy, img)
-        finally:
-            painter.end()
+        from utils.impresion import pintar_pdf_en_printer
+        pintar_pdf_en_printer(printer, self._tmp_pdf)
 
     # ─── Cleanup ─────────────────────────────────────────────────────────────
 

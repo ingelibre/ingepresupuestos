@@ -1449,24 +1449,8 @@ class MetradosView(QWidget):
     def _paint_pdf_a_printer(self, printer, pdf_path: str):
         """Renderiza el PDF temporal página por página al QPrinter."""
         try:
-            from PySide6.QtPdf import QPdfDocument
-            doc = QPdfDocument(self)
-            doc.load(pdf_path)
-            from PySide6.QtGui import QPainter
-            painter = QPainter(printer)
-            for i in range(doc.pageCount()):
-                if i > 0:
-                    printer.newPage()
-                size = doc.pagePointSize(i)
-                # QPdfDocument.render() exige QSize: con una tupla lanza
-                # TypeError y la impresión no llegaba a salir.
-                page_image = doc.render(
-                    i,
-                    QSize(int(size.width() * 2), int(size.height() * 2))
-                )
-                target = printer.pageRect(QPrinter.DevicePixel)
-                painter.drawImage(target, page_image)
-            painter.end()
+            from utils.impresion import pintar_pdf_en_printer
+            pintar_pdf_en_printer(printer, pdf_path)
         except Exception as e:
             import traceback; traceback.print_exc()
             QMessageBox.warning(self, "Error de impresión", str(e))
