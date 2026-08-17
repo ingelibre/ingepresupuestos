@@ -57,6 +57,18 @@ def test_parse_num_opt_distingue_vacio_de_cero():
     assert parse_num_opt("0.00") == 0.0
     assert parse_num_opt("1,000.00") == 1000.0
 
+def test_safe_float_importador_separador_de_miles():
+    """Celdas de TEXTO en Excel importados: «1,234.56» debe ser 1234.56,
+    no 0.0 (el viejo replace(',', '.') la partía en dos puntos)."""
+    from core.importer import safe_float
+    assert safe_float("1,234.56") == 1234.56
+    assert safe_float("21,36")    == 21.36     # coma decimal, se conserva
+    assert safe_float("1,000")    == 1000.0
+    assert safe_float(1234)       == 1234.0    # celda numérica, intacta
+    assert safe_float(12.5)       == 12.5
+    assert safe_float(None)       == 0.0
+    assert safe_float("abc")      == 0.0
+
 def test_pad_codigo():
     assert pad_codigo("47") == "4700000"
     assert pad_codigo("4700023") == "4700023"

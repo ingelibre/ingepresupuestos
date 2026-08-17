@@ -43,7 +43,7 @@ from core.pdf_reports import (
     cargar_logo as _cargar_logo_rep,
     _rect_logo,
 )
-from utils.formatting import fmt
+from utils.formatting import fmt, parse_num
 
 
 # ── Paleta consistente con proyecto_view.py ────────────────────────────────
@@ -8025,12 +8025,21 @@ class ValorizadoWidget(QWidget):
             """Convierte string a float (quita símbolos de moneda)."""
             if not s:
                 return None
-            t = (str(s).replace('S/', '').replace('US$', '').replace('€', '')
-                       .strip().replace(',', '').rstrip('%').strip())
-            try:
-                return float(t)
-            except ValueError:
+            # Gate: solo tratar como número las celdas que son un monto
+            # (símbolo opcional + dígitos/separadores + % opcional). Los
+            # rótulos («TOTAL», «SEMANA 1») pasan de largo como texto.
+            # parse_num entiende ambos estilos de separador: con monedas de
+            # coma decimal («€ 1.234,50») el replace(',', '') de antes hacía
+            # fallar float() y el Excel recibía TEXTO en vez de número.
+            import re as _re
+            _NUM = (r'(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?'   # 1,234,567.89
+                    r'|\d{1,3}(?:\.\d{3})+(?:,\d+)?'     # 1.234.567,89
+                    r'|\d+(?:[.,]\d+)?)')                  # 1234.56 · 21,36 · 85
+            if not _re.match(r'^\s*-?\s*(?:S/\.?|US\$|CLP\$|COP\$|ARS\$'
+                             r'|UYU\$|MXN\$|R\$|Bs\.?|₲|€|\$)?'
+                             r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
+            return parse_num(s)
 
         # Acceso a las partidas para detectar títulos por índice (las filas
         # del QTableWidget mantienen el mismo orden que `_cv._partidas`).
@@ -11203,12 +11212,21 @@ class InsumosWidget(QWidget):
         def _n(s):
             if not s:
                 return None
-            t = (str(s).replace('S/', '').replace('US$', '').replace('€', '')
-                       .strip().replace(',', '').rstrip('%').strip())
-            try:
-                return float(t)
-            except ValueError:
+            # Gate: solo tratar como número las celdas que son un monto
+            # (símbolo opcional + dígitos/separadores + % opcional). Los
+            # rótulos («TOTAL», «SEMANA 1») pasan de largo como texto.
+            # parse_num entiende ambos estilos de separador: con monedas de
+            # coma decimal («€ 1.234,50») el replace(',', '') de antes hacía
+            # fallar float() y el Excel recibía TEXTO en vez de número.
+            import re as _re
+            _NUM = (r'(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?'   # 1,234,567.89
+                    r'|\d{1,3}(?:\.\d{3})+(?:,\d+)?'     # 1.234.567,89
+                    r'|\d+(?:[.,]\d+)?)')                  # 1234.56 · 21,36 · 85
+            if not _re.match(r'^\s*-?\s*(?:S/\.?|US\$|CLP\$|COP\$|ARS\$'
+                             r'|UYU\$|MXN\$|R\$|Bs\.?|₲|€|\$)?'
+                             r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
+            return parse_num(s)
 
         def _alto_desc(texto: str) -> float:
             """Alto de fila (pts) para que la Descripción mergeada C+D con
