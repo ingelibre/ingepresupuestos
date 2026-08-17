@@ -5638,6 +5638,32 @@ def generar_tdr_pdf(out_path: str, req_id: int):
                             paper='A4', orient='portrait')
     renderer.render_to_file(body, out_path)
 
+    # ── Anexar las fichas técnicas (PDF) al final del documento ──────────
+    # Solo en el PDF: Word/ODT no pueden llevar un PDF incrustado. Una ficha
+    # borrada o ilegible se salta sin tumbar el reporte.
+    fichas = _req.get_adjuntos(req_id)
+    if fichas:
+        import os
+        try:
+            from pypdf import PdfWriter
+            writer = PdfWriter()
+            writer.append(out_path)
+            anexadas = 0
+            for f in fichas:
+                ruta = f.get('ruta') or ''
+                if not os.path.exists(ruta):
+                    continue
+                try:
+                    writer.append(ruta)
+                    anexadas += 1
+                except Exception:
+                    continue
+            if anexadas:
+                with open(out_path, 'wb') as fh:
+                    writer.write(fh)
+        except Exception:
+            pass  # sin anexos antes que sin reporte
+
 
 def generar_pdf_seccion_archivo(seccion: str, num: int, pid: int,
                                   out_path: str, *,

@@ -144,6 +144,29 @@ def generar_tdr_ia(req_id: int, datos: dict, prompt_extra: str = '') -> tuple:
     ctx.append(f"INCLUIR PENALIDADES: {'sí' if es_publico else 'solo si aplica'}")
     bloque_ctx = '\n'.join(ctx)
 
+    # ── Fichas técnicas adjuntas (PDF con texto) ─────────────────────────
+    # El texto de cada ficha entra al prompt para que las especificaciones
+    # citen las propiedades REALES del producto (norma, tipo, resistencia…).
+    # Un PDF escaneado no aporta texto: igual se lista, porque va como anexo
+    # físico en el PDF exportado y la IA debe referenciarlo.
+    fichas = REQ.get_adjuntos(req_id)
+    bloque_fichas = ''
+    nombres_fichas = [f.get('nombre') or '' for f in fichas if f.get('nombre')]
+    if fichas:
+        partes = []
+        for f in fichas:
+            t = REQ.texto_adjunto_pdf(f.get('ruta') or '')
+            if t:
+                partes.append(f"--- FICHA TÉCNICA: {f.get('nombre')} ---\n{t}")
+            else:
+                partes.append(f"--- FICHA TÉCNICA: {f.get('nombre')} "
+                              f"(sin texto legible; solo anexo) ---")
+        bloque_fichas = (
+            "\n\nFICHAS TÉCNICAS ADJUNTAS (al redactar las especificaciones del "
+            "insumo correspondiente, usa ESTOS datos reales — norma, tipo, "
+            "resistencia, presentación — por encima de lo genérico):\n"
+            + '\n\n'.join(partes))
+
     prompt = f"""{_SYSTEM}
 
 ════════════════════════════════════════════
@@ -175,7 +198,9 @@ INSTRUCCIONES FINALES
 - En ESPECIFICACIONES TÉCNICAS detalla CADA insumo en su propio sub-bloque (norma NTP/ASTM, tipo/grado, calidad, presentación), no en una sola línea.
 - Usa exactamente los insumos de la tabla; no inventes ítems ni precios.
 - El monto total exprésalo también EN LETRAS.
+{f"- ANEXOS: cierra el documento con una sección ANEXOS que liste: {' · '.join('Anexo N° %d: %s' % (i + 1, n) for i, n in enumerate(nombres_fichas))} (se adjuntan al final del PDF)." if nombres_fichas else ''}
 {f'- INSTRUCCIONES ADICIONALES DEL USUARIO: {prompt_extra}' if prompt_extra and prompt_extra.strip() else ''}"""
+    prompt += bloque_fichas
 
     texto, error = _llamar_ia(prompt, api_key, max_tokens=3800)
     if error:

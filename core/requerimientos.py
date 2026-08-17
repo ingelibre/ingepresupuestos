@@ -157,6 +157,11 @@ def eliminar_requerimiento(req_id: int) -> bool:
             return False
         pid = v['proyecto_id']
         conn.execute("DELETE FROM requerimientos WHERE id=?", (req_id,))
+        # Sus fichas adjuntas ya no tienen dueño: borrar la carpeta.
+        import shutil
+        from core.config import UPLOADS_DIR
+        shutil.rmtree(UPLOADS_DIR / "requerimientos" / str(req_id),
+                      ignore_errors=True)
         # Recompacta la numeración: los que quedan vuelven a ser correlativos
         # (1, 2, 3…) sin huecos, conservando su orden actual.
         restantes = conn.execute(
@@ -355,6 +360,87 @@ def guardar_tdr(req_id: int, texto: str, datos_json: str = None):
         conn.commit()
     finally:
         conn.close()
+
+
+# ── Fichas técnicas adjuntas (PDF) ───────────────────────────────────────────
+# Se copian a USER_DATA_DIR/uploads/requerimientos/<req_id>/ (la ruta original
+# del usuario puede moverse o vivir en un USB) y la lista viaja en la columna
+# `adjuntos` como JSON [{nombre, ruta}, …].
+
+def get_adjuntos(req_id: int) -> list[dict]:
+    import json
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT adjuntos FROM requerimientos WHERE id=?",
+                         (req_id,)).fetchone()
+    finally:
+        conn.close()
+    if not r or not (r['adjuntos'] or '').strip():
+        return []
+    try:
+        lista = json.loads(r['adjuntos'])
+        return lista if isinstance(lista, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _set_adjuntos(req_id: int, lista: list[dict]):
+    import json
+    conn = get_db()
+    try:
+        conn.execute("UPDATE requerimientos SET adjuntos=? WHERE id=?",
+                     (json.dumps(lista, ensure_ascii=False), req_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _dir_adjuntos(req_id: int):
+    from core.config import UPLOADS_DIR
+    d = UPLOADS_DIR / "requerimientos" / str(req_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def agregar_adjunto(req_id: int, ruta_origen: str) -> dict:
+    """Copia el PDF junto al requerimiento y lo registra. Devuelve la entrada
+    {nombre, ruta}. Si ya existe un adjunto con el mismo nombre, lo pisa."""
+    import shutil, os
+    nombre = os.path.basename(ruta_origen)
+    destino = _dir_adjuntos(req_id) / nombre
+    shutil.copyfile(ruta_origen, destino)
+    lista = [a for a in get_adjuntos(req_id) if a.get('nombre') != nombre]
+    lista.append({'nombre': nombre, 'ruta': str(destino)})
+    _set_adjuntos(req_id, lista)
+    return {'nombre': nombre, 'ruta': str(destino)}
+
+
+def quitar_adjunto(req_id: int, nombre: str):
+    import os
+    lista = get_adjuntos(req_id)
+    for a in lista:
+        if a.get('nombre') == nombre:
+            try:
+                os.remove(a.get('ruta') or '')
+            except OSError:
+                pass
+    _set_adjuntos(req_id, [a for a in lista if a.get('nombre') != nombre])
+
+
+def texto_adjunto_pdf(ruta: str, max_pags: int = 6, max_chars: int = 6000) -> str:
+    """Texto de la ficha técnica (PDF digital). Un PDF escaneado —solo
+    imagen, sin capa de texto— devuelve ''. Import perezoso: pdfplumber
+    tarda en cargar y solo hace falta aquí y en el importador de PDF."""
+    try:
+        import pdfplumber
+        partes = []
+        with pdfplumber.open(ruta) as pdf:
+            for pagina in pdf.pages[:max_pags]:
+                partes.append(pagina.extract_text() or '')
+        texto = '\n'.join(partes).strip()
+        return texto[:max_chars]
+    except Exception:
+        return ''
 
 
 def recursos_en_requerimientos(proyecto_id: int) -> set:
