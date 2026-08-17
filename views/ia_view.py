@@ -476,7 +476,7 @@ class IAView(QWidget):
         form = QFormLayout()
         form.setSpacing(6)
         self.inp_qwen_modelo = QLineEdit()
-        self.inp_qwen_modelo.setPlaceholderText("qwen-flash")
+        self.inp_qwen_modelo.setPlaceholderText("qwen3.6-flash")
         self.inp_qwen_modelo.setFixedHeight(32)
         self.inp_qwen_modelo.setStyleSheet(
             f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
@@ -486,7 +486,7 @@ class IAView(QWidget):
         vl.addLayout(form)
 
         modelos_nota = QLabel(
-            "Modelos: qwen-flash (recomendado) · qwen-plus · qwen-max")
+            "Modelos: qwen3.6-flash (recomendado) · qwen3.7-plus · qwen3.7-max")
         modelos_nota.setStyleSheet(
             f"font-size:10px; color:{SLATE_300}; "
             f"background:transparent; border:none;"
@@ -622,18 +622,19 @@ class IAView(QWidget):
         hl.addWidget(self._btn_ojo(self.inp_openrouter))
         vl.addLayout(hl)
 
+        # Lista de RESPALDO (si «↺ Actualizar lista» no ha corrido aún).
+        # Ids verificados en vivo contra openrouter.ai/api/v1/models
+        # (2026-08-18) — la anterior estaba entera retirada del catálogo.
         _OR_MODELOS = [
-            ("google/gemini-2.0-flash-exp:free",           "⭐ Gemini 2.0 Flash  [gratis]"),
-            ("google/gemini-2.5-pro-exp-03-25:free",       "⭐ Gemini 2.5 Pro  [gratis]"),
-            ("deepseek/deepseek-chat:free",                "⭐ DeepSeek V3  [gratis]"),
-            ("deepseek/deepseek-r1:free",                  "DeepSeek R1  [gratis]"),
-            ("meta-llama/llama-3.3-70b-instruct:free",     "LLaMA 3.3 70B  [gratis]"),
-            ("meta-llama/llama-4-maverick:free",           "LLaMA 4 Maverick  [gratis]"),
-            ("mistralai/mistral-7b-instruct:free",         "Mistral 7B  [gratis]"),
-            ("microsoft/phi-4:free",                       "Microsoft Phi-4  [gratis]"),
-            ("google/gemini-2.0-flash-001",                "Gemini 2.0 Flash  [pago]"),
-            ("openai/gpt-4o-mini",                         "GPT-4o Mini  [pago]"),
-            ("anthropic/claude-3-haiku",                   "Claude 3 Haiku  [pago]"),
+            ("openai/gpt-oss-20b:free",                 "⭐ GPT-OSS 20B  [gratis]"),
+            ("z-ai/glm-5.2:free",                       "⭐ GLM 5.2  [gratis]"),
+            ("nvidia/nemotron-3-super-120b-a12b:free",  "Nemotron 3 Super 120B  [gratis]"),
+            ("google/gemma-4-31b-it:free",              "Gemma 4 31B  [gratis]"),
+            ("deepseek/deepseek-v4-flash-0731",         "DeepSeek V4 Flash  [pago barato]"),
+            ("qwen/qwen3.7-flash",                      "Qwen 3.7 Flash  [pago barato]"),
+            ("google/gemini-3.6-flash",                 "Gemini 3.6 Flash  [pago]"),
+            ("moonshotai/kimi-k3",                      "Kimi K3  [pago]"),
+            ("anthropic/claude-sonnet-5",               "Claude Sonnet 5  [pago]"),
         ]
 
         # Popup styling cubierto por `install_global_popup_styles(app)`.
@@ -758,9 +759,9 @@ class IAView(QWidget):
         ollama_modelo  = get_config('ollama_modelo',   'llama3.2')
         openai_modelo      = get_config('openai_modelo',      'gpt-4o-mini')
         gemini_modelo      = get_config('gemini_modelo',      'gemini-2.0-flash')
-        openrouter_modelo  = get_config('openrouter_modelo',  'meta-llama/llama-3.3-70b-instruct:free')
+        openrouter_modelo  = get_config('openrouter_modelo',  'openai/gpt-oss-20b:free')
         deepseek_modelo    = get_config('deepseek_modelo',    'deepseek-v4-flash')
-        qwen_modelo        = get_config('qwen_modelo',        'qwen-flash')
+        qwen_modelo        = get_config('qwen_modelo',        'qwen3.6-flash')
 
         self.inp_ollama_url.setText(ollama_url)
         self.inp_ollama_modelo.setText(ollama_modelo)
@@ -856,7 +857,7 @@ class IAView(QWidget):
             gemini_modelo    = self.inp_gemini_modelo.text().strip()  or 'gemini-2.0-flash',
             openrouter_modelo= self._openrouter_modelo_id(),
             deepseek_modelo  = self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash',
-            qwen_modelo      = self.inp_qwen_modelo.text().strip()     or 'qwen-flash',
+            qwen_modelo      = self.inp_qwen_modelo.text().strip()     or 'qwen3.6-flash',
         )
         self._worker.terminado.connect(self._on_probar_terminado)
         self._worker.start()
@@ -948,7 +949,7 @@ class IAView(QWidget):
         set_config('gemini_modelo',     self.inp_gemini_modelo.text().strip()     or 'gemini-2.0-flash')
         set_config('openrouter_modelo', self._openrouter_modelo_id())
         set_config('deepseek_modelo',   self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash')
-        set_config('qwen_modelo',       self.inp_qwen_modelo.text().strip()     or 'qwen-flash')
+        set_config('qwen_modelo',       self.inp_qwen_modelo.text().strip()     or 'qwen3.6-flash')
 
         self.lbl_ia_estado.setStyleSheet(
             f"font-size:11px; color:{GREEN}; "

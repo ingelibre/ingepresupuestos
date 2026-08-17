@@ -163,17 +163,39 @@ def _llamar_openai(prompt: str, api_key: str, max_tokens: int):
         return None, f'Error OpenAI: {err}'
 
 
+# Los :free de OpenRouter rotan seguido (llama-3.3-70b-instruct:free, el
+# default histórico, ya no existe). Default vigente + auto-reparación abajo.
+_OPENROUTER_MODELO_DEFAULT = 'openai/gpt-oss-20b:free'
+
+
 def _llamar_openrouter(prompt: str, api_key: str, max_tokens: int):
     try:
         from openai import OpenAI
-        client   = OpenAI(api_key=api_key, base_url='https://openrouter.ai/api/v1')
-        modelo   = get_config('openrouter_modelo', 'meta-llama/llama-3.3-70b-instruct:free')
-        response = client.chat.completions.create(
-            model=modelo, max_tokens=max_tokens,
-            messages=[{'role': 'user', 'content': prompt}],
-            extra_headers={'X-Title': 'ingePresupuestos'},
-        )
-        return response.choices[0].message.content, None
+        client = OpenAI(api_key=api_key, base_url='https://openrouter.ai/api/v1')
+        modelo = get_config('openrouter_modelo', _OPENROUTER_MODELO_DEFAULT)
+        try:
+            response = client.chat.completions.create(
+                model=modelo, max_tokens=max_tokens,
+                messages=[{'role': 'user', 'content': prompt}],
+                extra_headers={'X-Title': 'ingePresupuestos'},
+            )
+            return response.choices[0].message.content, None
+        except Exception as e_mod:
+            # Modelo retirado del catálogo: reintentar con el default vigente
+            # y GUARDARLO (mismo criterio que Groq/Gemini). El usuario puede
+            # elegir otro con «↺ Actualizar lista».
+            em = str(e_mod)
+            if modelo != _OPENROUTER_MODELO_DEFAULT and (
+                    '404' in em or 'No endpoints found' in em
+                    or 'not a valid model' in em.lower()):
+                response = client.chat.completions.create(
+                    model=_OPENROUTER_MODELO_DEFAULT, max_tokens=max_tokens,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    extra_headers={'X-Title': 'ingePresupuestos'},
+                )
+                set_config('openrouter_modelo', _OPENROUTER_MODELO_DEFAULT)
+                return response.choices[0].message.content, None
+            raise
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or 'invalid' in err.lower() or '401' in err:
@@ -226,7 +248,7 @@ def _llamar_qwen(prompt: str, api_key: str, max_tokens: int):
         client   = OpenAI(
             api_key=api_key,
             base_url='https://dashscope-intl.aliyuncs.com/compatible-mode/v1')
-        modelo   = get_config('qwen_modelo', 'qwen-flash')
+        modelo   = get_config('qwen_modelo', 'qwen3.6-flash')
         response = client.chat.completions.create(
             model=modelo, max_tokens=max_tokens,
             messages=[{'role': 'user', 'content': prompt}]
@@ -241,10 +263,10 @@ def _llamar_qwen(prompt: str, api_key: str, max_tokens: int):
         if 'rate' in err.lower() or 'throttl' in err.lower() or '429' in err:
             return None, 'Límite Qwen alcanzado. Intenta en unos minutos.'
         if 'not exist' in err.lower() or '404' in err:
-            modelo = get_config('qwen_modelo', 'qwen-flash')
+            modelo = get_config('qwen_modelo', 'qwen3.6-flash')
             return None, (f'El modelo "{modelo}" no existe en DashScope. '
                           'Revisa el nombre en Configuración '
-                          '(p.ej. qwen-flash, qwen-plus).')
+                          '(p.ej. qwen3.6-flash, qwen3.7-plus).')
         return None, f'Error Qwen: {err}'
 
 
