@@ -404,8 +404,8 @@ UBICACIÓN: {proyecto['ubicacion']}
 {_geo_spec}{_bloque_notas}
 PARTIDA: {partida['item']} - {partida['descripcion']}
 UNIDAD DE MEDIDA: {partida['unidad']}
-METRADO: {partida['metrado']:.2f} {partida['unidad']}
-PRECIO UNITARIO: S/ {partida['precio_unitario']:.2f}
+METRADO: {(partida['metrado'] or 0):.2f} {partida['unidad']}
+PRECIO UNITARIO: S/ {(partida['precio_unitario'] or 0):.2f}
 
 ANÁLISIS DE COSTOS UNITARIOS (recursos utilizados):
 {acu_texto if acu_texto else 'Sin análisis de costos cargado.'}

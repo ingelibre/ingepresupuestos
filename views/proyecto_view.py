@@ -5067,7 +5067,11 @@ class ProyectoView(QWidget):
             es_titulo = bool(child.data(0, Qt.UserRole + 1))
             if es_titulo:
                 total_hijo = self._calcular_totales_titulos(child)
-                child.setText(5, fmt_num(_r2(total_hijo), self._moneda))
+                # Mismos decimales que las partidas hoja (decimales_presupuesto):
+                # con _r2 fijo, al configurar 3-4 decimales los títulos
+                # mostraban 2 y las hojas 3-4 en la misma columna.
+                _dp = get_decimales_ppto()
+                child.setText(5, fmt_num(_rn(total_hijo, _dp), self._moneda, _dp))
                 child.setTextAlignment(5, Qt.AlignRight | Qt.AlignVCenter)
                 subtotal += total_hijo
             else:
@@ -6955,44 +6959,52 @@ class ProyectoView(QWidget):
         dec     = get_decimales_metrado()
         dec_p   = get_decimales_ppto()
         parcial = parcial_wysiwyg(met, pu, dec_p)
+        # try/finally: dentro de la región silenciada hay un DELETE+commit —
+        # si la BD está bloqueada y lanza, sin el finally el árbol quedaba
+        # MUDO (blockSignals(True) permanente) y las ediciones siguientes ya
+        # no se guardaban hasta recargar el proyecto.
         self.tree.blockSignals(True)
-        item.setText(3, f"{met:,.{dec}f}")
-        item.setText(5, fmt_num(parcial, self._moneda, dec_p))
-        # Valor numérico para los subtotales de los títulos padre
-        item.setData(5, Qt.UserRole, float(parcial))
-        # Si tenía planilla (normal o de acero), borrarla y quitar el indicador ✓
-        if part_id in getattr(self, '_con_planilla', set()):
-            conn2 = get_db()
-            conn2.execute("DELETE FROM metrados_detalle WHERE partida_id=?", (part_id,))
-            conn2.execute("DELETE FROM acero_detalle WHERE partida_id=?", (part_id,))
-            conn2.commit()
-            conn2.close()
-            self._con_planilla.discard(part_id)
-            item.setData(1, Qt.UserRole, False)
-            item.setData(3, Qt.UserRole, False)
-            item.setToolTip(3, "")
-        # Si la planilla de metrados (panel derecho) está mostrando ESTA partida,
-        # limpiar sus tablas en memoria. El metrado manual descarta la planilla;
-        # de no limpiarlas, `tbl_met`/`tbl_acero` conservan las filas viejas y el
-        # guardado silencioso reescribiría el detalle y recalcularía el metrado
-        # desde la planilla → sobrescribe el valor manual "después de un tiempo".
-        # Con las tablas vacías, los guards `_met_tiene_datos()` /
-        # `_acero_tiene_datos()` evitan el re-guardado.
-        if getattr(self, '_met_panel_pid', None) == part_id:
-            if hasattr(self, 'tbl_met'):
-                self._met_loading = True
-                self.tbl_met.setRowCount(0)
-                self._met_loading = False
-                self._met_dirty = False
-            if hasattr(self, 'tbl_acero'):
-                self._acero_loading = True
-                self.tbl_acero.setRowCount(0)
-                self._acero_loading = False
-            if hasattr(self, 'lbl_met_total'):
-                self.lbl_met_total.setText(f"{0:,.{get_decimales_metrado()}f}")
-            self._metrado_nueva_fila()
-        self._calcular_totales_titulos(self.tree.invisibleRootItem())
-        self.tree.blockSignals(False)
+        try:
+            item.setText(3, f"{met:,.{dec}f}")
+            item.setText(5, fmt_num(parcial, self._moneda, dec_p))
+            # Valor numérico para los subtotales de los títulos padre
+            item.setData(5, Qt.UserRole, float(parcial))
+            # Si tenía planilla (normal o de acero), borrarla y quitar el ✓
+            if part_id in getattr(self, '_con_planilla', set()):
+                conn2 = get_db()
+                try:
+                    conn2.execute("DELETE FROM metrados_detalle WHERE partida_id=?", (part_id,))
+                    conn2.execute("DELETE FROM acero_detalle WHERE partida_id=?", (part_id,))
+                    conn2.commit()
+                finally:
+                    conn2.close()
+                self._con_planilla.discard(part_id)
+                item.setData(1, Qt.UserRole, False)
+                item.setData(3, Qt.UserRole, False)
+                item.setToolTip(3, "")
+            # Si la planilla de metrados (panel derecho) muestra ESTA partida,
+            # limpiar sus tablas en memoria. El metrado manual descarta la
+            # planilla; de no limpiarlas, `tbl_met`/`tbl_acero` conservan filas
+            # viejas y el guardado silencioso reescribiría el detalle →
+            # sobrescribe el valor manual "después de un tiempo". Con las
+            # tablas vacías, los guards `_met_tiene_datos()` /
+            # `_acero_tiene_datos()` evitan el re-guardado.
+            if getattr(self, '_met_panel_pid', None) == part_id:
+                if hasattr(self, 'tbl_met'):
+                    self._met_loading = True
+                    self.tbl_met.setRowCount(0)
+                    self._met_loading = False
+                    self._met_dirty = False
+                if hasattr(self, 'tbl_acero'):
+                    self._acero_loading = True
+                    self.tbl_acero.setRowCount(0)
+                    self._acero_loading = False
+                if hasattr(self, 'lbl_met_total'):
+                    self.lbl_met_total.setText(f"{0:,.{get_decimales_metrado()}f}")
+                self._metrado_nueva_fila()
+            self._calcular_totales_titulos(self.tree.invisibleRootItem())
+        finally:
+            self.tree.blockSignals(False)
         self.actualizar_total()
 
     def _supr_partida_seleccionada(self):
