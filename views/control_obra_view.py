@@ -3095,26 +3095,39 @@ _REQ_COLS = ["#", "Recurso", "Und", "Presup.", "Requerido"]
 
 
 class _ReqTable(_MetTable):
-    """Tabla del requerimiento que acepta insumos arrastrados desde el árbol de
-    insumos del proyecto (panel izquierdo). `on_drop(list_de_insumos)`."""
+    """Tabla del requerimiento. Dos arrastres distintos:
+    - DESDE el árbol de insumos (panel izquierdo): agrega recursos
+      (`on_drop(list_de_insumos)`).
+    - DENTRO de la tabla: reordena las filas; las sub-filas de acero viajan
+      pegadas a su recurso. El panel pone los callbacks `fila_movible(r)`,
+      `expandir_bloque(r)`, `ajustar_destino(r)` y `on_reorder()`.
+    """
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.on_drop = None
+        self.on_reorder = None
+        self.fila_movible = None
+        self.expandir_bloque = None
+        self.ajustar_destino = None
         self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DropOnly)
+        # DragDrop (no DropOnly): habilita también el arrastre interno. El
+        # arrastre efectivo se enciende con setDragEnabled(abierto) al cargar.
+        self.setDragDropMode(QAbstractItemView.DragDrop)
+        self.setDragDropOverwriteMode(False)
+        self.setDropIndicatorShown(True)
 
     def _es_arbol(self, e):
         return isinstance(e.source(), QTreeWidget)
 
     def dragEnterEvent(self, e):
-        if self._es_arbol(e):
+        if self._es_arbol(e) or e.source() is self:
             e.acceptProposedAction()
         else:
             super().dragEnterEvent(e)
 
     def dragMoveEvent(self, e):
-        if self._es_arbol(e):
+        if self._es_arbol(e) or e.source() is self:
             e.acceptProposedAction()
         else:
             super().dragMoveEvent(e)
@@ -3127,7 +3140,93 @@ class _ReqTable(_MetTable):
                 self.on_drop(datos)
                 e.acceptProposedAction()
                 return
+        if e.source() is self:
+            if self._mover_filas(e):
+                # CopyAction a propósito: con MoveAction Qt intentaría borrar
+                # las filas de origen que ya movimos a mano (duplicaría el
+                # borrado). El movimiento real lo hicimos nosotros.
+                e.setDropAction(Qt.CopyAction)
+                e.accept()
+                if self.on_reorder:
+                    self.on_reorder()
+            else:
+                e.ignore()
+            return
         super().dropEvent(e)
+
+    def _mover_filas(self, e) -> bool:
+        """Mueve el bloque de filas seleccionadas al punto del drop."""
+        sel = sorted({i.row() for i in self.selectedIndexes()})
+        movibles = [r for r in sel
+                    if not self.fila_movible or self.fila_movible(r)]
+        if not movibles:
+            return False
+        filas = []
+        for r in movibles:
+            bloque = self.expandir_bloque(r) if self.expandir_bloque else [r]
+            filas.extend(bloque)
+        filas = sorted(set(filas))
+
+        idx = self.indexAt(e.position().toPoint())
+        destino = idx.row() if idx.isValid() else self.rowCount()
+        if (idx.isValid() and self.dropIndicatorPosition()
+                == QAbstractItemView.DropIndicatorPosition.BelowItem):
+            destino += 1
+        if self.ajustar_destino:
+            destino = self.ajustar_destino(destino)
+        return self._mover_bloques(filas, destino)
+
+    def _mover_bloques(self, filas: list, destino: int) -> bool:
+        """Extrae las filas (ordenadas) y las reinserta en `destino`."""
+        # Soltar dentro del propio bloque contiguo = no-op
+        if filas[0] <= destino <= filas[-1] + 1 and filas == list(
+                range(filas[0], filas[-1] + 1)):
+            return False
+
+        self.blockSignals(True)
+        try:
+            extraidas = [[self.takeItem(r, c) for c in range(self.columnCount())]
+                         for r in filas]
+            for r in reversed(filas):
+                self.removeRow(r)
+                if r < destino:
+                    destino -= 1
+            for i, items in enumerate(extraidas):
+                self.insertRow(destino + i)
+                for c, it in enumerate(items):
+                    if it is not None:
+                        self.setItem(destino + i, c, it)
+            self.clearSelection()
+            for i in range(len(extraidas)):
+                for c in range(self.columnCount()):
+                    it = self.item(destino + i, c)
+                    if it is not None and it.flags() & Qt.ItemIsSelectable:
+                        it.setSelected(True)
+        finally:
+            self.blockSignals(False)
+        return True
+
+
+class _ReqCellDelegate(QStyledItemDelegate):
+    """Editor de la tabla de requerimientos. El _MetCellDelegate que se usaba
+    antes venía de la planilla del Cuaderno, donde la descripción es la col 0;
+    aquí es la col 1 (Recurso) → al editar, el texto saltaba a la DERECHA y en
+    letra menor (10px contra los 11px de la tabla). Cada columna edita con la
+    misma alineación con la que se muestra."""
+
+    def createEditor(self, parent, option, index):
+        ed = QLineEdit(parent)
+        c = index.column()
+        if c in (REQ_PRES, REQ_REQ):
+            ed.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        elif c == REQ_UND:
+            ed.setAlignment(Qt.AlignCenter)
+        else:
+            ed.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        ed.setStyleSheet(
+            "QLineEdit { font-size:11px; padding:0 3px; margin:0;"
+            f" border:1px solid {ORANGE}; background:white; color:#1A2535; }}")
+        return ed
 
 
 class _TDRWorker(QThread):
@@ -4596,15 +4695,24 @@ class _RequerimientosPanel(QWidget):
         self.tbl.setEditTriggers(QAbstractItemView.DoubleClicked
                                  | QAbstractItemView.SelectedClicked
                                  | QAbstractItemView.AnyKeyPressed)
-        deleg = _MetCellDelegate(self.tbl)
+        deleg = _ReqCellDelegate(self.tbl)
         for c in range(len(_REQ_COLS)):
             self.tbl.setItemDelegateForColumn(c, deleg)
+        # Reordenar arrastrando: las sub-filas de acero viajan con su recurso
+        # y el orden nuevo se guarda al soltar (save_detalle renumera `orden`).
+        self.tbl.fila_movible = lambda r: (not self._es_subfila(r)
+                                           and self._fila_no_vacia(r))
+        self.tbl.expandir_bloque = self._bloque_con_subfilas
+        self.tbl.ajustar_destino = self._destino_mov
+        self.tbl.on_reorder = self._despues_de_mover
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.on_copy = lambda: self._copiar()
         self.tbl.on_delete = lambda: self._eliminar_filas()
+        self.tbl.setToolTip(
+            "Doble clic para editar · arrastra las filas para reordenar los recursos.")
         self.tbl.itemChanged.connect(self._on_item)
         self.tbl.customContextMenuRequested.connect(self._menu)
         # Mismo estilo que las grillas de Valorizaciones/Cuaderno: encabezado
@@ -5044,6 +5152,7 @@ class _RequerimientosPanel(QWidget):
                     self._fila_acero_sub(x['diametro'], x['varillas'])
         if abierto:
             self._fila({}, abierto)
+        self.tbl.setDragEnabled(abierto)
         self.tbl.blockSignals(False)
         self._loading = False
         self._renumerar()
@@ -5074,6 +5183,32 @@ class _RequerimientosPanel(QWidget):
     def _es_subfila(self, r):
         it = self.tbl.item(r, REQ_ITEM)
         return bool(it and it.data(Qt.UserRole) == '_acero_sub')
+
+    # ── Reordenar arrastrando ────────────────────────────────────────────────
+
+    def _bloque_con_subfilas(self, r) -> list:
+        """La fila r + sus sub-filas de acero inmediatas (viajan juntas)."""
+        filas = [r]
+        k = r + 1
+        while k < self.tbl.rowCount() and self._es_subfila(k):
+            filas.append(k)
+            k += 1
+        return filas
+
+    def _destino_mov(self, r) -> int:
+        """Destino válido: nunca en medio de un bloque de sub-filas de acero
+        y nunca después de la fila vacía del final."""
+        while r < self.tbl.rowCount() and self._es_subfila(r):
+            r += 1
+        ultima = self.tbl.rowCount() - 1
+        if ultima >= 0 and not self._fila_no_vacia(ultima) \
+                and not self._es_subfila(ultima) and r > ultima:
+            r = ultima
+        return r
+
+    def _despues_de_mover(self):
+        self._renumerar()
+        self._guardar()
 
     def _renumerar(self):
         """Numera la columna «#» según los recursos (las filas con datos); la fila
