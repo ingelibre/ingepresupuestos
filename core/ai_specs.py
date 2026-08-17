@@ -36,7 +36,8 @@ def _detectar_proveedor(api_key: str) -> str:
 def _proveedor_activo() -> str:
     """Lee ia_proveedor de la BD; si no está, lo detecta por el prefijo de la clave."""
     ia_proveedor = get_config('ia_proveedor', '')
-    if ia_proveedor in ('groq', 'anthropic', 'openai', 'gemini', 'ollama', 'openrouter'):
+    if ia_proveedor in ('groq', 'anthropic', 'openai', 'gemini', 'ollama',
+                        'openrouter', 'deepseek', 'qwen'):
         return ia_proveedor
     api_key = get_config('api_key', '')
     return _detectar_proveedor(api_key)
@@ -187,6 +188,66 @@ def _llamar_openrouter(prompt: str, api_key: str, max_tokens: int):
         return None, f'Error OpenRouter: {err}'
 
 
+def _llamar_deepseek(prompt: str, api_key: str, max_tokens: int):
+    """DeepSeek nativo (API OpenAI-compatible). El proveedor más económico
+    del panel: V4-Flash cuesta centavos por millón de tokens."""
+    try:
+        from openai import OpenAI
+        client   = OpenAI(api_key=api_key, base_url='https://api.deepseek.com')
+        modelo   = get_config('deepseek_modelo', 'deepseek-v4-flash')
+        response = client.chat.completions.create(
+            model=modelo, max_tokens=max_tokens,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response.choices[0].message.content, None
+    except Exception as e:
+        err = str(e)
+        if 'authentication' in err.lower() or '401' in err:
+            return None, 'Clave DeepSeek incorrecta. Verifica en Configuración.'
+        if 'insufficient' in err.lower() or 'balance' in err.lower() or '402' in err:
+            return None, ('Sin saldo en DeepSeek. Recarga en '
+                          'platform.deepseek.com (acepta tarjeta).')
+        if 'rate' in err.lower() or '429' in err:
+            return None, 'Límite DeepSeek alcanzado. Intenta en unos minutos.'
+        if 'not exist' in err.lower() or '404' in err:
+            modelo = get_config('deepseek_modelo', 'deepseek-v4-flash')
+            return None, (f'El modelo "{modelo}" no existe en DeepSeek. '
+                          'Revisa el nombre en Configuración '
+                          '(p.ej. deepseek-v4-flash).')
+        return None, f'Error DeepSeek: {err}'
+
+
+def _llamar_qwen(prompt: str, api_key: str, max_tokens: int):
+    """Qwen de Alibaba vía DashScope INTERNACIONAL (API OpenAI-compatible).
+    Ojo: la clave del endpoint chino NO sirve aquí — debe crearse en la
+    consola internacional (modelstudio.console.alibabacloud.com)."""
+    try:
+        from openai import OpenAI
+        client   = OpenAI(
+            api_key=api_key,
+            base_url='https://dashscope-intl.aliyuncs.com/compatible-mode/v1')
+        modelo   = get_config('qwen_modelo', 'qwen-flash')
+        response = client.chat.completions.create(
+            model=modelo, max_tokens=max_tokens,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response.choices[0].message.content, None
+    except Exception as e:
+        err = str(e)
+        if 'authentication' in err.lower() or 'invalid' in err.lower() or '401' in err:
+            return None, ('Clave Qwen incorrecta. Ojo: debe ser del endpoint '
+                          'INTERNACIONAL de Alibaba Cloud Model Studio (una '
+                          'clave del endpoint de China no funciona aquí).')
+        if 'rate' in err.lower() or 'throttl' in err.lower() or '429' in err:
+            return None, 'Límite Qwen alcanzado. Intenta en unos minutos.'
+        if 'not exist' in err.lower() or '404' in err:
+            modelo = get_config('qwen_modelo', 'qwen-flash')
+            return None, (f'El modelo "{modelo}" no existe en DashScope. '
+                          'Revisa el nombre en Configuración '
+                          '(p.ej. qwen-flash, qwen-plus).')
+        return None, f'Error Qwen: {err}'
+
+
 def _gemini_modelo_disponible(client, prefer: str = 'flash') -> str | None:
     """Pregunta a Google qué modelos hay y elige uno que soporte generación de
     contenido (prefiriendo los «flash», más baratos/rápidos). Permite que la app
@@ -299,6 +360,10 @@ def _llamar_ia(prompt: str, api_key: str, max_tokens: int = 1500):
         texto, error = _llamar_gemini(prompt, api_key, max_tokens)
     elif proveedor == 'openrouter':
         texto, error = _llamar_openrouter(prompt, api_key, max_tokens)
+    elif proveedor == 'deepseek':
+        texto, error = _llamar_deepseek(prompt, api_key, max_tokens)
+    elif proveedor == 'qwen':
+        texto, error = _llamar_qwen(prompt, api_key, max_tokens)
     else:
         texto, error = _llamar_anthropic(prompt, api_key, max_tokens)
     if error is None and not (texto and str(texto).strip()):
@@ -325,6 +390,8 @@ def probar_conexion(api_key: str = '', ia_proveedor: str = '') -> tuple[bool, st
         'gemini':      'Google Gemini',
         'ollama':      'Ollama',
         'openrouter':  'OpenRouter',
+        'deepseek':    'DeepSeek',
+        'qwen':        'Qwen (Alibaba)',
     }
 
     if ia_proveedor == 'ollama':
@@ -350,6 +417,10 @@ def probar_conexion(api_key: str = '', ia_proveedor: str = '') -> tuple[bool, st
         texto, error = _llamar_gemini('Responde solo: OK', api_key, max_tokens=10)
     elif ia_proveedor == 'openrouter':
         texto, error = _llamar_openrouter('Responde solo: OK', api_key, max_tokens=10)
+    elif ia_proveedor == 'deepseek':
+        texto, error = _llamar_deepseek('Responde solo: OK', api_key, max_tokens=10)
+    elif ia_proveedor == 'qwen':
+        texto, error = _llamar_qwen('Responde solo: OK', api_key, max_tokens=10)
     else:
         texto, error = _llamar_ia('Responde solo: OK', api_key, max_tokens=10)
 

@@ -51,6 +51,8 @@ _API_KEY_CFG = {
     'openai':     'api_key_openai',
     'gemini':     'api_key_gemini',
     'openrouter': 'api_key_openrouter',
+    'deepseek':   'api_key_deepseek',
+    'qwen':       'api_key_qwen',
 }
 
 
@@ -104,7 +106,8 @@ class _WorkerProbar(QThread):
     terminado = Signal(bool, str, str)   # (ok, mensaje, proveedor_nombre)
 
     def __init__(self, ia_proveedor, api_key, ollama_url, ollama_modelo,
-                 openai_modelo='', gemini_modelo='', openrouter_modelo=''):
+                 openai_modelo='', gemini_modelo='', openrouter_modelo='',
+                 deepseek_modelo='', qwen_modelo=''):
         super().__init__()
         self.ia_proveedor      = ia_proveedor
         self.api_key           = api_key
@@ -113,6 +116,8 @@ class _WorkerProbar(QThread):
         self.openai_modelo     = openai_modelo
         self.gemini_modelo     = gemini_modelo
         self.openrouter_modelo = openrouter_modelo
+        self.deepseek_modelo   = deepseek_modelo
+        self.qwen_modelo       = qwen_modelo
 
     def run(self):
         try:
@@ -126,6 +131,8 @@ class _WorkerProbar(QThread):
             set_config('openai_modelo',   self.openai_modelo)
             set_config('gemini_modelo',   self.gemini_modelo)
             set_config('openrouter_modelo', self.openrouter_modelo)
+            set_config('deepseek_modelo',   self.deepseek_modelo)
+            set_config('qwen_modelo',       self.qwen_modelo)
             from core.ai_specs import probar_conexion
             ok, msg, prov = probar_conexion(self.api_key, self.ia_proveedor)
             self.terminado.emit(ok, msg, prov)
@@ -225,10 +232,13 @@ class IAView(QWidget):
         self.rb_openai      = QRadioButton("OpenAI  (GPT-4o)")
         self.rb_anthropic   = QRadioButton("Anthropic Claude")
         self.rb_ollama      = QRadioButton("Ollama  (local, sin internet)")
+        self.rb_deepseek    = QRadioButton("DeepSeek  (muy económico)")
+        self.rb_qwen        = QRadioButton("Qwen  (Alibaba)")
 
         _RB_SS = "font-size:12px; background:transparent; border:none;"
         for rb in (self.rb_groq, self.rb_openrouter, self.rb_gemini,
-                   self.rb_openai, self.rb_anthropic, self.rb_ollama):
+                   self.rb_openai, self.rb_anthropic, self.rb_ollama,
+                   self.rb_deepseek, self.rb_qwen):
             rb.setStyleSheet(_RB_SS)
             self._bg_prov.addButton(rb)
 
@@ -238,6 +248,8 @@ class IAView(QWidget):
         grid_radio.addWidget(self.rb_openai,     1, 1)
         grid_radio.addWidget(self.rb_anthropic,  2, 0)
         grid_radio.addWidget(self.rb_ollama,     2, 1)
+        grid_radio.addWidget(self.rb_deepseek,   3, 0)
+        grid_radio.addWidget(self.rb_qwen,       3, 1)
         vl.addLayout(grid_radio)
 
         # ── Stack de paneles ──────────────────────────────────────────
@@ -248,6 +260,8 @@ class IAView(QWidget):
         self.stack_ia.addWidget(self._panel_openai())      # 3
         self.stack_ia.addWidget(self._panel_gemini())      # 4
         self.stack_ia.addWidget(self._panel_openrouter())  # 5
+        self.stack_ia.addWidget(self._panel_deepseek())    # 6
+        self.stack_ia.addWidget(self._panel_qwen())        # 7
         vl.addWidget(self.stack_ia)
 
         self.rb_groq.toggled.connect(lambda on:       on and self.stack_ia.setCurrentIndex(0))
@@ -256,6 +270,8 @@ class IAView(QWidget):
         self.rb_openai.toggled.connect(lambda on:     on and self.stack_ia.setCurrentIndex(3))
         self.rb_gemini.toggled.connect(lambda on:     on and self.stack_ia.setCurrentIndex(4))
         self.rb_openrouter.toggled.connect(lambda on: on and self.stack_ia.setCurrentIndex(5))
+        self.rb_deepseek.toggled.connect(lambda on:   on and self.stack_ia.setCurrentIndex(6))
+        self.rb_qwen.toggled.connect(lambda on:       on and self.stack_ia.setCurrentIndex(7))
         self.rb_groq.setChecked(True)
 
         # ── Botones ───────────────────────────────────────────────────
@@ -373,6 +389,110 @@ class IAView(QWidget):
         hl.addWidget(self.inp_anthropic)
         hl.addWidget(self._btn_ojo(self.inp_anthropic))
         vl.addLayout(hl)
+        return w
+
+    def _panel_deepseek(self) -> QWidget:
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(0, 4, 0, 0)
+        vl.setSpacing(8)
+
+        nota = QLabel(
+            "DeepSeek V4-Flash: calidad alta a precio MUY bajo (centavos por "
+            "millón de tokens; con descuento adicional en horario valle).<br>"
+            "Obtén tu clave en  "
+            "<a href='https://platform.deepseek.com/api_keys'>platform.deepseek.com</a>"
+        )
+        nota.setWordWrap(True)
+        nota.setStyleSheet(_NOTE_SS)
+        nota.setOpenExternalLinks(True)
+        vl.addWidget(nota)
+
+        hl = QHBoxLayout()
+        self.inp_deepseek = QLineEdit()
+        self.inp_deepseek.setEchoMode(QLineEdit.Password)
+        self.inp_deepseek.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxx")
+        self.inp_deepseek.setFixedHeight(34)
+        self.inp_deepseek.setStyleSheet(
+            f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:0 10px; font-size:12px; }}"
+        )
+        hl.addWidget(self.inp_deepseek)
+        hl.addWidget(self._btn_ojo(self.inp_deepseek))
+        vl.addLayout(hl)
+
+        form = QFormLayout()
+        form.setSpacing(6)
+        self.inp_deepseek_modelo = QLineEdit()
+        self.inp_deepseek_modelo.setPlaceholderText("deepseek-v4-flash")
+        self.inp_deepseek_modelo.setFixedHeight(32)
+        self.inp_deepseek_modelo.setStyleSheet(
+            f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:0 10px; font-size:11px; }}"
+        )
+        form.addRow("Modelo:", self.inp_deepseek_modelo)
+        vl.addLayout(form)
+
+        modelos_nota = QLabel(
+            "Modelos: deepseek-v4-flash (recomendado) · deepseek-v4-pro")
+        modelos_nota.setStyleSheet(
+            f"font-size:10px; color:{SLATE_300}; "
+            f"background:transparent; border:none;"
+        )
+        vl.addWidget(modelos_nota)
+        vl.addStretch()
+        return w
+
+    def _panel_qwen(self) -> QWidget:
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(0, 4, 0, 0)
+        vl.setSpacing(8)
+
+        nota = QLabel(
+            "Qwen (Alibaba) vía Model Studio INTERNACIONAL — la clave del "
+            "endpoint de China no funciona aquí.<br>Obtén tu clave en  "
+            "<a href='https://modelstudio.console.alibabacloud.com/'>"
+            "modelstudio.console.alibabacloud.com</a>"
+        )
+        nota.setWordWrap(True)
+        nota.setStyleSheet(_NOTE_SS)
+        nota.setOpenExternalLinks(True)
+        vl.addWidget(nota)
+
+        hl = QHBoxLayout()
+        self.inp_qwen = QLineEdit()
+        self.inp_qwen.setEchoMode(QLineEdit.Password)
+        self.inp_qwen.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxx")
+        self.inp_qwen.setFixedHeight(34)
+        self.inp_qwen.setStyleSheet(
+            f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:0 10px; font-size:12px; }}"
+        )
+        hl.addWidget(self.inp_qwen)
+        hl.addWidget(self._btn_ojo(self.inp_qwen))
+        vl.addLayout(hl)
+
+        form = QFormLayout()
+        form.setSpacing(6)
+        self.inp_qwen_modelo = QLineEdit()
+        self.inp_qwen_modelo.setPlaceholderText("qwen-flash")
+        self.inp_qwen_modelo.setFixedHeight(32)
+        self.inp_qwen_modelo.setStyleSheet(
+            f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:0 10px; font-size:11px; }}"
+        )
+        form.addRow("Modelo:", self.inp_qwen_modelo)
+        vl.addLayout(form)
+
+        modelos_nota = QLabel(
+            "Modelos: qwen-flash (recomendado) · qwen-plus · qwen-max")
+        modelos_nota.setStyleSheet(
+            f"font-size:10px; color:{SLATE_300}; "
+            f"background:transparent; border:none;"
+        )
+        vl.addWidget(modelos_nota)
+        vl.addStretch()
         return w
 
     def _panel_openai(self) -> QWidget:
@@ -639,11 +759,15 @@ class IAView(QWidget):
         openai_modelo      = get_config('openai_modelo',      'gpt-4o-mini')
         gemini_modelo      = get_config('gemini_modelo',      'gemini-2.0-flash')
         openrouter_modelo  = get_config('openrouter_modelo',  'meta-llama/llama-3.3-70b-instruct:free')
+        deepseek_modelo    = get_config('deepseek_modelo',    'deepseek-v4-flash')
+        qwen_modelo        = get_config('qwen_modelo',        'qwen-flash')
 
         self.inp_ollama_url.setText(ollama_url)
         self.inp_ollama_modelo.setText(ollama_modelo)
         self.inp_openai_modelo.setText(openai_modelo)
         self.inp_gemini_modelo.setText(gemini_modelo)
+        self.inp_deepseek_modelo.setText(deepseek_modelo)
+        self.inp_qwen_modelo.setText(qwen_modelo)
         idx = self.inp_openrouter_modelo.findData(openrouter_modelo)
         if idx >= 0:
             self.inp_openrouter_modelo.setCurrentIndex(idx)
@@ -658,6 +782,8 @@ class IAView(QWidget):
             'openai':     self.inp_openai,
             'gemini':     self.inp_gemini,
             'openrouter': self.inp_openrouter,
+            'deepseek':   self.inp_deepseek,
+            'qwen':       self.inp_qwen,
         }
         for prov, inp in inputs.items():
             k = get_config(_API_KEY_CFG[prov], '')
@@ -672,6 +798,7 @@ class IAView(QWidget):
             'groq': self.rb_groq, 'anthropic': self.rb_anthropic,
             'openai': self.rb_openai, 'gemini': self.rb_gemini,
             'openrouter': self.rb_openrouter, 'ollama': self.rb_ollama,
+            'deepseek': self.rb_deepseek, 'qwen': self.rb_qwen,
         }
         if ia_proveedor in _RBS:
             _RBS[ia_proveedor].setChecked(True)
@@ -694,6 +821,8 @@ class IAView(QWidget):
         if self.rb_openai.isChecked():     return 'openai'
         if self.rb_gemini.isChecked():     return 'gemini'
         if self.rb_openrouter.isChecked(): return 'openrouter'
+        if self.rb_deepseek.isChecked():   return 'deepseek'
+        if self.rb_qwen.isChecked():       return 'qwen'
         return 'ollama'
 
     def _api_key_actual(self) -> str:
@@ -703,6 +832,8 @@ class IAView(QWidget):
         if prov == 'openai':     return self.inp_openai.text().strip()
         if prov == 'gemini':     return self.inp_gemini.text().strip()
         if prov == 'openrouter': return self.inp_openrouter.text().strip()
+        if prov == 'deepseek':   return self.inp_deepseek.text().strip()
+        if prov == 'qwen':       return self.inp_qwen.text().strip()
         return ''
 
     def _probar_ia(self):
@@ -724,6 +855,8 @@ class IAView(QWidget):
             openai_modelo    = self.inp_openai_modelo.text().strip()  or 'gpt-4o-mini',
             gemini_modelo    = self.inp_gemini_modelo.text().strip()  or 'gemini-2.0-flash',
             openrouter_modelo= self._openrouter_modelo_id(),
+            deepseek_modelo  = self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash',
+            qwen_modelo      = self.inp_qwen_modelo.text().strip()     or 'qwen-flash',
         )
         self._worker.terminado.connect(self._on_probar_terminado)
         self._worker.start()
@@ -804,6 +937,8 @@ class IAView(QWidget):
         set_config('api_key_openai',     self.inp_openai.text().strip())
         set_config('api_key_gemini',     self.inp_gemini.text().strip())
         set_config('api_key_openrouter', self.inp_openrouter.text().strip())
+        set_config('api_key_deepseek',   self.inp_deepseek.text().strip())
+        set_config('api_key_qwen',       self.inp_qwen.text().strip())
 
         set_config('ia_proveedor',    prov)
         set_config('api_key',         api_key)   # clave del proveedor ACTIVO (la lee el runtime)
@@ -812,6 +947,8 @@ class IAView(QWidget):
         set_config('openai_modelo',     self.inp_openai_modelo.text().strip()     or 'gpt-4o-mini')
         set_config('gemini_modelo',     self.inp_gemini_modelo.text().strip()     or 'gemini-2.0-flash')
         set_config('openrouter_modelo', self._openrouter_modelo_id())
+        set_config('deepseek_modelo',   self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash')
+        set_config('qwen_modelo',       self.inp_qwen_modelo.text().strip()     or 'qwen-flash')
 
         self.lbl_ia_estado.setStyleSheet(
             f"font-size:11px; color:{GREEN}; "
