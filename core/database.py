@@ -1432,7 +1432,15 @@ def obtener_plantilla_pie_guardada(plantilla_id: int) -> list:
         row = conn.execute(
             "SELECT items_json FROM pie_plantillas WHERE id=?", (plantilla_id,)
         ).fetchone()
-        return json.loads(row['items_json']) if row else []
+        if not row:
+            return []
+        try:
+            return json.loads(row['items_json'])
+        except (ValueError, TypeError):
+            # Fila corrupta: degradar a vacío en vez de romper el diálogo de
+            # plantillas para siempre (el resto de json.loads del código ya
+            # sigue este criterio).
+            return []
     finally:
         conn.close()
 
