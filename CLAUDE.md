@@ -344,14 +344,17 @@ de resolver un color).
 los hermanos (15 y 13). No es urgente —el código que no corre no cuesta
 rendimiento— pero es ruido que hace más difícil ver lo de arriba.
 
-⚠️ **`version-anterior/` y `version-anterior/dist_windows/` NO están en
-git** (verificado: `git ls-files` no los lista) — son carpetas locales.
-Pero un escáner sobre el directorio ve **60 clones y 144 nombres
-repetidos**, con importadores enteros triplicados (`parse_ifc`, 1409
-nodos, en tres copias). O sea: **no son deuda del repo, son una trampa para
-quien busque con grep** —incluido yo— porque es facilísimo leer, o peor
-arreglar, la copia muerta creyendo que es la viva. Conviene moverlas fuera
-del árbol del proyecto.
+✅ **`version-anterior/` ya no está en el proyecto (2026-08-29).** Nunca
+estuvo en git (`git ls-files` no listaba ni un archivo suyo), pero un
+`grep` sobre el directorio del proyecto sí la veía: **60 clones y 144
+nombres repetidos**, con importadores enteros triplicados (`parse_ifc`,
+1409 nodos, en tres copias). No era deuda del repo, era una trampa para
+quien busque —incluido yo—: es facilísimo leer, o peor **arreglar**, la
+copia muerta creyendo que es la viva. Se movió entera, con sus 5186
+archivos y 745 326 286 bytes verificados de los dos lados, a
+`~/Respaldos/ingepresupuestos-version-anterior-2026-08-29/` (partición de
+respaldos, no se borró nada). Si algún día hace falta mirar cómo hacía algo
+la versión vieja, está ahí.
 
 **El método, igual que en los hermanos:** por cada concepto, primero una
 prueba que fije la conducta actual de los DOS sitios, después unificar,
