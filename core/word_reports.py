@@ -1227,9 +1227,7 @@ def generar_word_almacen(pid: int, archivo: str) -> str:
     con_mov = [f for f in filas
                if (f['ingresado'] or 0) > 1e-6 or (f['consumido'] or 0) > 1e-6]
     if con_mov:
-        def _dmy(iso):
-            p = str(iso or '').split('-')
-            return f"{p[2]}/{p[1]}/{p[0]}" if len(p) == 3 else str(iso or '')
+        from utils.formatting import fecha_dmy as _dmy
         doc.add_page_break()
         _add_heading(doc, "Kárdex de almacén por material", size=13,
                      color=_accent_od_rgb())

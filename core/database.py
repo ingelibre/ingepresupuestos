@@ -816,6 +816,12 @@ def init_db():
     conn.close()
 
 # ─── HELPERS DE USUARIOS ──────────────────────────────────────────────────────
+# VESTIGIAL. El dueño de usuarios/sesión es `utils/auth.py`; lo de acá quedó
+# de antes y hoy no lo llama nadie (`crear_usuario`, `verificar_usuario` y
+# `get_usuario_invitado` no tienen una sola referencia en el proyecto).
+# Se quitó `hay_usuarios` porque además contestaba DISTINTO que la de auth
+# —excluía al invitado del conteo— y bastaba importar la de acá por error
+# para que la pantalla de setup apareciera cuando no debía.
 
 def crear_usuario(nombre, email, password, rol='usuario', username=None):
     conn = get_db()
@@ -842,12 +848,6 @@ def verificar_usuario(login, password):
     if u and check_password_hash(u['password_hash'], password):
         return u
     return None
-
-def hay_usuarios():
-    conn = get_db()
-    n = conn.execute("SELECT COUNT(*) FROM usuarios WHERE rol != 'invitado'").fetchone()[0]
-    conn.close()
-    return n > 0
 
 def get_usuario_invitado():
     """Devuelve (o crea) el usuario invitado del sistema."""

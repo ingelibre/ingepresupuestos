@@ -338,31 +338,11 @@ class IndicesINEIView(QWidget):
         return b
 
     def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QFrame:
-        from utils.theme import apply_shadow
-        card = QFrame()
-        card.setObjectName("kpiCard")
-        card.setAttribute(Qt.WA_StyledBackground, True)
-        card.setStyleSheet(
-            f"QFrame#kpiCard {{ background:white; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(card, 'sm')
-        v = QVBoxLayout(card)
-        v.setContentsMargins(14, 8, 14, 8)
-        v.setSpacing(0)
-        l_e = QLabel(etiqueta)
-        l_e.setStyleSheet(
-            f"color:{SLATE_300}; font-size:11px; letter-spacing:0.4px; "
-            f"background:transparent; border:none;"
-        )
-        l_v = QLabel(valor)
-        f = QFont(); f.setPointSize(14); f.setWeight(QFont.DemiBold)
-        l_v.setFont(f)
-        l_v.setStyleSheet(f"color:{color}; background:transparent; border:none;")
-        v.addWidget(l_e)
-        v.addWidget(l_v)
-        card.lbl_valor = l_v
-        return card
+        """Card KPI del sistema de diseño, un punto más apretada que la de
+        los catálogos: esta fila lleva cuatro KPIs y una barra de filtros."""
+        from utils.theme import crear_kpi_card
+        return crear_kpi_card(etiqueta, valor, color,
+                              margenes=(14, 8, 14, 8), espaciado=0)
 
     # ── Carga inicial ───────────────────────────────────────────────────────
     def _cargar_todo(self):

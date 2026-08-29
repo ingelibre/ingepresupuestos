@@ -108,3 +108,30 @@ def parse_num_opt(val) -> 'float | None':
 def pad_codigo(codigo: str) -> str:
     """Normaliza código de recurso a 7 dígitos (right-pad ceros)."""
     return str(codigo).ljust(7, '0')[:7]
+
+
+def superindice_unidad(txt: str) -> 'str | None':
+    """«m2» → «m²», «m3» → «m³». None si el texto no es un caso a convertir.
+
+    Sólo actúa sobre unidades enteras (letras y barras seguidas de 2 o 3):
+    «m2», «cm3», «m/2». Nada de convertir el «2» de «p2x4» o de un texto
+    que ya venía con el superíndice puesto.
+
+    Devuelve None —y no el texto original— para que quien llama distinga
+    «no hay nada que hacer» de «acá tenés el reemplazo» sin comparar cadenas.
+    """
+    m = _re.match(r'^([a-zA-Z/]+)([23])$', txt or '')
+    if not m:
+        return None
+    return m.group(1) + ('²' if m.group(2) == '2' else '³')
+
+
+def fecha_dmy(iso) -> str:
+    """Fecha ISO «2026-08-29» → «29/08/2026». Lo que no sea ISO, tal cual.
+
+    Las fechas de la BD viajan en ISO y todos los reportes las muestran en
+    dd/mm/aaaa. Una sola definición: PDF y Word tenían la suya y bastaba con
+    tocar una para que un reporte saliera con otra fecha que el otro.
+    """
+    p = str(iso or '').split('-')
+    return f"{p[2]}/{p[1]}/{p[0]}" if len(p) == 3 else str(iso or '')

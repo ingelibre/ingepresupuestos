@@ -320,6 +320,10 @@ normalizado, ignorando nombres y literales):
 | IngeTrazo (`app/`) | 115 | 50 516 | 16 | 8 | 13 |
 | **IngePresupuestos (`app/`)** | **90** | **88 606** | **17** | **11** | **54** |
 
+✅ **Los puntos 1, 2 y 3 se arreglaron el 2026-08-29** — ver «Base común de
+los catálogos» más abajo. El 4 (definiciones sin referencias) sigue abierto a
+propósito: Marco decidió medirlo y no borrarlo todavía.
+
 **1. Dos vistas gemelas, y es lo más caro que hay acá.**
 `views/recursos_view.py` (1154 líneas) y `views/biblioteca_view.py` (986)
 son la misma pantalla copiada: **cinco funciones idénticas**, incluido
@@ -362,3 +366,66 @@ después medir que nada cambió. Y el aviso: **el escáner ve clones, no
 conceptos** — los peores casos de IngeCAD eran código distinto contestando
 la misma pregunta, y no habrían salido en esta tabla.
 
+---
+
+## Base común de los catálogos — `views/_catalogo_base.py` (2026-08-29)
+
+`recursos_view` (Catálogo de Insumos) y `biblioteca_view` (Biblioteca de CU)
+son la misma pantalla sobre dos tablas distintas, y llegaron a tener **cinco
+métodos idénticos carácter por carácter**. Ahora viven una sola vez en
+**`views/_catalogo_base.py`**:
+
+* **`CatalogoTablaMixin`** — `_mk_btn`, `_mk_kpi`, `_rid_at`,
+  `_ids_seleccionados` (nuevo, sale de deduplicar dos veces la misma línea),
+  `_eliminar_seleccion` y `_menu_contextual`.
+* **`UnidadSuperindiceMixin`** — el auto-superíndice del campo Unidad, que
+  estaba copiado en los dos diálogos de alta.
+
+Las dos vistas heredan `(Mixin, QWidget)`; sus diálogos, `(Mixin, QDialog)`.
+**Contrato de la vista concreta:** `self.tbl` con el id en `Qt.UserRole` de la
+columna 0, más `_editar_id` · `_duplicar_id` · `_eliminar_id` ·
+`_eliminar_ids`. Los dos caminos de borrado (uno y varios) son a propósito:
+cada catálogo valida distinto —un insumo en uso por un ACU no se borra; un CU
+sí, con CASCADE—.
+
+**Lo que NO se unificó, y por qué.** `_exportar_json` / `_importar_json` se
+parecen de lejos pero cada una habla con su backend y con textos propios;
+unificarlas pedía pasar seis cadenas por parámetro y hubiera empeorado el
+código. `tipos_soportados()` de `odt_reports` / `word_reports` / `ods_reports`
+tiene el mismo cuerpo de dos líneas pero cada una devuelve **su** registro
+`_GENERADORES`: es un patrón, no un concepto duplicado. El escáner ve clones;
+no todo clon es un concepto.
+
+**Otras dos verdades que se cerraron el mismo día:**
+- **`fecha_dmy`** (`utils/formatting.py`) — el `_dmy` que estaba anidado en
+  `pdf_reports` y en `word_reports`. Era el caso típico de diverger sin que
+  nadie lo note hasta que un reporte sale con otra fecha que el otro.
+- **`hay_usuarios`** — quedaba una en `core/database.py` que contestaba
+  **distinto** que la de `utils/auth.py` (excluía al invitado del conteo) y no
+  la llamaba nadie. Se eliminó. El dueño de usuarios/sesión es `utils/auth.py`;
+  lo que queda en la sección «HELPERS DE USUARIOS» de `database.py` está
+  marcado como vestigial y también está muerto.
+
+**Card KPI: una sola definición.** `utils/theme.crear_kpi_card()` construye la
+card que antes copiaban `recursos_view`, `biblioteca_view` **e**
+`indices_inei_view`. `kpi_card()` ahora acepta `objeto=` para acotar el
+selector a `QFrame#kpiCard` (un `QFrame {…}` pelado tiñe a cualquier QFrame
+descendiente). Índices INEI conserva su densidad más apretada pasando
+`margenes=(14, 8, 14, 8), espaciado=0` — no es un punto de extensión, es que
+esa fila lleva cuatro KPIs y una barra de filtros.
+
+**El botón primario ya no se escribe a mano** en estas vistas: usan
+`theme.BTN_PRIMARY_SS`, igual que el resto de la app. Decisión de Marco
+(2026-08-29) sabiendo el efecto visible: «Nuevo insumo» y «Nuevo CU» quedaron
+8 px más anchos (padding 14 → 18) y ganaron estado `:disabled`.
+
+**Cómo se verificó** (el método de siempre: fijar la conducta, unificar,
+medir). Antes de tocar nada se capturó una línea base de los dos gemelos —
+stylesheet, márgenes, `sizeHint` y **hash SHA-256 del render real** de cada
+widget, más las acciones del menú contextual y a quién dispara cada una. Tras
+el refactor, 24 de 29 mediciones salieron idénticas y las 5 que cambiaron son
+exactamente las buscadas: el `sizeHint` del botón primario (61 → 69 px) y el
+string del CSS de la card KPI (`white` → `#FFFFFF`), **con el hash de píxeles
+intacto**. Lo permanente quedó en **`tests/test_catalogos.py`** (17 pruebas),
+que además falla si alguna vista vuelve a definirse su propia copia de un
+método de la base.

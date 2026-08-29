@@ -10,18 +10,19 @@ import/export Excel. Reusa el pool de Índices INEI del recurso_selector.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QModelIndex, QRect, QSize, QTimer, Signal
+from PySide6.QtCore import Qt, QModelIndex, QRect, QTimer, Signal
 from PySide6.QtGui import (
-    QAction, QFont, QKeySequence, QShortcut, QColor, QPalette, QPainter,
+    QFont, QKeySequence, QShortcut, QColor, QPalette, QPainter,
 )
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QMessageBox, QFileDialog, QMenu, QDialog, QDialogButtonBox, QFormLayout,
+    QMessageBox, QFileDialog, QDialog, QDialogButtonBox, QFormLayout,
     QSizePolicy, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QApplication,
 )
 
 from core.database import get_db, _siguiente_codigo_inei
+from views._catalogo_base import CatalogoTablaMixin, UnidadSuperindiceMixin
 from core.config import TIPOS_RECURSO, INEI_DEFAULT
 from utils.formatting import fmt, parse_num
 from widgets.num_item import NumItem
@@ -31,14 +32,12 @@ from utils.theme import C
 
 # ── Paleta — aliases de los tokens centralizados (utils/theme.py) ───────────
 BLUE_500   = C.brand            # naranja marca (legacy name)
-BLUE_700   = C.brand_hover
 SLATE_700  = C.text
 SLATE_500  = C.text_secondary
 SLATE_300  = C.text_muted
 SILVER_100 = C.bg
 SILVER_200 = C.surface_subtle
 SILVER_300 = C.border
-ORANGE_500 = C.brand
 GREEN_500  = "#68B723"
 RED_500    = C.error
 
@@ -135,7 +134,7 @@ class _TipoBadgeDelegate(QStyledItemDelegate):
 
 
 # ── Diálogo: formulario de recurso (nuevo / editar) ──────────────────────────
-class RecursoFormDialog(QDialog):
+class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
     """Form para crear o editar un recurso del catálogo."""
 
     def __init__(self, parent=None, recurso: dict | None = None):
@@ -308,16 +307,6 @@ class RecursoFormDialog(QDialog):
             if not self.es_edicion:
                 self.inp_codigo.clear()
 
-    def _auto_superindice_unidad(self, txt: str):
-        import re
-        m = re.match(r'^([a-zA-Z/]+)([23])$', txt)
-        if not m:
-            return
-        sup = '²' if m.group(2) == '2' else '³'
-        self.inp_unidad.blockSignals(True)
-        self.inp_unidad.setText(m.group(1) + sup)
-        self.inp_unidad.blockSignals(False)
-
     def _cargar(self):
         r = self.recurso
         for i in range(self.cmb_tipo.count()):
@@ -393,7 +382,7 @@ class RecursoFormDialog(QDialog):
 
 
 # ── Vista principal del catálogo ─────────────────────────────────────────────
-class RecursosView(QWidget):
+class RecursosView(CatalogoTablaMixin, QWidget):
     """Catálogo de Insumos — lista, filtros, KPIs y CRUD completo."""
 
     def __init__(self, *args, **kwargs):
@@ -562,53 +551,6 @@ class RecursosView(QWidget):
         QShortcut(QKeySequence("F5"), self, activated=self.cargar)
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.inp_q.setFocus())
 
-    def _mk_btn(self, text: str, primary: bool = False,
-                icon_name: str | None = None) -> QPushButton:
-        b = QPushButton(text)
-        b.setCursor(Qt.PointingHandCursor)
-        b.setMinimumHeight(32)
-        if icon_name:
-            b.setIcon(icon(icon_name))
-            b.setIconSize(QSize(18, 18))
-        if primary:
-            b.setStyleSheet(
-                f"QPushButton {{ background:{ORANGE_500}; color:white; border:none; "
-                f"border-radius:6px; padding:6px 14px; font-weight:600; }}"
-                f"QPushButton:hover {{ background:{BLUE_700}; }}"
-            )
-        return b
-
-    def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QFrame:
-        from utils.theme import apply_shadow
-        card = QFrame()
-        card.setObjectName("kpiCard")
-        card.setAttribute(Qt.WA_StyledBackground, True)
-        card.setStyleSheet(
-            f"QFrame#kpiCard {{ background:white; border:1px solid {SILVER_300}; "
-            f"border-radius:8px; }}"
-        )
-        apply_shadow(card, 'sm')
-        v = QVBoxLayout(card)
-        v.setContentsMargins(14, 10, 14, 10)
-        v.setSpacing(2)
-        l_e = QLabel(etiqueta)
-        l_e.setStyleSheet(
-            f"color:{SLATE_300}; font-size:11px; letter-spacing:0.4px; "
-            f"background:transparent; border:none;"
-        )
-        l_v = QLabel(valor)
-        f = QFont()
-        f.setPointSize(14)
-        f.setWeight(QFont.DemiBold)
-        l_v.setFont(f)
-        l_v.setStyleSheet(f"color:{color}; background:transparent; border:none;")
-        v.addWidget(l_e)
-        v.addWidget(l_v)
-        # accesores
-        card.lbl_etiqueta = l_e
-        card.lbl_valor = l_v
-        return card
-
     # -- carga / consulta ------------------------------------------------------
     def cargar(self):
         from utils.formatting import norm_busqueda
@@ -745,15 +687,6 @@ class RecursosView(QWidget):
             self.lbl_subt.setText(f"{n_filt} de {n_total} insumos")
 
     # -- helper: obtener rid robusto a sorting --------------------------------
-    def _rid_at(self, row: int) -> int | None:
-        if row < 0 or row >= self.tbl.rowCount():
-            return None
-        it = self.tbl.item(row, 0)
-        if not it:
-            return None
-        v = it.data(Qt.UserRole)
-        return int(v) if v is not None else None
-
     # -- edición inline del precio --------------------------------------------
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() != 4:
@@ -830,13 +763,6 @@ class RecursosView(QWidget):
     def _eliminar_id(self, rid: int):
         self._eliminar_ids([rid])
 
-    def _eliminar_seleccion(self):
-        rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
-        ids = [self._rid_at(r) for r in rows]
-        ids = [i for i in ids if i is not None]
-        if ids:
-            self._eliminar_ids(ids)
-
     def _eliminar_ids(self, ids: list[int]):
         if not ids:
             return
@@ -870,35 +796,6 @@ class RecursosView(QWidget):
         finally:
             conn.close()
         self.cargar()
-
-    # -- menú contextual -------------------------------------------------------
-    def _menu_contextual(self, pos):
-        idx = self.tbl.indexAt(pos)
-        if not idx.isValid():
-            return
-        rid = self._rid_at(idx.row())
-        if rid is None:
-            return
-        seleccion = sorted({i.row() for i in self.tbl.selectedIndexes()})
-        ids_sel = [self._rid_at(r) for r in seleccion]
-        ids_sel = [i for i in ids_sel if i is not None]
-
-        m = QMenu(self)
-        a_edit = QAction(icon("editar"), "Editar", self)
-        a_edit.triggered.connect(lambda: self._editar_id(rid))
-        m.addAction(a_edit)
-        a_dup = QAction(icon("duplicar"), "Duplicar", self)
-        a_dup.triggered.connect(lambda: self._duplicar_id(rid))
-        m.addAction(a_dup)
-        m.addSeparator()
-        if len(ids_sel) > 1:
-            a_del = QAction(icon("eliminar"), f"Eliminar {len(ids_sel)} seleccionados", self)
-            a_del.triggered.connect(lambda: self._eliminar_ids(ids_sel))
-        else:
-            a_del = QAction(icon("eliminar"), "Eliminar", self)
-            a_del.triggered.connect(lambda: self._eliminar_id(rid))
-        m.addAction(a_del)
-        m.exec(self.tbl.viewport().mapToGlobal(pos))
 
     # -- filtros ---------------------------------------------------------------
     def _limpiar_filtros(self):

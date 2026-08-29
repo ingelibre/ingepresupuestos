@@ -16,16 +16,17 @@ Panel inferior (splitter) muestra los recursos del CU seleccionado.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QMessageBox, QMenu, QSplitter, QDialog, QDialogButtonBox, QFormLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QMessageBox, QSplitter, QDialog, QDialogButtonBox, QFormLayout,
     QSizePolicy, QTextEdit, QStackedWidget, QApplication,
 )
 
 from core.database import get_db
+from views._catalogo_base import CatalogoTablaMixin, UnidadSuperindiceMixin
 from utils.formatting import fmt, parse_num
 from widgets.num_item import NumItem
 from utils.icons import icon
@@ -33,8 +34,6 @@ from utils.theme import C
 
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
-ORANGE_500  = C.brand
-ORANGE_700  = C.brand_hover
 ORANGE_SOFT = C.brand_soft
 SLATE_700   = C.text
 SLATE_500   = C.text_secondary
@@ -51,7 +50,7 @@ TIPO_TEXTO = {'MO': C.mo_fg, 'MAT': C.mat_fg, 'EQ': C.eq_fg, 'SC': C.sc_fg}
 
 
 # ── Diálogo de edición / creación de CU ──────────────────────────────────────
-class CUFormDialog(QDialog):
+class CUFormDialog(UnidadSuperindiceMixin, QDialog):
     """Form para crear/editar una entrada en la biblioteca."""
 
     def __init__(self, parent=None, cu: dict | None = None):
@@ -137,16 +136,6 @@ class CUFormDialog(QDialog):
         btns.rejected.connect(self.reject)
         v.addWidget(btns)
 
-    def _auto_superindice_unidad(self, txt: str):
-        import re
-        m = re.match(r'^([a-zA-Z/]+)([23])$', txt)
-        if not m:
-            return
-        sup = '²' if m.group(2) == '2' else '³'
-        self.inp_unidad.blockSignals(True)
-        self.inp_unidad.setText(m.group(1) + sup)
-        self.inp_unidad.blockSignals(False)
-
     def _cargar(self):
         c = self.cu
         self.inp_desc.setText(c.get('descripcion', '') or '')
@@ -193,7 +182,7 @@ class CUFormDialog(QDialog):
 
 
 # ── Vista principal ─────────────────────────────────────────────────────────
-class BibliotecaView(QWidget):
+class BibliotecaView(CatalogoTablaMixin, QWidget):
     """Catálogo navegable de costos unitarios reutilizables."""
 
     volver = Signal()
@@ -437,59 +426,6 @@ class BibliotecaView(QWidget):
 
         v.addWidget(self._stack_detalle, 1)
         return fr
-
-    def _mk_btn(self, text: str, primary: bool = False,
-                icon_name: str | None = None) -> QPushButton:
-        b = QPushButton(text)
-        b.setCursor(Qt.PointingHandCursor)
-        b.setMinimumHeight(32)
-        if icon_name:
-            b.setIcon(icon(icon_name))
-            b.setIconSize(QSize(18, 18))
-        if primary:
-            b.setStyleSheet(
-                f"QPushButton {{ background:{ORANGE_500}; color:white; border:none;"
-                f"  border-radius:6px; padding:6px 14px; font-weight:600; }}"
-                f"QPushButton:hover {{ background:{ORANGE_700}; }}"
-            )
-        return b
-
-    def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QFrame:
-        from utils.theme import apply_shadow
-        card = QFrame()
-        card.setObjectName("kpiCard")
-        card.setAttribute(Qt.WA_StyledBackground, True)
-        card.setStyleSheet(
-            f"QFrame#kpiCard {{ background:white; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(card, 'sm')
-        v = QVBoxLayout(card)
-        v.setContentsMargins(14, 10, 14, 10)
-        v.setSpacing(2)
-        l_e = QLabel(etiqueta)
-        l_e.setStyleSheet(
-            f"color:{SLATE_300}; font-size:11px; letter-spacing:0.4px; "
-            f"background:transparent; border:none;"
-        )
-        l_v = QLabel(valor)
-        f = QFont()
-        f.setPointSize(14)
-        f.setWeight(QFont.DemiBold)
-        l_v.setFont(f)
-        l_v.setStyleSheet(f"color:{color}; background:transparent; border:none;")
-        v.addWidget(l_e)
-        v.addWidget(l_v)
-        card.lbl_etiqueta = l_e
-        card.lbl_valor = l_v
-        return card
-
-    def _rid_at(self, row: int) -> int | None:
-        if row < 0 or row >= self.tbl.rowCount():
-            return None
-        it = self.tbl.item(row, 0)
-        v = it.data(Qt.UserRole) if it else None
-        return int(v) if v is not None else None
 
     # ── carga y filtrado ────────────────────────────────────────────────────
     def cargar(self):
@@ -793,13 +729,6 @@ class BibliotecaView(QWidget):
     def _eliminar_id(self, cu_id: int):
         self._eliminar_ids([cu_id])
 
-    def _eliminar_seleccion(self):
-        rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
-        ids = [self._rid_at(r) for r in rows]
-        ids = [i for i in ids if i is not None]
-        if ids:
-            self._eliminar_ids(ids)
-
     def _eliminar_ids(self, ids: list[int]):
         if not ids:
             return
@@ -829,35 +758,6 @@ class BibliotecaView(QWidget):
             self._editar_id(cu_id)
 
     # ── menú contextual ────────────────────────────────────────────────────
-    def _menu_contextual(self, pos):
-        idx = self.tbl.indexAt(pos)
-        if not idx.isValid():
-            return
-        cu_id = self._rid_at(idx.row())
-        if cu_id is None:
-            return
-        seleccion = sorted({i.row() for i in self.tbl.selectedIndexes()})
-        ids_sel = [self._rid_at(r) for r in seleccion]
-        ids_sel = [i for i in ids_sel if i is not None]
-
-        m = QMenu(self)
-        a_edit = QAction(icon("editar"), "Editar", self)
-        a_edit.triggered.connect(lambda: self._editar_id(cu_id))
-        m.addAction(a_edit)
-        a_dup = QAction(icon("duplicar"), "Duplicar", self)
-        a_dup.triggered.connect(lambda: self._duplicar_id(cu_id))
-        m.addAction(a_dup)
-        m.addSeparator()
-        if len(ids_sel) > 1:
-            a_del = QAction(icon("eliminar"),
-                            f"Eliminar {len(ids_sel)} seleccionados", self)
-            a_del.triggered.connect(lambda: self._eliminar_ids(ids_sel))
-        else:
-            a_del = QAction(icon("eliminar"), "Eliminar", self)
-            a_del.triggered.connect(lambda: self._eliminar_id(cu_id))
-        m.addAction(a_del)
-        m.exec(self.tbl.viewport().mapToGlobal(pos))
-
     # ── filtros ────────────────────────────────────────────────────────────
     def _limpiar_filtros(self):
         self.inp_q.blockSignals(True)

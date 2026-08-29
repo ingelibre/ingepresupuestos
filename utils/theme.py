@@ -393,12 +393,71 @@ def input_default() -> str:
     )
 
 
-def kpi_card() -> str:
-    """Card KPI estandarizada — fondo blanco con borde y radio uniforme."""
+def kpi_card(*, objeto: str | None = None) -> str:
+    """Card KPI estandarizada — fondo blanco con borde y radio uniforme.
+
+    ``objeto`` acota la regla a un ``objectName`` concreto (``QFrame#kpiCard``).
+    Sin él, el selector ``QFrame`` cascadea a cualquier QFrame descendiente
+    (ver «Stylesheet» en CLAUDE.md), así que las cards con hijos deben pasarlo.
+    """
+    sel = f"QFrame#{objeto}" if objeto else "QFrame"
     return (
-        f"QFrame {{ background:{C.surface}; border:1px solid {C.border}; "
+        f"{sel} {{ background:{C.surface}; border:1px solid {C.border}; "
         f"border-radius:{R.lg}px; }}"
     )
+
+
+# Márgenes/interlineado canónicos de la card KPI. Los dos catálogos
+# (insumos y biblioteca) usan el juego «normal»; Índices INEI es más compacta.
+KPI_MARGENES = (14, 10, 14, 10)
+KPI_ESPACIADO = 2
+
+
+def crear_kpi_card(etiqueta: str, valor: str, color: str, *,
+                   margenes: tuple[int, int, int, int] = KPI_MARGENES,
+                   espaciado: int = KPI_ESPACIADO):
+    """Construye la card KPI del sistema de diseño y la devuelve.
+
+    Es UNA sola definición para las tres vistas que la usan (Catálogo de
+    Insumos, Biblioteca de CU e Índices INEI); antes cada una llevaba su
+    propia copia del mismo cuerpo. La card expone ``lbl_etiqueta`` y
+    ``lbl_valor`` para que quien la crea pueda refrescar el número sin
+    reconstruirla.
+
+    ``margenes``/``espaciado`` existen sólo para que Índices INEI conserve
+    su densidad más apretada — no son un punto de extensión.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+
+    card = QFrame()
+    card.setObjectName("kpiCard")
+    card.setAttribute(Qt.WA_StyledBackground, True)
+    card.setStyleSheet(kpi_card(objeto="kpiCard"))
+    apply_shadow(card, 'sm')
+
+    v = QVBoxLayout(card)
+    v.setContentsMargins(*margenes)
+    v.setSpacing(espaciado)
+
+    l_e = QLabel(etiqueta)
+    l_e.setStyleSheet(
+        f"color:{C.text_muted}; font-size:{F_PX.label}px; letter-spacing:0.4px; "
+        f"background:transparent; border:none;"
+    )
+    l_v = QLabel(valor)
+    f = QFont()
+    f.setPointSize(14)
+    f.setWeight(QFont.DemiBold)
+    l_v.setFont(f)
+    l_v.setStyleSheet(f"color:{color}; background:transparent; border:none;")
+
+    v.addWidget(l_e)
+    v.addWidget(l_v)
+    card.lbl_etiqueta = l_e
+    card.lbl_valor = l_v
+    return card
 
 
 def tag_pill(color: str, *, active: bool = False) -> str:

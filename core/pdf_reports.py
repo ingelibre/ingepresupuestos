@@ -37,7 +37,7 @@ from core.database import (
     get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
     get_insumos_para_partidas, set_config, _orden_mo,
 )
-from utils.formatting import fmt as _fmt_money
+from utils.formatting import fecha_dmy as _dmy, fmt as _fmt_money
 
 # ── Configuración de formato (editable por el usuario) ───────────────────────
 # Las claves se leen desde la tabla `configuracion`; los defaults aquí abajo se
@@ -4928,10 +4928,6 @@ def _html_kardex_material(pid: int, f: dict, dm: int, colors) -> str:
 
     def m(v):
         return _fmt(v, dm) if v not in (None, 0, 0.0) else ""
-
-    def _dmy(iso):
-        p = str(iso or '').split('-')
-        return f"{p[2]}/{p[1]}/{p[0]}" if len(p) == 3 else str(iso or '')
 
     movs = _alm.kardex(pid, f['recurso_id'])
     filas_html = []
