@@ -303,3 +303,59 @@ Descartadas: (B) reusar `biblioteca_cu` — es global, rompe precios por proyect
 3. **Reportes:** los 3 críticos; migrar los 2 de SQL crudo a `get_acu_items`.
 4. **Periféricos:** fórmula polinómica, requerimientos, cronograma.
 5. **Bonus:** el importador `.prs` deja de aplanar y preserva el vínculo real.
+
+---
+
+## 🧭 Conceptos duplicados — medido el 2026-08-29 (pedido de Marco)
+
+Marco preguntó, mirando lo que salió en IngeCAD: *«dime si IngeTrazo e
+IngePresupuestos tienen los mismos problemas de conceptos duplicados»*.
+Mismo escáner en los tres (nombres definidos en más de un archivo +
+funciones **estructuralmente idénticas** en archivos distintos, sobre AST
+normalizado, ignorando nombres y literales):
+
+| | archivos | líneas | nombres repetidos | clones reales | sin referencias |
+|---|---|---|---|---|---|
+| IngeCAD | 99 | 41 413 | 9 | 4 | 15 |
+| IngeTrazo (`app/`) | 115 | 50 516 | 16 | 8 | 13 |
+| **IngePresupuestos (`app/`)** | **90** | **88 606** | **17** | **11** | **54** |
+
+**1. Dos vistas gemelas, y es lo más caro que hay acá.**
+`views/recursos_view.py` (1154 líneas) y `views/biblioteca_view.py` (986)
+son la misma pantalla copiada: **cinco funciones idénticas**, incluido
+`_menu_contextual` (292 nodos, 26 líneas cada una, **10 líneas de
+diferencia y todas son el nombre de una variable**: `rid` contra `cu_id`),
+más `_mk_kpi`, `_mk_btn`, `_auto_superindice_unidad` y
+`_eliminar_seleccion`. Un arreglo en una no llega a la otra, y ninguna
+prueba lo va a notar. Candidata clarísima a una base común (delegates,
+KPIs, menú y borrado) con las dos vistas quedándose sólo con lo suyo.
+
+**2. `_dmy` en `core/word_reports.py` y `core/pdf_reports.py`** — la misma
+fecha formateada dos veces. Barato de unificar y del tipo que diverge sin
+que nadie lo note hasta que un reporte sale con otra fecha que el otro.
+
+**3. `tipos_soportados` en los TRES exportadores** (`odt_reports.py`,
+`word_reports.py`, `ods_reports.py`) y `hay_usuarios` en `utils/auth.py`
+**y** `core/database.py`: la misma pregunta con dos dueños posibles — el
+caso exacto que en IngeCAD dio bugs (dos constantes de PICKBOX, dos formas
+de resolver un color).
+
+**4. Las 54 definiciones sin ninguna referencia** son muchas más que las de
+los hermanos (15 y 13). No es urgente —el código que no corre no cuesta
+rendimiento— pero es ruido que hace más difícil ver lo de arriba.
+
+⚠️ **`version-anterior/` y `version-anterior/dist_windows/` NO están en
+git** (verificado: `git ls-files` no los lista) — son carpetas locales.
+Pero un escáner sobre el directorio ve **60 clones y 144 nombres
+repetidos**, con importadores enteros triplicados (`parse_ifc`, 1409
+nodos, en tres copias). O sea: **no son deuda del repo, son una trampa para
+quien busque con grep** —incluido yo— porque es facilísimo leer, o peor
+arreglar, la copia muerta creyendo que es la viva. Conviene moverlas fuera
+del árbol del proyecto.
+
+**El método, igual que en los hermanos:** por cada concepto, primero una
+prueba que fije la conducta actual de los DOS sitios, después unificar,
+después medir que nada cambió. Y el aviso: **el escáner ve clones, no
+conceptos** — los peores casos de IngeCAD eran código distinto contestando
+la misma pregunta, y no habrían salido en esta tabla.
+
