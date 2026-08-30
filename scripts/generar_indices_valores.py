@@ -193,8 +193,14 @@ def main() -> int:
         return 1
     doc = _empaquetar(filas)
     tmp = DESTINO + '.tmp'          # mismo sistema de archivos que el destino
-    with gzip.open(tmp, 'wt', encoding='utf-8', compresslevel=9) as fh:
-        json.dump(doc, fh, ensure_ascii=False, separators=(',', ':'))
+    # mtime=0: gzip guarda la hora de compresión en su cabecera, así que sin
+    # esto el archivo sale distinto en cada corrida aunque el contenido sea el
+    # mismo — y la Action commitearía un cambio falso dos veces al mes.
+    with open(tmp, 'wb') as bruto:
+        with gzip.GzipFile(fileobj=bruto, mode='wb', compresslevel=9,
+                           mtime=0) as gz:
+            gz.write(json.dumps(doc, ensure_ascii=False,
+                                separators=(',', ':')).encode('utf-8'))
     os.replace(tmp, DESTINO)
 
     print(f"\n{os.path.relpath(DESTINO)} — {os.path.getsize(DESTINO) / 1024:.0f} KB")
