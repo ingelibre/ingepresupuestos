@@ -109,9 +109,10 @@ class DiccionarioIUDialog(QDialog):
         v.addLayout(barra)
 
         # ── Tabla de propuestas ──
-        self.tbl = QTableWidget(0, 6)
+        self.tbl = QTableWidget(0, 7)
         self.tbl.setHorizontalHeaderLabels(
-            ["", "Insumo", "Tipo", "Índice propuesto", "Parecido", "Se parece a"])
+            ["", "Insumo", "Tipo", "Índice propuesto", "Parecido", "Fuente",
+             "Se parece a"])
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -131,7 +132,8 @@ class DiccionarioIUDialog(QDialog):
         h.setSectionResizeMode(2, QHeaderView.Fixed); h.resizeSection(2, 54)
         h.setSectionResizeMode(3, QHeaderView.Fixed); h.resizeSection(3, 230)
         h.setSectionResizeMode(4, QHeaderView.Fixed); h.resizeSection(4, 80)
-        h.setSectionResizeMode(5, QHeaderView.Stretch)
+        h.setSectionResizeMode(5, QHeaderView.Fixed); h.resizeSection(5, 90)
+        h.setSectionResizeMode(6, QHeaderView.Stretch)
         v.addWidget(self.tbl, 1)
 
         self.lbl_pie = QLabel(
@@ -175,10 +177,15 @@ class DiccionarioIUDialog(QDialog):
         pendientes = DIC.insumos_sin_indice()
         total = len(pendientes)
         if total:
+            from core.indices_inei import diccionario_oficial
             self.lbl_estado.setText(
                 f"<b>{total}</b> insumo(s) sin índice unificado asignado. "
                 f"La fórmula polinómica los reparte por el índice de su tipo, "
-                f"que es un supuesto — clasificarlos la vuelve exacta."
+                f"que es un supuesto — clasificarlos la vuelve exacta.<br>"
+                f"Las propuestas se apoyan primero en el <b>Diccionario de "
+                f"Elementos de la Construcción</b> del INEI "
+                f"({len(diccionario_oficial())} elementos, Anexo 2 de la "
+                f"RJ 016-2026-INEI) y después en tu propia biblioteca."
             )
         else:
             self.lbl_estado.setText(
@@ -239,16 +246,31 @@ class DiccionarioIUDialog(QDialog):
             it_p.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tbl.setItem(r, 4, it_p)
 
+            es_oficial = s.get('fuente') == 'oficial'
+            it_f = QTableWidgetItem("INEI" if es_oficial else "biblioteca")
+            it_f.setTextAlignment(Qt.AlignCenter)
+            it_f.setToolTip(
+                "Diccionario de Elementos de la Construcción del INEI "
+                "(Anexo 2 de la RJ 016-2026-INEI)" if es_oficial else
+                "Parecido con un insumo de tu biblioteca que ya tiene índice"
+            )
+            if es_oficial:
+                f_b = QFont(); f_b.setBold(True)
+                it_f.setFont(f_b)
+            else:
+                it_f.setForeground(QColor(SLATE_300))
+            self.tbl.setItem(r, 5, it_f)
+
             it_o = QTableWidgetItem(s['parecido_a'])
             it_o.setForeground(QColor(SLATE_300))
-            self.tbl.setItem(r, 5, it_o)
+            self.tbl.setItem(r, 6, it_o)
 
             if s['ambiguo']:
                 ambiguas += 1
                 tip = (f"El índice {s['rival']} se parece casi igual. "
                        f"Asignar mal el índice mueve costo de un monomio a "
                        f"otro de la fórmula: confirma este a mano.")
-                for c in range(6):
+                for c in range(7):
                     it = self.tbl.item(r, c)
                     if it:
                         it.setBackground(QColor(AMBAR_SOFT))
@@ -256,10 +278,13 @@ class DiccionarioIUDialog(QDialog):
                         it.setToolTip(tip)
 
         n = len(self._sugerencias)
+        n_of = sum(1 for s in self._sugerencias if s.get('fuente') == 'oficial')
         self.lbl_pie.setText(
-            f"{n} propuesta(s): {n - ambiguas} sin rival cercano (marcadas) y "
-            f"{ambiguas} ambigua(s) en ámbar, desmarcadas para que las revises. "
-            f"Puedes cambiar el índice de cualquier fila antes de aplicar."
+            f"{n} propuesta(s): {n_of} salen del diccionario del INEI y "
+            f"{n - n_of} del parecido con tu biblioteca. {n - ambiguas} sin "
+            f"rival cercano (marcadas) y {ambiguas} ambigua(s) en ámbar, "
+            f"desmarcadas para que las revises. Puedes cambiar el índice de "
+            f"cualquier fila antes de aplicar."
         )
 
     def _cambiar_codigo(self, fila: int, cmb: QComboBox):

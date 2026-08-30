@@ -155,7 +155,7 @@ class FormulaView(QWidget):
         hl.addStretch(1)
 
         # Chip de estado a la derecha, como el «Plazo: 60 días» del Gantt.
-        self.lbl_suma_badge = QLabel("Σk = 0.0000")
+        self.lbl_suma_badge = QLabel("Σk = 0.000")
         self.lbl_suma_badge.setStyleSheet(
             "color:white; font-size:11px; font-weight:700;"
             " background:rgba(255,255,255,0.12); border-radius:4px;"
@@ -831,7 +831,7 @@ class FormulaView(QWidget):
         self.tbl.setItem(row, 3, it_i)
 
         coef = float(m.get('coeficiente') or 0)
-        it_k = QTableWidgetItem(f"{coef:.4f}")
+        it_k = QTableWidgetItem(f"{coef:.3f}")
         it_k.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         f2 = QFont(); f2.setBold(True)
         it_k.setFont(f2)
@@ -894,7 +894,7 @@ class FormulaView(QWidget):
         elif col == 4:
             m['coeficiente'] = max(0.0, parse_num(item.text()))
             self.tbl.blockSignals(True)
-            item.setText(f"{m['coeficiente']:.4f}")
+            item.setText(f"{m['coeficiente']:.3f}")
             it_p = self.tbl.item(row, 5)
             if it_p:
                 it_p.setText(f"{m['coeficiente'] * 100:.2f}%")
@@ -975,7 +975,7 @@ class FormulaView(QWidget):
         suma = sum(float(m.get('coeficiente') or 0) for m in monos)
         if abs(suma - 1.0) >= 0.001:
             issues.append(
-                f"La suma de coeficientes debe ser 1.000 (actual: {suma:.4f}).")
+                f"La suma de coeficientes debe ser 1.000 (actual: {suma:.3f}).")
         if n > 8:
             issues.append(f"Máximo 8 monomios por fórmula (tienes {n}).")
         bajos = [(m.get('simbolo') or '?') for m in monos
@@ -991,13 +991,13 @@ class FormulaView(QWidget):
         ok = abs(suma - 1.0) < 0.001
         bg = GREEN_SOFT if ok else RED_SOFT
         fg = GREEN_DARK if ok else RED_DARK
-        self.lbl_suma_badge.setText(f"Σk = {suma:.4f}")
+        self.lbl_suma_badge.setText(f"Σk = {suma:.3f}")
         self.lbl_suma_badge.setStyleSheet(
             f"background:{bg}; color:{fg}; padding:3px 10px;"
             f"  border-radius:4px; font-weight:600; font-size:11px;"
         )
         col_suma = GREEN_DARK if ok else RED_500
-        self.lbl_suma_foot.setText(f"Σ = {suma:.4f}  ·  {suma * 100:.2f}%")
+        self.lbl_suma_foot.setText(f"Σ = {suma:.3f}  ·  {suma * 100:.2f}%")
         self.lbl_suma_foot.setStyleSheet(
             f"color:{col_suma}; font-size:11px; font-weight:600; padding:0 8px;"
         )
@@ -1029,7 +1029,7 @@ class FormulaView(QWidget):
                 continue
             s = m.get('simbolo') or '?'
             partes.append(
-                f"<span style='color:{ORANGE_DARK}'>{k:.4f}</span>"
+                f"<span style='color:{ORANGE_DARK}'>{k:.3f}</span>"
                 f"·(<b>{s}</b>r/<b>{s}</b>o)"
             )
         if not partes:
@@ -1100,7 +1100,7 @@ class FormulaView(QWidget):
         if self._monomios and abs(suma - 1.0) > 0.005:
             res = QMessageBox.question(
                 self, "Confirmar",
-                f"Los coeficientes suman {suma:.4f} (debería ser 1.000).\n"
+                f"Los coeficientes suman {suma:.3f} (debería ser 1.000).\n"
                 f"¿Guardar de todas formas?",
                 QMessageBox.Yes | QMessageBox.No
             )
@@ -1266,7 +1266,7 @@ class FormulaView(QWidget):
             self.tbl_k.setItem(row, 1, it_i)
 
             # k
-            it_k = QTableWidgetItem(f"{d['coeficiente']:.4f}")
+            it_k = QTableWidgetItem(f"{d['coeficiente']:.3f}")
             it_k.setFlags(flag)
             it_k.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tbl_k.setItem(row, 2, it_k)

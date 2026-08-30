@@ -100,15 +100,32 @@ def test_asignar_sin_ids_no_hace_nada():
 
 # ── Las propuestas ───────────────────────────────────────────────────────────
 def test_marca_ambigua_cuando_otro_indice_esta_igual_de_cerca():
-    """El caso del cemento: mismo texto casi, índices distintos."""
+    """El caso del cemento, en el camino de la biblioteca.
+
+    Se prueba con `usar_oficial=False` a propósito: el diccionario del INEI
+    resuelve el cemento con UN solo código —el 21 de la base 2025 absorbió los
+    tipos I, II y V— así que la ambigüedad solo aparece cuando la propuesta se
+    apoya en la biblioteca del usuario, que sí conserva la distinción.
+    """
     DIC = _preparar()
     _insumo('CEMENTO ZZQX PORTLAND TIPO I', inei='21')
     _insumo('CEMENTO ZZQX PORTLAND TIPO V', inei='23')
     rid = _insumo('CEMENTO ZZQX PORTLAND TIPO II')
-    sug = {s['recurso_id']: s for s in DIC.sugerencias(umbral=80)}
+    sug = {s['recurso_id']: s
+           for s in DIC.sugerencias(umbral=80, usar_oficial=False)}
     assert rid in sug, "no propuso nada para el cemento ambiguo"
     assert sug[rid]['ambiguo'], \
         f"no marcó la ambigüedad: {sug[rid]['codigo']} vs {sug[rid]['rival']}"
+
+
+def test_el_diccionario_oficial_tiene_prioridad_sobre_la_biblioteca():
+    """Es la referencia con autoridad; la biblioteca puede traer errores."""
+    DIC = _preparar()
+    rid = _insumo('Cemento Portland', inei='')
+    sug = {s['recurso_id']: s for s in DIC.sugerencias(umbral=80)}
+    assert rid in sug, "el diccionario oficial no lo resolvió"
+    assert sug[rid]['fuente'] == 'oficial', sug[rid]
+    assert sug[rid]['puntaje'] >= 95, sug[rid]['puntaje']
 
 
 def test_no_marca_ambigua_cuando_el_ganador_despega():
@@ -121,12 +138,18 @@ def test_no_marca_ambigua_cuando_el_ganador_despega():
     assert sug[rid]['codigo'] == '26'
 
 
-def test_las_propuestas_no_cruzan_tipos():
-    """Un material no se resuelve contra una mano de obra por parecido de texto."""
+def test_las_propuestas_de_la_biblioteca_no_cruzan_tipos():
+    """Un material no se resuelve contra una mano de obra por parecido de texto.
+
+    El guardia es del camino de la biblioteca. El diccionario del INEI mapea
+    por NOMBRE del elemento y no conoce el tipo interno de la app, así que ahí
+    manda el nombre — que es justamente su criterio.
+    """
     DIC = _preparar()
     _insumo('OPERARIO ZZQZ ESPECIALISTA RARO', tipo='MO', inei='47')
     rid = _insumo('OPERARIO ZZQZ ESPECIALISTA RARO', tipo='MAT')
-    sug = {s['recurso_id']: s for s in DIC.sugerencias(umbral=80)}
+    sug = {s['recurso_id']: s
+           for s in DIC.sugerencias(umbral=80, usar_oficial=False)}
     if rid in sug:
         assert sug[rid]['codigo'] != '47', \
             "propuso el índice de mano de obra para un material"

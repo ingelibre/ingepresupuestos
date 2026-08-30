@@ -54,7 +54,8 @@ def resumen(conn=None) -> list[dict]:
     if own:
         conn = get_db()
     try:
-        from core.indices_inei import SERIE_ACTUAL
+        from core.indices_inei import SERIE_ACTUAL, asegurar_seed
+        asegurar_seed(conn)
         rows = conn.execute(
             """SELECT COALESCE(NULLIF(r.indice_inei,''), '—') AS codigo,
                       COALESCE(i.nombre, '') AS nombre,
@@ -119,36 +120,74 @@ def asignar_indice(recurso_ids, codigo: str, conn=None) -> int:
             conn.close()
 
 
+def _mejor(objetivo: str, claves: list[str], umbral: int,
+           codigo_de) -> tuple[str, float, bool, str] | None:
+    """(clave, puntaje, ambiguo, rival) del mejor candidato, o None.
+
+    El riesgo del dominio: «CEMENTO PORTLAND TIPO V» se parece un 95.7% a
+    «TIPO I» y son índices distintos (23 y 21). Ningún scorer los separa, así
+    que si el mejor candidato de OTRO índice queda a menos de `MARGEN_AMBIGUO`
+    puntos, la propuesta se marca para que la decida el usuario.
+    """
+    if not claves:
+        return None
+    try:
+        from rapidfuzz import fuzz, process
+        hits = process.extract(objetivo, claves, scorer=fuzz.token_set_ratio,
+                               limit=8, score_cutoff=umbral)
+        hits = [(h[1], h[2]) for h in hits]
+    except ImportError:
+        import difflib
+        cerca = difflib.get_close_matches(objetivo, claves, n=8,
+                                          cutoff=umbral / 100)
+        hits = sorted(((difflib.SequenceMatcher(None, objetivo, t).ratio() * 100,
+                        claves.index(t)) for t in cerca), key=lambda h: -h[0])
+    if not hits:
+        return None
+    puntaje, idx = hits[0]
+    cod = codigo_de(claves[idx])
+    rival = next(((p, codigo_de(claves[i])) for p, i in hits[1:]
+                  if codigo_de(claves[i]) != cod), None)
+    ambiguo = bool(rival and (puntaje - rival[0]) < MARGEN_AMBIGUO)
+    return claves[idx], puntaje, ambiguo, (f"{rival[1]} ({rival[0]:.0f})"
+                                           if rival else '')
+
+
 def sugerencias(umbral: int = 85, limite: int | None = None,
-                conn=None) -> list[dict]:
-    """Propone un índice para cada insumo sin clasificar.
+                conn=None, usar_oficial: bool = True) -> list[dict]:
+    """Propone un índice unificado para cada insumo sin clasificar.
 
-    El criterio es el parecido de la descripción con los insumos que SÍ están
-    clasificados: si «CEMENTO PORTLAND TIPO I 42.5KG» ya está en el 21, es muy
-    probable que «CEMENTO PORTLAND TIPO I (BOLSA 42.5 KG)» también.
+    Dos fuentes, en este orden:
 
-    No inventa índices nuevos ni toca nada: devuelve las propuestas con su
-    puntaje y el insumo en que se apoya, para que el usuario acepte o descarte.
-    Las que tienen un rival cercano de OTRO índice salen marcadas `ambiguo`:
-    «CEMENTO PORTLAND TIPO V» se parece un 95.7% a «TIPO I» y son índices
-    distintos (23 y 21), así que un puntaje alto no basta.
-    Sin `rapidfuzz` instalado usa `difflib`, que es más lento pero está en la
-    biblioteca estándar.
+    1. **El Diccionario de Elementos de la Construcción del INEI** (Anexo 2 de
+       la RJ 016-2026-INEI, ~1930 entradas). Es la referencia con autoridad:
+       primero por coincidencia exacta del nombre normalizado y después por
+       parecido. Resuelve algo más de la mitad de lo que falta y, a diferencia
+       de la biblioteca propia, no propaga errores de clasificación previos.
+    2. **La propia biblioteca**, por parecido con los insumos que YA tienen
+       índice. Cubre lo que el diccionario no nombra —marcas, formatos y
+       descripciones locales.
+
+    No inventa índices ni toca nada: devuelve las propuestas con su puntaje, su
+    fuente y el elemento en que se apoya, para que el usuario acepte o
+    descarte. Las que tienen un rival cercano de OTRO índice salen marcadas
+    `ambiguo`.
 
     Devuelve [{'recurso_id','descripcion','tipo','codigo','nombre','puntaje',
-               'parecido_a'}].
+               'parecido_a','ambiguo','rival','fuente'}].
     """
     own = conn is None
     if own:
         conn = get_db()
     try:
+        from core.indices_inei import SERIE_ACTUAL, asegurar_seed
+        asegurar_seed(conn)
         clasificados = conn.execute(
             "SELECT descripcion, tipo, indice_inei FROM recursos "
             "WHERE COALESCE(indice_inei,'') NOT IN ('', '00') "
             "  AND COALESCE(descripcion,'') <> ''"
         ).fetchall()
         pendientes = insumos_sin_indice(limite, conn)
-        from core.indices_inei import SERIE_ACTUAL
         nombres = dict(conn.execute(
             "SELECT codigo, nombre FROM indices_inei WHERE serie=?",
             (SERIE_ACTUAL,)).fetchall())
@@ -156,11 +195,20 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
         if own:
             conn.close()
 
-    if not clasificados or not pendientes:
+    if not pendientes:
         return []
 
-    # Un banco por tipo: un material no debería resolverse contra una mano de
-    # obra por mucho que se parezcan los textos.
+    # ── Fuente 1: el diccionario oficial ──
+    oficial: dict[str, str] = {}
+    if usar_oficial:
+        from core.indices_inei import diccionario_oficial
+        for elemento, cod in diccionario_oficial().items():
+            n = _normalizar(elemento)
+            if n:
+                oficial[n] = cod
+    claves_of = list(oficial)
+
+    # ── Fuente 2: la biblioteca, por tipo ──
     banco: dict[str, list[tuple[str, str, str]]] = {}
     for r in clasificados:
         norm = _normalizar(r['descripcion'])
@@ -168,66 +216,59 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
             banco.setdefault(r['tipo'] or 'MAT', []).append(
                 (norm, r['indice_inei'], r['descripcion']))
 
-    try:
-        from rapidfuzz import fuzz, process
-        _fuzz = True
-    except ImportError:
-        import difflib
-        _fuzz = False
-
     out = []
     for ins in pendientes:
-        cand = banco.get(ins['tipo'] or 'MAT') or []
-        if not cand:
-            continue
         objetivo = _normalizar(ins['descripcion'])
         if not objetivo:
             continue
+
+        # 1a. El diccionario oficial, palabra por palabra.
+        if objetivo in oficial:
+            cod = oficial[objetivo]
+            out.append({
+                'recurso_id': ins['id'], 'descripcion': ins['descripcion'],
+                'tipo': ins['tipo'], 'codigo': cod,
+                'nombre': nombres.get(cod, f"Índice {cod}"),
+                'puntaje': 100.0, 'parecido_a': ins['descripcion'],
+                'ambiguo': False, 'rival': '', 'fuente': 'oficial',
+            })
+            continue
+
+        # 1b. El diccionario oficial, por parecido.
+        m = _mejor(objetivo, claves_of, umbral, lambda k: oficial[k])
+        if m:
+            clave, puntaje, ambiguo, rival = m
+            cod = oficial[clave]
+            out.append({
+                'recurso_id': ins['id'], 'descripcion': ins['descripcion'],
+                'tipo': ins['tipo'], 'codigo': cod,
+                'nombre': nombres.get(cod, f"Índice {cod}"),
+                'puntaje': round(puntaje, 1), 'parecido_a': clave,
+                'ambiguo': ambiguo, 'rival': rival, 'fuente': 'oficial',
+            })
+            continue
+
+        # 2. La biblioteca propia, dentro del mismo tipo de insumo.
+        cand = banco.get(ins['tipo'] or 'MAT') or []
+        if not cand:
+            continue
         textos = [c[0] for c in cand]
-
-        if _fuzz:
-            # Varios candidatos, no uno: hace falta ver si el segundo apunta a
-            # OTRO índice con casi el mismo puntaje.
-            hits = process.extract(objetivo, textos,
-                                   scorer=fuzz.token_set_ratio,
-                                   limit=8, score_cutoff=umbral)
-            if not hits:
-                continue
-            hits = [(h[1], h[2]) for h in hits]          # (puntaje, idx)
-        else:
-            import difflib
-            cerca = difflib.get_close_matches(objetivo, textos, n=8,
-                                              cutoff=umbral / 100)
-            if not cerca:
-                continue
-            hits = [(difflib.SequenceMatcher(None, objetivo, t).ratio() * 100,
-                     textos.index(t)) for t in cerca]
-            hits.sort(key=lambda h: -h[0])
-
-        puntaje, idx = hits[0]
-        _, cod, desc_origen = cand[idx]
-
-        # El riesgo del dominio: «CEMENTO PORTLAND TIPO V» se parece un 95.7% a
-        # «TIPO I», y son índices distintos (23 y 21). Ningún scorer distingue
-        # eso. Si el mejor candidato de OTRO índice queda a menos de `MARGEN`
-        # puntos, la propuesta es ambigua y se marca para que el usuario decida:
-        # asignar mal un índice desplaza plata de un monomio a otro.
-        rival = next(((p, cand[i][1]) for p, i in hits[1:]
-                      if cand[i][1] != cod), None)
-        ambiguo = bool(rival and (puntaje - rival[0]) < MARGEN_AMBIGUO)
-
+        idx_por_texto = {t: i for i, t in enumerate(textos)}
+        m = _mejor(objetivo, textos, umbral,
+                   lambda t: cand[idx_por_texto[t]][1])
+        if not m:
+            continue
+        clave, puntaje, ambiguo, rival = m
+        _, cod, desc_origen = cand[idx_por_texto[clave]]
         out.append({
-            'recurso_id':  ins['id'],
-            'descripcion': ins['descripcion'],
-            'tipo':        ins['tipo'],
-            'codigo':      cod,
-            'nombre':      nombres.get(cod, f"Índice {cod}"),
-            'puntaje':     round(puntaje, 1),
-            'parecido_a':  desc_origen,
-            'ambiguo':     ambiguo,
-            'rival':       (f"{rival[1]} ({rival[0]:.0f})" if rival else ''),
+            'recurso_id': ins['id'], 'descripcion': ins['descripcion'],
+            'tipo': ins['tipo'], 'codigo': cod,
+            'nombre': nombres.get(cod, f"Índice {cod}"),
+            'puntaje': round(puntaje, 1), 'parecido_a': desc_origen,
+            'ambiguo': ambiguo, 'rival': rival, 'fuente': 'biblioteca',
         })
-    out.sort(key=lambda x: -x['puntaje'])
+
+    out.sort(key=lambda x: (x['fuente'] != 'oficial', -x['puntaje']))
     return out
 
 
