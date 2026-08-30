@@ -191,17 +191,17 @@ def test_k_de_un_monomio_agrupado_pondera_sus_indices():
     import core.indices_inei as I
     for cod in ('21', '43'):
         I.asegurar_codigos([cod])
-    I.guardar_valor('21', 2025, 1, 100.0)
-    I.guardar_valor('43', 2025, 1, 100.0)
-    I.guardar_valor('21', 2026, 1, 120.0)
-    I.guardar_valor('43', 2026, 1, 100.0)
+    I.guardar_valor('21', 2020, 1, 100.0)
+    I.guardar_valor('43', 2020, 1, 100.0)
+    I.guardar_valor('21', 2021, 1, 120.0)
+    I.guardar_valor('43', 2021, 1, 100.0)
     F.guardar_monomios(pid, [{
         'simbolo': 'M', 'descripcion': 'Agrupado', 'indice_inei': '21',
         'coeficiente': 1.0,
         'componentes': [{'codigo': '21', 'nombre': 'Cemento', 'monto': 50.0},
                         {'codigo': '43', 'nombre': 'Madera', 'monto': 50.0}],
     }])
-    r = F.calcular_reajuste_k(pid, 2025, 1, 2026, 1, '01')
+    r = F.calcular_reajuste_k(pid, 2020, 1, 2021, 1, '01')
     fila = r['detalle'][0]
     assert abs(fila['ratio'] - 1.10) < 1e-6, fila['ratio']
     assert len(fila['componentes']) == 2
@@ -212,13 +212,13 @@ def test_k_sin_composicion_usa_el_indice_del_monomio():
     """Los proyectos guardados antes de esta versión no cambian de número."""
     F, pid = _preparar()
     import core.indices_inei as I
-    I.guardar_valor('21', 2025, 1, 100.0)
-    I.guardar_valor('21', 2026, 1, 150.0)
+    I.guardar_valor('21', 2020, 1, 100.0)
+    I.guardar_valor('21', 2021, 1, 150.0)
     F.guardar_monomios(pid, [{
         'simbolo': 'C', 'descripcion': 'Cemento', 'indice_inei': '21',
         'coeficiente': 1.0,      # sin 'componentes'
     }])
-    r = F.calcular_reajuste_k(pid, 2025, 1, 2026, 1, '01')
+    r = F.calcular_reajuste_k(pid, 2020, 1, 2021, 1, '01')
     assert abs(r['detalle'][0]['ratio'] - 1.5) < 1e-6
     assert r['detalle'][0]['componentes'] == []
 
@@ -227,19 +227,51 @@ def test_un_componente_sin_datos_no_anula_el_monomio():
     """Se renormaliza sobre los que sí tienen valor, y se avisa cuántos faltan."""
     F, pid = _preparar()
     import core.indices_inei as I
-    I.guardar_valor('21', 2025, 1, 100.0)
-    I.guardar_valor('21', 2026, 1, 200.0)
+    I.guardar_valor('21', 2020, 1, 100.0)
+    I.guardar_valor('21', 2021, 1, 200.0)
     F.guardar_monomios(pid, [{
         'simbolo': 'M', 'descripcion': 'Agrupado', 'indice_inei': '21',
         'coeficiente': 1.0,
         'componentes': [{'codigo': '21', 'nombre': 'Cemento', 'monto': 50.0},
                         {'codigo': '77', 'nombre': 'Sin datos', 'monto': 50.0}],
     }])
-    r = F.calcular_reajuste_k(pid, 2025, 1, 2026, 1, '01')
+    r = F.calcular_reajuste_k(pid, 2020, 1, 2021, 1, '01')
     fila = r['detalle'][0]
     assert not fila['falta_dato'], "anuló el monomio entero"
     assert fila['componentes_sin_dato'] == 1
     assert abs(fila['ratio'] - 2.0) < 1e-6, fila['ratio']
+
+
+def test_k_se_niega_a_cruzar_el_cambio_de_base():
+    """La RJ 016-2026-INEI cambió la base en diciembre de 2025.
+
+    Dividir un índice de la serie nueva entre uno de la vieja da un número sin
+    sentido —30 códigos cambiaron de significado—, así que el cálculo se niega
+    y lo explica en vez de devolver una cifra falsa.
+    """
+    F, pid = _preparar()
+    F.guardar_monomios(pid, [{
+        'simbolo': 'C', 'descripcion': 'Cemento', 'indice_inei': '21',
+        'coeficiente': 1.0,
+    }])
+    r = F.calcular_reajuste_k(pid, 2025, 6, 2026, 3, '01')
+    assert not r['ok'], "calculó K a caballo entre las dos bases"
+    assert 'empalme' in r['msg'].lower(), r['msg']
+    assert r['series'] == ('1992', '2025'), r.get('series')
+
+
+def test_k_dentro_de_la_misma_base_sigue_calculando():
+    F, pid = _preparar()
+    import core.indices_inei as I
+    I.guardar_valor('21', 2026, 1, 100.0)
+    I.guardar_valor('21', 2026, 3, 110.0)
+    F.guardar_monomios(pid, [{
+        'simbolo': 'C', 'descripcion': 'Cemento', 'indice_inei': '21',
+        'coeficiente': 1.0,
+    }])
+    r = F.calcular_reajuste_k(pid, 2026, 1, 2026, 3, '01')
+    assert r['ok'], r.get('msg')
+    assert abs(r['k_total'] - 1.10) < 1e-4, r['k_total']
 
 
 if __name__ == "__main__":

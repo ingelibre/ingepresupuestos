@@ -27,6 +27,7 @@ from __future__ import annotations
 import unicodedata
 
 from core.config import INEI_DEFAULT
+from core.indices_inei import SERIE_ACTUAL as SERIE_NOMBRES
 from core.database import get_db, get_insumos_para_partidas
 
 
@@ -179,7 +180,8 @@ def incidencias_por_iu(proyecto_id: int) -> dict:
         indices = {r['id']: (r['indice_inei'] or '').strip()
                    for r in conn.execute("SELECT id, indice_inei FROM recursos")}
         nombres = dict(conn.execute(
-            "SELECT codigo, nombre FROM indices_inei").fetchall())
+            "SELECT codigo, nombre FROM indices_inei WHERE serie=?",
+            (SERIE_NOMBRES,)).fetchall())
     finally:
         conn.close()
 
@@ -395,23 +397,34 @@ def _ajustar_a_uno(monomios: list[dict]) -> None:
         mayor['coeficiente'] = round(mayor['coeficiente'] + dif, 4)
 
 
-def cargar_componentes(proyecto_id: int) -> dict[int, list[dict]]:
+def cargar_componentes(proyecto_id: int,
+                       serie: str | None = None) -> dict[int, list[dict]]:
     """Composición guardada de cada monomio: {orden: [{codigo, nombre, monto}]}.
 
     Los monomios de proyectos anteriores a esta versión no tienen composición
     guardada; para ellos devuelve un dict vacío y la vista muestra el monomio
     como lo que era: un solo índice escrito a mano.
+
+    El nombre del índice se busca en la SERIE que corresponde al presupuesto
+    base. Sin ese filtro el join devolvía una fila por serie —el mismo código
+    existe en las dos— y cada componente salía duplicado, repartiendo su peso
+    a la mitad en el promedio ponderado de K.
     """
+    from core.indices_inei import serie_de
+    if serie is None:
+        per = cargar_periodos(proyecto_id)
+        serie = serie_de(per['oferta_anio'], per['oferta_mes'])
     conn = get_db()
     try:
         rows = conn.execute(
             """SELECT c.orden, c.indice_inei, c.monto,
                       COALESCE(i.nombre, '') AS nombre
                  FROM formula_monomio_iu c
-                 LEFT JOIN indices_inei i ON i.codigo = c.indice_inei
+                 LEFT JOIN indices_inei i
+                        ON i.codigo = c.indice_inei AND i.serie = ?
                 WHERE c.proyecto_id=?
                 ORDER BY c.orden, c.monto DESC""",
-            (proyecto_id,)
+            (serie, proyecto_id)
         ).fetchall()
     finally:
         conn.close()
@@ -614,6 +627,29 @@ def calcular_reajuste_k(proyecto_id: int,
     rm = reajuste_mes  or per['reajuste_mes']
     area = area_inei   or per['area_inei']
 
+    # Las dos bases del INEI no se pueden mezclar. La RJ 016-2026-INEI fijó
+    # «Diciembre 2025 = 100» y con ella 30 códigos cambiaron de significado, así
+    # que dividir un índice de la serie nueva entre uno de la vieja da un número
+    # sin sentido. Cuando el reajuste cruza el cambio de base hace falta el
+    # factor de empalme oficial: mejor decirlo que devolver una cifra falsa.
+    from core.indices_inei import serie_de, serie_nombre
+    s_oferta, s_reajuste = serie_de(oa, om), serie_de(ra, rm)
+    if s_oferta != s_reajuste:
+        return {
+            'ok': False,
+            'msg': (f"El presupuesto base ({om:02d}/{oa}) está en la "
+                    f"{serie_nombre(s_oferta)} y el reajuste ({rm:02d}/{ra}) en "
+                    f"la {serie_nombre(s_reajuste)}. El INEI cambió la base en "
+                    f"diciembre de 2025 y los índices de una serie no se "
+                    f"dividen entre los de la otra: hace falta el factor de "
+                    f"empalme oficial."),
+            'k_total': 0.0,
+            'oferta': {'anio': oa, 'mes': om},
+            'reajuste': {'anio': ra, 'mes': rm},
+            'area': area, 'detalle': [], 'monomios_sin_datos': 0,
+            'series': (s_oferta, s_reajuste),
+        }
+
     monomios = cargar_monomios(proyecto_id)
     componentes = cargar_componentes(proyecto_id)
     detalle = []
@@ -667,4 +703,5 @@ def calcular_reajuste_k(proyecto_id: int,
         'area':     area,
         'detalle':  detalle,
         'monomios_sin_datos': sin_datos,
+        'series':   (s_oferta, s_reajuste),
     }

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from core.indices_inei import (
     asegurar_seed, listar_indices, listar_areas,
+    SERIE_ACTUAL, series_disponibles, serie_nombre,
     crear_indice, actualizar_indice, eliminar_indice, contar_usos,
     asegurar_codigos, codigos_huerfanos,
     obtener_matriz, guardar_valor, guardar_valores, eliminar_valor,
@@ -137,6 +138,10 @@ class IndicesINEIView(QWidget):
         asegurar_seed()
         self._codigo_actual: str | None = None
         self._area_actual: str = '01'
+        # Las dos bases del INEI conviven: la de 1992 (6 áreas) para los
+        # presupuestos anteriores a diciembre de 2025 y la de 2025 (13 áreas)
+        # desde entonces. No se mezclan.
+        self._serie_actual: str = SERIE_ACTUAL
         self._indices_cache: list[tuple[str, str]] = []
         self._huerfanos: list[dict] = []
         self._build()
@@ -166,6 +171,21 @@ class IndicesINEIView(QWidget):
         self.lbl_subt.setStyleSheet(f"color:{SLATE_300}; padding-left:6px;")
         top.addWidget(self.lbl_subt)
         top.addStretch(1)
+
+        # Selector de serie (base del INEI)
+        lbl_s = QLabel("Base:")
+        lbl_s.setStyleSheet(f"color:{SLATE_500}; font-weight:600;")
+        top.addWidget(lbl_s)
+        self.cmb_serie = QComboBox()
+        self.cmb_serie.setMinimumWidth(190)
+        self.cmb_serie.setToolTip(
+            "El INEI cambió la base en diciembre de 2025 (RJ 016-2026-INEI). "
+            "Los índices de una base no se mezclan con los de la otra."
+        )
+        for clave, nombre in series_disponibles():
+            self.cmb_serie.addItem(nombre, clave)
+        self.cmb_serie.currentIndexChanged.connect(self._on_serie_change)
+        top.addWidget(self.cmb_serie)
 
         # Selector de área
         lbl_a = QLabel("Área:")
@@ -460,7 +480,7 @@ class IndicesINEIView(QWidget):
         # Áreas
         self.cmb_area.blockSignals(True)
         self.cmb_area.clear()
-        for a in listar_areas():
+        for a in listar_areas(serie=self._serie_actual):
             self.cmb_area.addItem(f"{a['codigo']} — {a['nombre']}", a['codigo'])
         self.cmb_area.blockSignals(False)
         self._area_actual = self.cmb_area.itemData(0) or '01'
@@ -470,7 +490,7 @@ class IndicesINEIView(QWidget):
 
     def _refrescar_lista(self):
         q = self.inp_q.text().strip().lower() if hasattr(self, 'inp_q') else ''
-        indices = listar_indices()
+        indices = listar_indices(serie=self._serie_actual)
         self._indices_cache = [(i['codigo'], i['nombre']) for i in indices]
         anterior = self._codigo_actual
 
@@ -508,19 +528,21 @@ class IndicesINEIView(QWidget):
     def _actualizar_kpis(self):
         from core.database import get_db
         conn = get_db()
-        n_indices = conn.execute("SELECT COUNT(*) FROM indices_inei").fetchone()[0]
+        n_indices = conn.execute(
+            "SELECT COUNT(*) FROM indices_inei WHERE serie=?",
+            (self._serie_actual,)).fetchone()[0]
         n_con_datos = conn.execute(
             "SELECT COUNT(DISTINCT codigo) FROM indices_inei_valores "
-            "WHERE area=?", (self._area_actual,)
+            "WHERE area=? AND serie=?", (self._area_actual, self._serie_actual)
         ).fetchone()[0]
         n_valores = conn.execute(
-            "SELECT COUNT(*) FROM indices_inei_valores WHERE area=?",
-            (self._area_actual,)
+            "SELECT COUNT(*) FROM indices_inei_valores WHERE area=? AND serie=?",
+            (self._area_actual, self._serie_actual)
         ).fetchone()[0]
         ult = conn.execute(
-            "SELECT anio, mes FROM indices_inei_valores WHERE area=? "
+            "SELECT anio, mes FROM indices_inei_valores WHERE area=? AND serie=? "
             "ORDER BY anio DESC, mes DESC LIMIT 1",
-            (self._area_actual,)
+            (self._area_actual, self._serie_actual)
         ).fetchone()
         conn.close()
         self.kpi_indices.lbl_valor.setText(str(n_indices))
@@ -556,7 +578,7 @@ class IndicesINEIView(QWidget):
             return
         codigo, nombre = dlg.datos()
         try:
-            codigo = crear_indice(codigo, nombre)
+            codigo = crear_indice(codigo, nombre, serie=self._serie_actual)
         except ValueError as e:
             QMessageBox.warning(self, "No se pudo crear", str(e))
             return
@@ -572,7 +594,7 @@ class IndicesINEIView(QWidget):
         if dlg.exec() != QDialog.Accepted:
             return
         _, nombre_nuevo = dlg.datos()
-        actualizar_indice(codigo, nombre=nombre_nuevo)
+        actualizar_indice(codigo, nombre=nombre_nuevo, serie=self._serie_actual)
         self._refrescar_lista()
 
     def _eliminar_indice_ui(self, codigo: str):
@@ -585,7 +607,7 @@ class IndicesINEIView(QWidget):
         if not codigo:
             return
         nombre = dict(self._indices_cache).get(codigo, "")
-        usos = contar_usos(codigo)
+        usos = contar_usos(codigo, serie=self._serie_actual)
         detalle = []
         if usos['recursos']:
             detalle.append(f"{usos['recursos']} insumo(s) lo tienen asignado")
@@ -621,7 +643,8 @@ class IndicesINEIView(QWidget):
             )
             borrar_valores = (r == QMessageBox.Yes)
 
-        eliminar_indice(codigo, borrar_valores=borrar_valores)
+        eliminar_indice(codigo, borrar_valores=borrar_valores,
+                        serie=self._serie_actual)
         if self._codigo_actual == codigo:
             self._codigo_actual = None
             self._limpiar_matriz()
@@ -631,7 +654,7 @@ class IndicesINEIView(QWidget):
     def _actualizar_huerfanos(self):
         """Refresca el aviso de códigos usados que el catálogo no define."""
         try:
-            self._huerfanos = codigos_huerfanos()
+            self._huerfanos = codigos_huerfanos(serie=self._serie_actual)
         except Exception:
             self._huerfanos = []
         n = len(self._huerfanos)
@@ -662,7 +685,8 @@ class IndicesINEIView(QWidget):
         )
         if r != QMessageBox.Yes:
             return
-        n = asegurar_codigos([h['codigo'] for h in self._huerfanos])
+        n = asegurar_codigos([h['codigo'] for h in self._huerfanos],
+                             serie=self._serie_actual)
         self._refrescar_lista()
         self._actualizar_kpis()
         QMessageBox.information(
@@ -681,6 +705,20 @@ class IndicesINEIView(QWidget):
         from views.diccionario_iu_dialog import DiccionarioIUDialog
         dlg = DiccionarioIUDialog(self)
         dlg.exec()
+        self._refrescar_lista()
+        self._actualizar_kpis()
+
+    def _on_serie_change(self):
+        """Cambiar de base recarga áreas e índices: son catálogos distintos."""
+        self._serie_actual = self.cmb_serie.currentData() or SERIE_ACTUAL
+        self._codigo_actual = None
+        self._limpiar_matriz()
+        self.cmb_area.blockSignals(True)
+        self.cmb_area.clear()
+        for a in listar_areas(serie=self._serie_actual):
+            self.cmb_area.addItem(f"{a['codigo']} — {a['nombre']}", a['codigo'])
+        self.cmb_area.blockSignals(False)
+        self._area_actual = self.cmb_area.itemData(0) or '01'
         self._refrescar_lista()
         self._actualizar_kpis()
 
@@ -713,7 +751,7 @@ class IndicesINEIView(QWidget):
         nombre = ind['nombre'] if ind else codigo
         self.lbl_titulo_matriz.setText(f"{codigo}  ·  {nombre}")
 
-        m = obtener_matriz(codigo, self._area_actual)
+        m = obtener_matriz(codigo, self._area_actual, serie=self._serie_actual)
         # Años a mostrar: rango completo desde el mín hasta el actual, o solo el actual
         hoy = datetime.now().year
         if m:
@@ -799,7 +837,8 @@ class IndicesINEIView(QWidget):
             return
         txt = item.text().strip()
         if not txt:
-            eliminar_valor(self._codigo_actual, anio, mes, self._area_actual)
+            eliminar_valor(self._codigo_actual, anio, mes, self._area_actual,
+                           serie=self._serie_actual)
             self.tbl.blockSignals(True)
             item.setForeground(QColor(SLATE_300))
             self.tbl.blockSignals(False)
@@ -807,7 +846,8 @@ class IndicesINEIView(QWidget):
             valor = parse_num(txt)
             if valor <= 0:
                 return
-            guardar_valor(self._codigo_actual, anio, mes, valor, self._area_actual)
+            guardar_valor(self._codigo_actual, anio, mes, valor,
+                          self._area_actual, serie=self._serie_actual)
             self.tbl.blockSignals(True)
             item.setText(f"{valor:.4f}".rstrip('0').rstrip('.'))
             f = QFont(); f.setWeight(QFont.DemiBold)

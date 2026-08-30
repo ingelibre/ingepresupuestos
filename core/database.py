@@ -361,24 +361,35 @@ def init_db():
             orden INTEGER DEFAULT 0,
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        -- Los índices unificados viven en DOS series que no se pueden mezclar:
+        -- la base Julio 1992 = 100 (6 áreas) y la base Diciembre 2025 = 100
+        -- (13 áreas), que fijó la RJ 016-2026-INEI. El mismo código significa
+        -- cosas distintas en cada una —el 21 era «Cemento Portland Tipo I» y
+        -- ahora es «Cemento Portland e hidráulico», que absorbió el 22 y el
+        -- 23—, así que la serie forma parte de la clave.
         CREATE TABLE IF NOT EXISTS indices_inei (
-            codigo TEXT PRIMARY KEY,
+            codigo TEXT NOT NULL,
+            serie TEXT NOT NULL DEFAULT '1992',
             nombre TEXT NOT NULL,
-            activo INTEGER DEFAULT 1
+            activo INTEGER DEFAULT 1,
+            PRIMARY KEY (codigo, serie)
         );
         CREATE TABLE IF NOT EXISTS indices_inei_areas (
-            codigo TEXT PRIMARY KEY,
+            codigo TEXT NOT NULL,
+            serie TEXT NOT NULL DEFAULT '1992',
             nombre TEXT NOT NULL,
-            orden INTEGER DEFAULT 0
+            orden INTEGER DEFAULT 0,
+            PRIMARY KEY (codigo, serie)
         );
         CREATE TABLE IF NOT EXISTS indices_inei_valores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             codigo TEXT NOT NULL,
+            serie TEXT NOT NULL DEFAULT '1992',
             anio INTEGER NOT NULL,
             mes INTEGER NOT NULL,
             area TEXT DEFAULT '01',
             valor REAL NOT NULL,
-            UNIQUE(codigo, anio, mes, area)
+            UNIQUE(codigo, serie, anio, mes, area)
         );
         CREATE TABLE IF NOT EXISTS formula_periodos (
             proyecto_id INTEGER PRIMARY KEY REFERENCES proyectos(id) ON DELETE CASCADE,
@@ -574,6 +585,60 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # columna ya existe
+    # ── Series de índices unificados (RJ 016-2026-INEI) ──────────────────
+    # Las tres tablas de índices nacieron sin columna `serie` porque solo
+    # existía la base Julio 1992. Con la base Diciembre 2025 el mismo código
+    # significa otra cosa, así que la serie entra en la clave primaria — y eso
+    # obliga a reconstruir las tablas, no basta un ALTER. Lo que había es de la
+    # serie 1992 por definición: es la única que existía cuando se guardó.
+    try:
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(indices_inei)")]
+        if cols and 'serie' not in cols:
+            conn.executescript("""
+                ALTER TABLE indices_inei        RENAME TO _inei_old;
+                ALTER TABLE indices_inei_areas  RENAME TO _inei_areas_old;
+                ALTER TABLE indices_inei_valores RENAME TO _inei_val_old;
+
+                CREATE TABLE indices_inei (
+                    codigo TEXT NOT NULL,
+                    serie TEXT NOT NULL DEFAULT '1992',
+                    nombre TEXT NOT NULL,
+                    activo INTEGER DEFAULT 1,
+                    PRIMARY KEY (codigo, serie)
+                );
+                CREATE TABLE indices_inei_areas (
+                    codigo TEXT NOT NULL,
+                    serie TEXT NOT NULL DEFAULT '1992',
+                    nombre TEXT NOT NULL,
+                    orden INTEGER DEFAULT 0,
+                    PRIMARY KEY (codigo, serie)
+                );
+                CREATE TABLE indices_inei_valores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    codigo TEXT NOT NULL,
+                    serie TEXT NOT NULL DEFAULT '1992',
+                    anio INTEGER NOT NULL,
+                    mes INTEGER NOT NULL,
+                    area TEXT DEFAULT '01',
+                    valor REAL NOT NULL,
+                    UNIQUE(codigo, serie, anio, mes, area)
+                );
+
+                INSERT INTO indices_inei (codigo, serie, nombre, activo)
+                    SELECT codigo, '1992', nombre, activo FROM _inei_old;
+                INSERT INTO indices_inei_areas (codigo, serie, nombre, orden)
+                    SELECT codigo, '1992', nombre, orden FROM _inei_areas_old;
+                INSERT INTO indices_inei_valores (codigo, serie, anio, mes, area, valor)
+                    SELECT codigo, '1992', anio, mes, area, valor FROM _inei_val_old;
+
+                DROP TABLE _inei_old;
+                DROP TABLE _inei_areas_old;
+                DROP TABLE _inei_val_old;
+            """)
+            conn.commit()
+    except Exception:
+        pass
+
     # ── Unificación de los datos de empresa (una sola vez) ───────────────
     # «Configuración → Datos de empresa» guardaba `empresa_*` y los reportes
     # leen `rep_*`: dos verdades, y borrar el logo en una no lo quitaba de la
@@ -779,7 +844,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_recursos_inei        ON recursos(indice_inei)",
         "CREATE INDEX IF NOT EXISTS idx_biblioteca_grupo     ON biblioteca_cu(grupo)",
         "CREATE INDEX IF NOT EXISTS idx_biblioteca_acu_cu    ON biblioteca_acu_items(cu_id)",
-        "CREATE INDEX IF NOT EXISTS idx_inei_codigo          ON indices_inei_valores(codigo, anio, mes, area)",
+        "CREATE INDEX IF NOT EXISTS idx_inei_codigo          ON indices_inei_valores(codigo, serie, anio, mes, area)",
         "CREATE INDEX IF NOT EXISTS idx_formula_mono_iu     ON formula_monomio_iu(proyecto_id, orden)",
         # ── Dashboard (filtros por portafolio + ordenamiento) ─────────────
         "CREATE INDEX IF NOT EXISTS idx_proyectos_portafolio ON proyectos(portafolio_id)",

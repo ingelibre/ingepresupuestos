@@ -24,12 +24,76 @@ from pathlib import Path
 from core.database import get_db
 
 
+# ── Series de índices unificados ─────────────────────────────────────────────
+# El INEI cambió la base con la RJ 016-2026-INEI (20-01-2026): de «Julio 1992 =
+# 100» con 6 áreas geográficas a «Diciembre 2025 = 100» con 13. No es solo un
+# cambio de escala: 30 de los códigos comunes CAMBIARON DE SIGNIFICADO —el 21
+# era «Cemento Portland Tipo I» y ahora es «Cemento Portland e hidráulico»,
+# que absorbió al 22 y al 23, desaparecidos— y se agregaron 15 (81 a 95).
+#
+# Por eso conviven las dos series y NO se mezclan: leer una fórmula de 2024 con
+# la tabla nueva daría un número equivocado sin avisar.
+SERIE_2025 = '2025'
+SERIE_1992 = '1992'
+SERIE_ACTUAL = SERIE_2025
+
+# Primer período de la serie nueva. Antes de esto manda la de 1992.
+INICIO_SERIE_2025 = (2025, 12)
+
+_OFICIAL: dict | None = None
+
+
+def _oficial() -> dict:
+    """Los anexos de la RJ 016-2026-INEI, leídos del recurso empaquetado.
+
+    `resources/indices_inei_oficial.json` trae las dos relaciones de índices,
+    las áreas de cada serie y el Diccionario de Elementos de la Construcción.
+    Se carga una vez y se cachea.
+    """
+    global _OFICIAL
+    if _OFICIAL is None:
+        try:
+            from core.config import BASE_DIR
+            ruta = Path(BASE_DIR) / "resources" / "indices_inei_oficial.json"
+            with open(ruta, encoding="utf-8") as f:
+                _OFICIAL = json.load(f)
+        except Exception:
+            # Sin el recurso la app sigue viva con la serie histórica.
+            _OFICIAL = {'series': {}, 'diccionario': {}}
+    return _OFICIAL
+
+
+def series_disponibles() -> list[tuple[str, str]]:
+    """[(clave, nombre)] de las series, la más reciente primero."""
+    s = _oficial().get('series') or {}
+    out = [(k, v.get('nombre', k)) for k, v in s.items()]
+    if not out:
+        out = [(SERIE_1992, 'Base Julio 1992 = 100')]
+    return sorted(out, key=lambda x: x[0], reverse=True)
+
+
+def serie_de(anio, mes) -> str:
+    """Qué serie corresponde a un período. Es la regla que evita mezclarlas."""
+    try:
+        return (SERIE_2025 if (int(anio), int(mes)) >= INICIO_SERIE_2025
+                else SERIE_1992)
+    except (TypeError, ValueError):
+        return SERIE_ACTUAL
+
+
+def diccionario_oficial() -> dict[str, str]:
+    """Anexo 2: elemento de construcción → código de índice unificado.
+
+    Son ~1930 entradas publicadas por el INEI, la referencia con autoridad para
+    decidir qué índice le toca a un insumo.
+    """
+    return _oficial().get('diccionario') or {}
+
+
 # ── Semilla del catálogo de índices unificados ───────────────────────────────
-# Son 72 entradas con códigos del 01 al 80: la numeración oficial tiene huecos
-# (25, 35, 36, 58, 63, 67, 75, 76). NO es la lista completa —el INEI publica
-# más— y sobre todo NO es la verdad: la verdad es la tabla `indices_inei`, que
-# el usuario edita a mano y que la importación del archivo oficial amplía sola.
-# Para leer el catálogo usar `catalogo()`, NUNCA esta constante.
+# Respaldo de la serie 1992 por si falta el recurso: 72 entradas con códigos del
+# 01 al 80 (la numeración tiene huecos). La verdad, igual que antes, es la tabla
+# `indices_inei`; para leerla usar `catalogo()`, NUNCA esta constante.
 CATALOGO_INEI: list[tuple[str, str]] = [
     ("01", "Aceite"),
     ("02", "Acero de construcción liso"),
@@ -104,9 +168,6 @@ CATALOGO_INEI: list[tuple[str, str]] = [
     ("79", "Vidrio incoloro nacional"),
     ("80", "Concreto premezclado"),
 ]
-
-
-# ── 6 Áreas geográficas estándar INEI (IUP) ──────────────────────────────────
 AREAS_INEI: list[tuple[str, str]] = [
     ("01", "Lima Metropolitana y Callao"),
     ("02", "Norte (Tumbes/Piura/Lambayeque/La Libertad/Áncash)"),
@@ -118,49 +179,67 @@ AREAS_INEI: list[tuple[str, str]] = [
 
 
 # ── Semilla del catálogo ─────────────────────────────────────────────────────
-# La semilla corre UNA vez por versión. Subir este número al agregar entradas
-# nuevas a CATALOGO_INEI: solo entonces se vuelven a sembrar las que falten.
-SEED_VERSION = 1
+# La semilla corre UNA vez por serie y por versión. Subir este número al
+# corregir o ampliar los datos oficiales: solo entonces se vuelve a sembrar.
+SEED_VERSION = 2
 
 
-def asegurar_seed(conn=None) -> None:
-    """Siembra el catálogo y las áreas. Corre una sola vez por SEED_VERSION.
+def _seed_de(serie: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """(índices, áreas) oficiales de una serie. Cae al respaldo de 1992."""
+    s = (_oficial().get('series') or {}).get(serie)
+    if s:
+        indices = sorted((s.get('indices') or {}).items(), key=lambda kv: kv[0])
+        areas = [tuple(a) for a in (s.get('areas') or [])]
+        if indices:
+            return indices, areas
+    if serie == SERIE_1992:
+        return list(CATALOGO_INEI), list(AREAS_INEI)
+    return [], []
+
+
+def asegurar_seed(conn=None, serie: str | None = None) -> None:
+    """Siembra el catálogo y las áreas de cada serie. Una vez por serie.
 
     Antes re-insertaba las 72 entradas en CADA arranque con INSERT OR IGNORE,
     así que un índice borrado por el usuario resucitaba al reiniciar. Ahora la
-    siembra se salta si `seed_inei_ver` ya alcanzó SEED_VERSION, y los borrados
-    y renombres del usuario mandan.
+    siembra se salta si `seed_inei_<serie>` ya alcanzó SEED_VERSION, y los
+    borrados y renombres del usuario mandan.
+
+    El flag es POR SERIE: incorporar la base 2025 no debe deshacer lo que el
+    usuario haya tocado en la de 1992.
 
     OJO: el alta, la edición y la baja la llaman ANTES de escribir. Si no, un
     borrado hecho sobre una BD donde la semilla todavía no corrió se deshacía
-    solo en la siguiente lectura —la semilla se ejecutaba después y devolvía la
-    fila—, que es como si no se hubiera borrado nada.
+    solo en la siguiente lectura.
     """
     own = conn is None
     if own:
         conn = get_db()
     try:
-        # Las áreas son las 6 geográficas del INEI, no se editan: siempre.
-        for i, (codigo, nombre) in enumerate(AREAS_INEI):
-            conn.execute(
-                "INSERT OR IGNORE INTO indices_inei_areas "
-                "(codigo, nombre, orden) VALUES (?, ?, ?)",
-                (codigo, nombre, i)
-            )
-        row = conn.execute(
-            "SELECT valor FROM configuracion WHERE clave='seed_inei_ver'"
-        ).fetchone()
-        ya = int((row['valor'] if row else 0) or 0)
-        if ya < SEED_VERSION:
-            for codigo, nombre in CATALOGO_INEI:
+        series = [serie] if serie else [SERIE_1992, SERIE_2025]
+        for s in series:
+            clave = f"seed_inei_{s}"
+            row = conn.execute(
+                "SELECT valor FROM configuracion WHERE clave=?", (clave,)
+            ).fetchone()
+            ya = int((row['valor'] if row else 0) or 0)
+            if ya >= SEED_VERSION:
+                continue
+            indices, areas = _seed_de(s)
+            for codigo, nombre in indices:
                 conn.execute(
-                    "INSERT OR IGNORE INTO indices_inei (codigo, nombre, activo) "
-                    "VALUES (?, ?, 1)",
-                    (codigo, nombre)
+                    "INSERT OR IGNORE INTO indices_inei (codigo, serie, nombre, activo)"
+                    " VALUES (?,?,?,1)", (codigo, s, nombre)
+                )
+            for i, (codigo, nombre) in enumerate(areas):
+                conn.execute(
+                    "INSERT OR IGNORE INTO indices_inei_areas "
+                    "(codigo, serie, nombre, orden) VALUES (?,?,?,?)",
+                    (codigo, s, nombre, i)
                 )
             conn.execute(
-                "INSERT OR REPLACE INTO configuracion (clave, valor) "
-                "VALUES ('seed_inei_ver', ?)", (str(SEED_VERSION),)
+                "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,?)",
+                (clave, str(SEED_VERSION))
             )
         conn.commit()
     finally:
@@ -180,27 +259,29 @@ def _norm_codigo(codigo) -> str:
     return f"{n:02d}"
 
 
-def catalogo(incluir_inactivos: bool = False, conn=None) -> list[tuple[str, str]]:
-    """El catálogo vigente, leído de la tabla. Fuente única para toda la app.
+def catalogo(incluir_inactivos: bool = False, conn=None,
+             serie: str = SERIE_ACTUAL) -> list[tuple[str, str]]:
+    """El catálogo vigente de una serie, leído de la tabla.
 
-    Las vistas lo usan para poblar sus combos: si el usuario da de alta un
-    índice, aparece en todas sin tocar código.
+    Fuente única para toda la app: las vistas lo usan para poblar sus combos,
+    así que un índice dado de alta aparece en todas sin tocar código.
     """
     own = conn is None
     if own:
         conn = get_db()
     asegurar_seed(conn)
-    sql = "SELECT codigo, nombre FROM indices_inei"
+    sql = "SELECT codigo, nombre FROM indices_inei WHERE serie=?"
     if not incluir_inactivos:
-        sql += " WHERE activo=1"
+        sql += " AND activo=1"
     sql += " ORDER BY codigo"
-    rows = conn.execute(sql).fetchall()
+    rows = conn.execute(sql, (serie,)).fetchall()
     if own:
         conn.close()
     return [(r['codigo'], r['nombre']) for r in rows]
 
 
-def crear_indice(codigo: str, nombre: str, conn=None) -> str:
+def crear_indice(codigo: str, nombre: str, conn=None,
+                 serie: str = SERIE_ACTUAL) -> str:
     """Da de alta un índice unificado. Devuelve el código normalizado."""
     codigo = _norm_codigo(codigo)
     nombre = str(nombre or '').strip()
@@ -212,13 +293,14 @@ def crear_indice(codigo: str, nombre: str, conn=None) -> str:
     try:
         asegurar_seed(conn)
         ya = conn.execute(
-            "SELECT nombre FROM indices_inei WHERE codigo=?", (codigo,)
+            "SELECT nombre FROM indices_inei WHERE codigo=? AND serie=?",
+            (codigo, serie)
         ).fetchone()
         if ya:
             raise ValueError(f"El índice {codigo} ya existe ({ya['nombre']}).")
         conn.execute(
-            "INSERT INTO indices_inei (codigo, nombre, activo) VALUES (?,?,1)",
-            (codigo, nombre)
+            "INSERT INTO indices_inei (codigo, serie, nombre, activo)"
+            " VALUES (?,?,?,1)", (codigo, serie, nombre)
         )
         conn.commit()
     finally:
@@ -228,7 +310,8 @@ def crear_indice(codigo: str, nombre: str, conn=None) -> str:
 
 
 def actualizar_indice(codigo: str, nombre: str | None = None,
-                      activo: bool | None = None, conn=None) -> None:
+                      activo: bool | None = None, conn=None,
+                      serie: str = SERIE_ACTUAL) -> None:
     """Renombra o activa/desactiva un índice ya existente."""
     codigo = _norm_codigo(codigo)
     sets, params = [], []
@@ -243,14 +326,15 @@ def actualizar_indice(codigo: str, nombre: str | None = None,
         params.append(1 if activo else 0)
     if not sets:
         return
-    params.append(codigo)
+    params.extend([codigo, serie])
     own = conn is None
     if own:
         conn = get_db()
     try:
         asegurar_seed(conn)
         conn.execute(
-            f"UPDATE indices_inei SET {', '.join(sets)} WHERE codigo=?", params
+            f"UPDATE indices_inei SET {', '.join(sets)} "
+            f"WHERE codigo=? AND serie=?", params
         )
         conn.commit()
     finally:
@@ -258,7 +342,7 @@ def actualizar_indice(codigo: str, nombre: str | None = None,
             conn.close()
 
 
-def contar_usos(codigo: str, conn=None) -> dict:
+def contar_usos(codigo: str, conn=None, serie: str = SERIE_ACTUAL) -> dict:
     """Qué quedaría colgando si se borra este índice.
 
     No hay clave foránea desde `recursos` ni desde `formula_monomios`, así que
@@ -274,7 +358,8 @@ def contar_usos(codigo: str, conn=None) -> dict:
             "SELECT COUNT(*) FROM recursos WHERE indice_inei=?", (codigo,)
         ).fetchone()[0]
         valores = conn.execute(
-            "SELECT COUNT(*) FROM indices_inei_valores WHERE codigo=?", (codigo,)
+            "SELECT COUNT(*) FROM indices_inei_valores WHERE codigo=? AND serie=?",
+            (codigo, serie)
         ).fetchone()[0]
         monomios = conn.execute(
             "SELECT COUNT(*) FROM formula_monomios WHERE indice_inei=?", (codigo,)
@@ -285,7 +370,8 @@ def contar_usos(codigo: str, conn=None) -> dict:
     return {'recursos': recursos, 'valores': valores, 'monomios': monomios}
 
 
-def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None) -> None:
+def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None,
+                    serie: str = SERIE_ACTUAL) -> None:
     """Baja del catálogo. Con `borrar_valores`, se lleva también su histórico.
 
     Los insumos que lo usaban NO se tocan: conservan el código para que el
@@ -297,10 +383,12 @@ def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None) -> Non
         conn = get_db()
     try:
         asegurar_seed(conn)
-        conn.execute("DELETE FROM indices_inei WHERE codigo=?", (codigo,))
+        conn.execute("DELETE FROM indices_inei WHERE codigo=? AND serie=?",
+                     (codigo, serie))
         if borrar_valores:
             conn.execute(
-                "DELETE FROM indices_inei_valores WHERE codigo=?", (codigo,)
+                "DELETE FROM indices_inei_valores WHERE codigo=? AND serie=?",
+                (codigo, serie)
             )
         conn.commit()
     finally:
@@ -308,7 +396,8 @@ def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None) -> Non
             conn.close()
 
 
-def asegurar_codigos(codigos, nombres: dict | None = None, conn=None) -> int:
+def asegurar_codigos(codigos, nombres: dict | None = None, conn=None,
+                     serie: str = SERIE_ACTUAL) -> int:
     """Da de alta los códigos que aún no estén en el catálogo. Devuelve cuántos.
 
     Es lo que hace utilizable la importación del archivo oficial: hasta ahora
@@ -328,14 +417,15 @@ def asegurar_codigos(codigos, nombres: dict | None = None, conn=None) -> int:
             except ValueError:
                 continue
             ya = conn.execute(
-                "SELECT 1 FROM indices_inei WHERE codigo=?", (cod,)
+                "SELECT 1 FROM indices_inei WHERE codigo=? AND serie=?",
+                (cod, serie)
             ).fetchone()
             if ya:
                 continue
             nombre = str(nombres.get(cod) or '').strip() or f"Índice {cod}"
             conn.execute(
-                "INSERT INTO indices_inei (codigo, nombre, activo) VALUES (?,?,1)",
-                (cod, nombre)
+                "INSERT INTO indices_inei (codigo, serie, nombre, activo)"
+                " VALUES (?,?,?,1)", (cod, serie, nombre)
             )
             nuevos += 1
         conn.commit()
@@ -345,11 +435,10 @@ def asegurar_codigos(codigos, nombres: dict | None = None, conn=None) -> int:
     return nuevos
 
 
-def codigos_huerfanos(conn=None) -> list[dict]:
-    """Códigos que la app usa pero el catálogo no define.
+def codigos_huerfanos(conn=None, serie: str = SERIE_ACTUAL) -> list[dict]:
+    """Códigos que la app usa pero el catálogo de la serie no define.
 
-    Los hay desde la propia biblioteca semilla (99, 75, 63, 76, 58…). El '00'
-    se excluye: no es un índice del INEI sino el centinela que usa
+    El '00' se excluye: no es un índice del INEI sino el centinela que usa
     `core.parte_diario` para los insumos sin clasificar.
     """
     own = conn is None
@@ -362,16 +451,18 @@ def codigos_huerfanos(conn=None) -> list[dict]:
                    SELECT indice_inei AS codigo, COUNT(*) AS n_recursos, 0 AS n_valores
                      FROM recursos
                     WHERE COALESCE(indice_inei,'') NOT IN ('', '00')
-                      AND indice_inei NOT IN (SELECT codigo FROM indices_inei)
+                      AND indice_inei NOT IN (
+                          SELECT codigo FROM indices_inei WHERE serie=?)
                     GROUP BY indice_inei
                    UNION ALL
                    SELECT codigo, 0, COUNT(*)
                      FROM indices_inei_valores
-                    WHERE codigo NOT IN ('00')
-                      AND codigo NOT IN (SELECT codigo FROM indices_inei)
+                    WHERE serie=? AND codigo NOT IN ('00')
+                      AND codigo NOT IN (
+                          SELECT codigo FROM indices_inei WHERE serie=?)
                     GROUP BY codigo
                  )
-                GROUP BY codigo ORDER BY codigo"""
+                GROUP BY codigo ORDER BY codigo""", (serie, serie, serie)
         ).fetchall()
     finally:
         if own:
@@ -380,7 +471,7 @@ def codigos_huerfanos(conn=None) -> list[dict]:
 
 
 # ── Listados ─────────────────────────────────────────────────────────────────
-def listar_indices(conn=None) -> list[dict]:
+def listar_indices(conn=None, serie: str = SERIE_ACTUAL) -> list[dict]:
     """Devuelve el catálogo con el último valor cargado (de cualquier área)."""
     own = conn is None
     if own:
@@ -389,31 +480,34 @@ def listar_indices(conn=None) -> list[dict]:
     rows = conn.execute(
         """SELECT i.codigo, i.nombre, i.activo,
                   (SELECT COUNT(DISTINCT anio || '-' || mes || '-' || area)
-                   FROM indices_inei_valores v WHERE v.codigo = i.codigo)
+                   FROM indices_inei_valores v
+                   WHERE v.codigo = i.codigo AND v.serie = i.serie)
                   AS n_valores,
                   (SELECT anio || '-' || PRINTF('%02d', mes)
-                   FROM indices_inei_valores v WHERE v.codigo = i.codigo
+                   FROM indices_inei_valores v
+                   WHERE v.codigo = i.codigo AND v.serie = i.serie
                    ORDER BY anio DESC, mes DESC LIMIT 1)
                   AS ultimo_periodo,
                   (SELECT valor FROM indices_inei_valores v
-                   WHERE v.codigo = i.codigo
+                   WHERE v.codigo = i.codigo AND v.serie = i.serie
                    ORDER BY anio DESC, mes DESC LIMIT 1)
                   AS ultimo_valor
-           FROM indices_inei i ORDER BY i.codigo"""
+           FROM indices_inei i WHERE i.serie=? ORDER BY i.codigo""", (serie,)
     ).fetchall()
     if own:
         conn.close()
     return [dict(r) for r in rows]
 
 
-def listar_areas(conn=None) -> list[dict]:
-    """Devuelve la lista de áreas geográficas."""
+def listar_areas(conn=None, serie: str = SERIE_ACTUAL) -> list[dict]:
+    """Las áreas geográficas de la serie: 6 en la de 1992, 13 en la de 2025."""
     own = conn is None
     if own:
         conn = get_db()
     asegurar_seed(conn)
     rows = conn.execute(
-        "SELECT codigo, nombre, orden FROM indices_inei_areas ORDER BY orden"
+        "SELECT codigo, nombre, orden FROM indices_inei_areas "
+        "WHERE serie=? ORDER BY orden", (serie,)
     ).fetchall()
     if own:
         conn.close()
@@ -421,28 +515,34 @@ def listar_areas(conn=None) -> list[dict]:
 
 
 def obtener_valor(codigo: str, anio: int, mes: int,
-                  area: str = '01') -> float | None:
-    """Devuelve el valor del índice para (codigo, anio, mes, area) o None."""
+                  area: str = '01', serie: str | None = None) -> float | None:
+    """Valor de un índice en un período. La serie se deduce de la fecha.
+
+    Deducirla acá es lo que impide el error silencioso de leer un período de
+    2024 contra la base Diciembre 2025.
+    """
+    serie = serie or serie_de(anio, mes)
     conn = get_db()
     try:
         row = conn.execute(
             "SELECT valor FROM indices_inei_valores "
-            "WHERE codigo=? AND anio=? AND mes=? AND area=?",
-            (codigo, anio, mes, area)
+            "WHERE codigo=? AND serie=? AND anio=? AND mes=? AND area=?",
+            (str(codigo), serie, int(anio), int(mes), str(area))
         ).fetchone()
-        return row['valor'] if row else None
     finally:
         conn.close()
+    return row['valor'] if row else None
 
 
-def obtener_matriz(codigo: str, area: str = '01') -> dict[int, dict[int, float]]:
-    """Devuelve un dict {anio: {mes: valor}} con toda la serie del índice."""
+def obtener_matriz(codigo: str, area: str = '01',
+                   serie: str = SERIE_ACTUAL) -> dict[int, dict[int, float]]:
+    """Histórico de un índice como {año: {mes: valor}}."""
     conn = get_db()
     try:
         rows = conn.execute(
             "SELECT anio, mes, valor FROM indices_inei_valores "
-            "WHERE codigo=? AND area=? ORDER BY anio, mes",
-            (codigo, area)
+            "WHERE codigo=? AND serie=? AND area=? ORDER BY anio, mes",
+            (str(codigo), serie, str(area))
         ).fetchall()
     finally:
         conn.close()
@@ -454,14 +554,15 @@ def obtener_matriz(codigo: str, area: str = '01') -> dict[int, dict[int, float]]
 
 # ── Persistencia ─────────────────────────────────────────────────────────────
 def guardar_valor(codigo: str, anio: int, mes: int, valor: float,
-                  area: str = '01') -> None:
-    """Inserta o reemplaza un valor."""
+                  area: str = '01', serie: str | None = None) -> None:
+    """Inserta o reemplaza un valor. La serie sale de la fecha si no se indica."""
+    serie = serie or serie_de(anio, mes)
     conn = get_db()
     try:
         conn.execute(
             "INSERT OR REPLACE INTO indices_inei_valores "
-            "(codigo, anio, mes, area, valor) VALUES (?,?,?,?,?)",
-            (codigo, int(anio), int(mes), area, float(valor))
+            "(codigo, serie, anio, mes, area, valor) VALUES (?,?,?,?,?,?)",
+            (codigo, serie, int(anio), int(mes), area, float(valor))
         )
         conn.commit()
     finally:
@@ -469,7 +570,7 @@ def guardar_valor(codigo: str, anio: int, mes: int, valor: float,
 
 
 def guardar_valores(rows: list[dict]) -> tuple[int, int]:
-    """Batch upsert. ``rows`` es lista de dicts con codigo/anio/mes/area/valor.
+    """Batch upsert. ``rows`` lleva codigo/anio/mes/area/valor y opcional serie.
     Retorna (n_insertados_o_actualizados, n_ignorados_por_error)."""
     conn = get_db()
     ok = 0
@@ -477,14 +578,18 @@ def guardar_valores(rows: list[dict]) -> tuple[int, int]:
     try:
         # Alta automática de los códigos que el catálogo aún no tenga: esta
         # tabla no tiene clave foránea, así que sin esto los valores entraban
-        # pero el índice quedaba invisible en la lista (que sale de
-        # `indices_inei`). Es el caso de los códigos > 80 del archivo oficial.
-        asegurar_codigos(
-            {str(r.get('codigo') or '').strip() for r in rows},
-            {str(r.get('codigo') or '').strip().zfill(2): r.get('nombre')
-             for r in rows if r.get('nombre')},
-            conn,
-        )
+        # pero el índice quedaba invisible en la lista.
+        por_serie: dict[str, set] = {}
+        nombres_por_serie: dict[str, dict] = {}
+        for r in rows:
+            cod = str(r.get('codigo') or '').strip().zfill(2)
+            s = r.get('serie') or serie_de(r.get('anio'), r.get('mes'))
+            por_serie.setdefault(s, set()).add(cod)
+            if r.get('nombre'):
+                nombres_por_serie.setdefault(s, {})[cod] = r['nombre']
+        for s, cods in por_serie.items():
+            asegurar_codigos(cods, nombres_por_serie.get(s, {}), conn, serie=s)
+
         for r in rows:
             try:
                 codigo = str(r.get('codigo') or '').strip().zfill(2)[:2]
@@ -492,13 +597,14 @@ def guardar_valores(rows: list[dict]) -> tuple[int, int]:
                 mes = int(r.get('mes') or 0)
                 area = str(r.get('area') or '01')
                 valor = float(r.get('valor') or 0)
+                serie = r.get('serie') or serie_de(anio, mes)
                 if not codigo or anio < 1900 or not (1 <= mes <= 12) or valor <= 0:
                     err += 1
                     continue
                 conn.execute(
                     "INSERT OR REPLACE INTO indices_inei_valores "
-                    "(codigo, anio, mes, area, valor) VALUES (?,?,?,?,?)",
-                    (codigo, anio, mes, area, valor)
+                    "(codigo, serie, anio, mes, area, valor) VALUES (?,?,?,?,?,?)",
+                    (codigo, serie, anio, mes, area, valor)
                 )
                 ok += 1
             except Exception:
@@ -509,13 +615,15 @@ def guardar_valores(rows: list[dict]) -> tuple[int, int]:
     return ok, err
 
 
-def eliminar_valor(codigo: str, anio: int, mes: int, area: str = '01') -> None:
+def eliminar_valor(codigo: str, anio: int, mes: int, area: str = '01',
+                   serie: str | None = None) -> None:
+    serie = serie or serie_de(anio, mes)
     conn = get_db()
     try:
         conn.execute(
             "DELETE FROM indices_inei_valores "
-            "WHERE codigo=? AND anio=? AND mes=? AND area=?",
-            (codigo, anio, mes, area)
+            "WHERE codigo=? AND serie=? AND anio=? AND mes=? AND area=?",
+            (codigo, serie, anio, mes, area)
         )
         conn.commit()
     finally:
@@ -563,8 +671,183 @@ def _parse_mes(texto) -> int | None:
     return None
 
 
+def _parse_hoja_periodo(nombre: str):
+    """(anio, mes) del nombre de una hoja del archivo INEI, o None.
+
+    Las hojas se llaman «Ene_2026», «Abr_2021», «Dic-2025»… y conviven con
+    hojas que NO son meses («Relación de Indices», «Diccionario Alfabetico»,
+    «Mano_de_obra_2026»), que hay que saltar.
+    """
+    import re as _re
+    s = str(nombre or '').strip()
+    m = _re.match(r'^\s*([A-Za-zÁÉÍÓÚáéíóú]{3,12})[\s_\-.]+(\d{4})\s*$', s)
+    if not m:
+        return None
+    mes = _parse_mes(m.group(1))
+    if not mes:
+        return None
+    return int(m.group(2)), mes
+
+
+def _bloques_de_areas(fila) -> list[tuple[int, dict[int, str]]]:
+    """Localiza los bloques «Cód. | 1 | 2 | …» de una fila de encabezado.
+
+    El archivo del INEI pone DOS tablas lado a lado —códigos impares a la
+    izquierda, pares a la derecha— y cada una lleva sus columnas de áreas
+    numeradas 1..6 (base 1992) o 1..13 (base 2025).
+
+    Devuelve [(col_del_codigo, {col_valor: codigo_de_area})].
+    """
+    bloques = []
+    actual = None
+    for j, val in enumerate(fila):
+        if val is None:
+            continue
+        s = str(val).strip().lower().rstrip('.')
+        if s.startswith('cod') or s.startswith('cód'):
+            actual = (j, {})
+            bloques.append(actual)
+            continue
+        if actual is None:
+            continue
+        try:
+            n = int(float(str(val).strip()))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= n <= 20:
+            actual[1][j] = f"{n:02d}"
+    return [b for b in bloques if b[1]]
+
+
+def _serie_del_libro(wb) -> str | None:
+    """Lee la base declarada en la cabecera: «(Base : Diciembre 2025 = 100)»."""
+    for ws in list(wb.worksheets)[:3]:
+        for row in ws.iter_rows(values_only=True, max_row=8):
+            for v in row:
+                if v is None:
+                    continue
+                t = str(v).lower()
+                if 'base' in t:
+                    if '2025' in t:
+                        return SERIE_2025
+                    if '1992' in t:
+                        return SERIE_1992
+    return None
+
+
+def _importar_oficial(wb, serie_forzada: str | None = None) -> dict | None:
+    """Lee el archivo del INEI con su estructura real. None si no es ese formato.
+
+    Estructura: UNA HOJA POR MES, y dentro cada columna es un ÁREA GEOGRÁFICA.
+    El lector anterior hacía justo lo contrario —tomaba `wb.active` y trataba
+    los números 1..6 del encabezado como MESES—, así que de un archivo de 111
+    hojas sacaba una sola, mezclaba las áreas de dos índices distintos como si
+    fueran los 12 meses de uno, y lo guardaba todo bajo el área que el usuario
+    hubiera elegido en el combo. Los valores con los que se calculaba K eran
+    inventados.
+    """
+    serie = serie_forzada or _serie_del_libro(wb) or SERIE_ACTUAL
+    rows_out: list[dict] = []
+    ignorados = 0
+    codigos: set[str] = set()
+    hojas = 0
+
+    for ws in wb.worksheets:
+        per = _parse_hoja_periodo(ws.title)
+        if not per:
+            continue
+        anio, mes = per
+        datos = list(ws.iter_rows(values_only=True))
+        bloques = None
+        for fila in datos[:20]:
+            b = _bloques_de_areas(fila)
+            if b and sum(len(x[1]) for x in b) >= 4:
+                bloques = b
+                break
+        if not bloques:
+            continue
+        hojas += 1
+        for fila in datos:
+            for col_cod, cols_area in bloques:
+                if col_cod >= len(fila):
+                    continue
+                cod_raw = fila[col_cod]
+                if cod_raw is None:
+                    continue
+                s = str(cod_raw).strip().replace('.0', '')
+                if not s.isdigit() or not (1 <= int(s) <= 99):
+                    continue
+                codigo = s.zfill(2)
+                for col, area in cols_area.items():
+                    if col >= len(fila):
+                        continue
+                    v = fila[col]
+                    if v is None or str(v).strip() in ('', '(*)', '*'):
+                        continue          # «(*) Sin índice» — no es un cero
+                    try:
+                        f = float(v)
+                    except (TypeError, ValueError):
+                        ignorados += 1
+                        continue
+                    if f <= 0:
+                        ignorados += 1
+                        continue
+                    rows_out.append({'codigo': codigo, 'serie': serie,
+                                     'anio': anio, 'mes': mes,
+                                     'area': area, 'valor': f})
+                    codigos.add(codigo)
+
+    if not rows_out:
+        return None
+    periodos = {(r['anio'], r['mes']) for r in rows_out}
+    areas = {r['area'] for r in rows_out}
+    return {
+        'ok': True,
+        'formato': 'oficial',
+        'serie': serie,
+        'msg': (f"Archivo oficial del INEI ({serie_nombre(serie)}): "
+                f"{len(rows_out)} valores · {len(codigos)} índices · "
+                f"{len(periodos)} meses · {len(areas)} áreas."),
+        'rows': rows_out,
+        'ignorados': ignorados,
+        'anio_detectado': max(a for a, _ in periodos),
+        'codigos_encontrados': codigos,
+        'nombres_encontrados': _relacion_del_libro(wb),
+        'hojas': hojas,
+        'periodos': len(periodos),
+        'areas': sorted(areas),
+    }
+
+
+def _relacion_del_libro(wb) -> dict[str, str]:
+    """La hoja «Relación de Índices» del propio archivo, si viene."""
+    import re as _re
+    for ws in wb.worksheets:
+        if 'relaci' not in ws.title.lower():
+            continue
+        out = {}
+        for row in ws.iter_rows(values_only=True):
+            c = list(row) + [None] * 8
+            for a, b in ((0, 1), (1, 2), (2, 3), (4, 5)):
+                cod, nom = c[a], c[b]
+                if cod is None or nom is None:
+                    continue
+                s = str(cod).strip().replace('.0', '')
+                if _re.fullmatch(r'\d{1,3}', s):
+                    n = ' '.join(str(nom).split())
+                    if n and not _re.fullmatch(r'[\d.,]+', n):
+                        out[s.zfill(2)] = _re.sub(r'\s*\([a-z]\)\s*$', '', n)
+        if out:
+            return out
+    return {}
+
+
+def serie_nombre(serie: str) -> str:
+    return dict(series_disponibles()).get(serie, serie)
+
+
 def _nombre_en_fila(row, cod_str: str, codigo_col: int, mes_cols: dict) -> str:
-    """Saca la descripción del índice de una fila del archivo del INEI.
+    """Saca la descripción del índice de una fila con formato libre.
 
     Dos formas, en orden: pegada al código en la misma celda ('85 - CABLE…')
     o en alguna columna de texto que no sea de meses.
@@ -583,18 +866,20 @@ def _nombre_en_fila(row, cod_str: str, codigo_col: int, mes_cols: dict) -> str:
 
 
 def importar_excel_inei(filepath: str, area: str = '01',
-                        anio_override: int | None = None) -> dict:
-    """Importa valores desde un Excel publicado por INEI.
+                        anio_override: int | None = None,
+                        serie: str | None = None) -> dict:
+    """Importa valores de índices desde un Excel.
 
-    Detecta automáticamente la orientación (índices en filas o columnas) y
-    parsea encabezados de mes en español/inglés. Asume todos los valores son
-    del mismo año (se infiere de un header tipo "Enero 2026" o se usa
-    ``anio_override``).
+    Dos formatos, en orden:
 
-    Retorna dict::
+    1. **El archivo oficial del INEI** — una hoja por mes y las columnas son
+       ÁREAS GEOGRÁFICAS. Se leen todas las hojas y todas las áreas de una sola
+       vez, y la serie sale de la base declarada en la cabecera.
+    2. **Una planilla libre** — una hoja y las columnas son MESES. Es lo que
+       arma un usuario a mano; ahí sí hace falta indicar el `area`.
 
-        {'ok': bool, 'msg': str, 'rows': [...], 'ignorados': int,
-         'anio_detectado': int|None, 'codigos_encontrados': set}
+    Distinguirlos importa: el lector anterior aplicaba SIEMPRE el criterio 2, y
+    con el archivo oficial eso significa leer las áreas como si fueran meses.
     """
     try:
         import openpyxl
@@ -608,6 +893,16 @@ def importar_excel_inei(filepath: str, area: str = '01',
         return {'ok': False, 'msg': f"No se pudo abrir: {e}",
                 'rows': [], 'ignorados': 0}
 
+    oficial = _importar_oficial(wb, serie)
+    if oficial:
+        return oficial
+
+    return _importar_libre(wb, area, anio_override, serie)
+
+
+def _importar_libre(wb, area: str, anio_override: int | None,
+                    serie: str | None) -> dict:
+    """Planilla de formato libre: una sola hoja y las columnas son meses."""
     ws = wb.active
     data = list(ws.iter_rows(values_only=True))
     if not data:
@@ -706,6 +1001,7 @@ def importar_excel_inei(filepath: str, area: str = '01',
             rows_out.append({
                 'codigo': codigo, 'anio': anio_detectado,
                 'mes': mes, 'area': area, 'valor': f,
+                'serie': serie or serie_de(anio_detectado, mes),
                 'nombre': nombres_encontrados.get(codigo, ''),
             })
             codigos_encontrados.add(codigo)

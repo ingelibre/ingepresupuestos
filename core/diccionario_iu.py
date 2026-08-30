@@ -54,6 +54,7 @@ def resumen(conn=None) -> list[dict]:
     if own:
         conn = get_db()
     try:
+        from core.indices_inei import SERIE_ACTUAL
         rows = conn.execute(
             """SELECT COALESCE(NULLIF(r.indice_inei,''), '—') AS codigo,
                       COALESCE(i.nombre, '') AS nombre,
@@ -61,9 +62,10 @@ def resumen(conn=None) -> list[dict]:
                       SUM(COALESCE(r.precio, 0)) AS valor,
                       (i.codigo IS NOT NULL) AS en_catalogo
                  FROM recursos r
-                 LEFT JOIN indices_inei i ON i.codigo = r.indice_inei
+                 LEFT JOIN indices_inei i
+                        ON i.codigo = r.indice_inei AND i.serie = ?
                 GROUP BY 1, 2, 5
-                ORDER BY n_insumos DESC"""
+                ORDER BY n_insumos DESC""", (SERIE_ACTUAL,)
         ).fetchall()
     finally:
         if own:
@@ -146,8 +148,10 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
             "  AND COALESCE(descripcion,'') <> ''"
         ).fetchall()
         pendientes = insumos_sin_indice(limite, conn)
+        from core.indices_inei import SERIE_ACTUAL
         nombres = dict(conn.execute(
-            "SELECT codigo, nombre FROM indices_inei").fetchall())
+            "SELECT codigo, nombre FROM indices_inei WHERE serie=?",
+            (SERIE_ACTUAL,)).fetchall())
     finally:
         if own:
             conn.close()
@@ -255,8 +259,10 @@ def exportar(filepath: str) -> int:
             "WHERE COALESCE(indice_inei,'') NOT IN ('', '00') "
             "  AND COALESCE(descripcion,'') <> ''"
         ).fetchall()
+        from core.indices_inei import SERIE_ACTUAL
         catalogo = [dict(r) for r in conn.execute(
-            "SELECT codigo, nombre FROM indices_inei ORDER BY codigo")]
+            "SELECT codigo, nombre FROM indices_inei WHERE serie=? "
+            "ORDER BY codigo", (SERIE_ACTUAL,))]
     finally:
         conn.close()
 

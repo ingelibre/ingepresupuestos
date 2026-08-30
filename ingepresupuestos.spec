@@ -48,6 +48,10 @@ datas = [
     ('ingepresupuesto-icon.svg',             '.'),
     # Base UBIGEO del Perú (INEI) para autocompletar la ubicación.
     ('resources/ubigeo_peru.json',           'resources'),
+    # Anexos de la RJ 016-2026-INEI: relación de índices unificados de las
+    # dos bases, sus áreas geográficas y el Diccionario de Elementos de la
+    # Construcción para fórmulas polinómicas.
+    ('resources/indices_inei_oficial.json',  'resources'),
     # Mapa QML (QtLocation/OSM) para marcar la ubicación del proyecto.
     ('resources/map.qml',                    'resources'),
     # Repositorio de proveedores de tiles propio (calle OSM + satélite Esri,

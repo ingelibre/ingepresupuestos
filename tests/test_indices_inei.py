@@ -58,14 +58,44 @@ def _crudo(sql, params=()):
 
 
 # ── La lista que se enviaba ──────────────────────────────────────────────────
-def test_la_semilla_son_72_entradas_con_huecos():
-    """Eran 72, no 80. El comentario decía 80 y los docs decían 72."""
+def test_las_dos_series_conviven_con_sus_propias_areas():
+    """La RJ 016-2026-INEI cambió la base: 6 áreas y 68 índices pasan a 13 y 77.
+
+    Las dos series tienen que coexistir; una fórmula de 2024 se lee con la
+    tabla vieja y una de 2026 con la nueva.
+    """
     I = _preparar()
-    cods = [c for c, _ in I.CATALOGO_INEI]
-    assert len(cods) == 72, f"la semilla cambió de tamaño: {len(cods)}"
-    assert max(int(c) for c in cods) == 80
-    huecos = sorted(set(range(1, 81)) - {int(c) for c in cods})
-    assert huecos == [25, 35, 36, 58, 63, 67, 75, 76], huecos
+    assert len(I.catalogo(serie=I.SERIE_2025)) >= 77
+    assert len(I.listar_areas(serie=I.SERIE_2025)) == 13
+    assert len(I.listar_areas(serie=I.SERIE_1992)) == 6
+    # la serie histórica conserva los códigos descontinuados que la nueva no trae
+    viejos = dict(I.catalogo(serie=I.SERIE_1992))
+    assert '22' in viejos, "se perdió el Cemento Portland Tipo II histórico"
+
+
+def test_el_mismo_codigo_significa_cosas_distintas_en_cada_serie():
+    """El 21 era «Cemento Portland Tipo I» y ahora absorbió al 22 y al 23."""
+    I = _preparar()
+    n92 = dict(I.catalogo(serie=I.SERIE_1992)).get('21', '')
+    n25 = dict(I.catalogo(serie=I.SERIE_2025)).get('21', '')
+    assert n92 and n25 and n92 != n25, (n92, n25)
+
+
+def test_la_serie_sale_de_la_fecha():
+    """Diciembre de 2025 es el corte: antes 1992, desde ahí 2025."""
+    I = _preparar()
+    assert I.serie_de(2025, 11) == I.SERIE_1992
+    assert I.serie_de(2025, 12) == I.SERIE_2025
+    assert I.serie_de(2026, 3) == I.SERIE_2025
+
+
+def test_el_diccionario_oficial_viene_empaquetado():
+    """Anexo 2 de la resolución: ~1930 elementos con su índice unificado."""
+    I = _preparar()
+    d = I.diccionario_oficial()
+    assert len(d) > 1500, f"solo {len(d)} entradas"
+    assert set(d.values()) <= set(dict(I.catalogo(serie=I.SERIE_2025))), \
+        "el diccionario apunta a índices que no están en la relación"
 
 
 def test_el_catalogo_tiene_un_solo_dueno():
@@ -102,20 +132,23 @@ def test_crear_acepta_un_codigo_sin_cero_a_la_izquierda():
 
 
 def test_crear_editar_eliminar():
+    """CRUD sobre la serie histórica, donde el 90-99 está libre entero."""
     I = _preparar()
-    I.crear_indice('91', 'Índice de prueba')
-    assert ('91', 'Índice de prueba') in I.catalogo()
-    I.actualizar_indice('91', nombre='Renombrado')
-    assert ('91', 'Renombrado') in I.catalogo()
-    I.eliminar_indice('91')
-    assert '91' not in dict(I.catalogo())
+    S = I.SERIE_1992
+    I.crear_indice('90', 'Índice de prueba', serie=S)
+    assert ('90', 'Índice de prueba') in I.catalogo(serie=S)
+    I.actualizar_indice('90', nombre='Renombrado', serie=S)
+    assert ('90', 'Renombrado') in I.catalogo(serie=S)
+    I.eliminar_indice('90', serie=S)
+    assert '90' not in dict(I.catalogo(serie=S))
 
 
 def test_no_se_puede_duplicar_un_codigo():
     I = _preparar()
-    I.crear_indice('92', 'Uno')
+    S = I.SERIE_1992
+    I.crear_indice('91', 'Uno', serie=S)
     try:
-        I.crear_indice('92', 'Otro')
+        I.crear_indice('91', 'Otro', serie=S)
     except ValueError:
         return
     raise AssertionError("dejó crear dos veces el mismo código")
@@ -123,8 +156,9 @@ def test_no_se_puede_duplicar_un_codigo():
 
 def test_nombre_vacio_se_rechaza():
     I = _preparar()
-    for fn in (lambda: I.crear_indice('93', '   '),
-               lambda: I.actualizar_indice('01', nombre='')):
+    S = I.SERIE_1992
+    for fn in (lambda: I.crear_indice('92', '   ', serie=S),
+               lambda: I.actualizar_indice('01', nombre='', serie=S)):
         try:
             fn()
         except ValueError:
@@ -134,10 +168,11 @@ def test_nombre_vacio_se_rechaza():
 
 def test_desactivar_lo_saca_del_catalogo_pero_no_de_la_tabla():
     I = _preparar()
-    I.crear_indice('94', 'Desactivable')
-    I.actualizar_indice('94', activo=False)
-    assert '94' not in dict(I.catalogo())
-    assert '94' in dict(I.catalogo(incluir_inactivos=True))
+    S = I.SERIE_1992
+    I.crear_indice('93', 'Desactivable', serie=S)
+    I.actualizar_indice('93', activo=False, serie=S)
+    assert '93' not in dict(I.catalogo(serie=S))
+    assert '93' in dict(I.catalogo(incluir_inactivos=True, serie=S))
 
 
 # ── La resurrección ──────────────────────────────────────────────────────────
@@ -177,34 +212,46 @@ def test_la_semilla_respeta_un_renombre():
 
 # ── Lo que hacía inservible la importación oficial ───────────────────────────
 def test_guardar_valores_da_de_alta_el_codigo_que_no_estaba():
-    """El archivo del INEI trae códigos > 80; antes entraban invisibles."""
+    """El archivo del INEI trae códigos nuevos; antes entraban invisibles."""
     I = _preparar()
-    assert '85' not in dict(I.catalogo())
+    assert '97' not in dict(I.catalogo(serie=I.SERIE_1992))
     ok, err = I.guardar_valores([
-        {'codigo': '85', 'anio': 2026, 'mes': 3, 'area': '01', 'valor': 123.45,
+        {'codigo': '97', 'anio': 2020, 'mes': 3, 'area': '01', 'valor': 123.45,
          'nombre': 'Índice nuevo del INEI'},
     ])
     assert ok == 1 and err == 0, (ok, err)
-    cat = dict(I.catalogo())
-    assert '85' in cat, "el valor entró pero el índice siguió invisible"
-    assert cat['85'] == 'Índice nuevo del INEI'
-    assert I.obtener_valor('85', 2026, 3) == 123.45
+    cat = dict(I.catalogo(serie=I.SERIE_1992))
+    assert '97' in cat, "el valor entró pero el índice siguió invisible"
+    assert cat['97'] == 'Índice nuevo del INEI'
+    assert I.obtener_valor('97', 2020, 3) == 123.45
 
 
 def test_el_alta_automatica_usa_nombre_provisional_si_no_viene():
     I = _preparar()
     I.guardar_valores([
-        {'codigo': '86', 'anio': 2026, 'mes': 4, 'area': '01', 'valor': 100.0},
+        {'codigo': '94', 'anio': 2020, 'mes': 4, 'area': '01', 'valor': 100.0},
     ])
-    assert dict(I.catalogo())['86'] == 'Índice 86'
+    assert dict(I.catalogo(serie=I.SERIE_1992))['94'] == 'Índice 94'
 
 
 # ── Huérfanos: códigos usados que el catálogo no define ──────────────────────
-def test_codigos_huerfanos_encuentra_los_de_la_biblioteca_semilla():
-    """La propia semilla trae insumos con IU que el catálogo no tenía."""
+def test_codigos_huerfanos_encuentra_los_que_el_catalogo_no_define():
+    """Un insumo que apunta a un código inexistente tiene que salir a la luz.
+
+    Pasa de verdad: la biblioteca semilla trae insumos con códigos que el
+    catálogo no definía, y con el cambio de base pasa más —el 22 y el 23
+    existen en la serie 1992 y desaparecieron en la de 2025.
+    """
     I = _preparar()
-    codigos = {h['codigo'] for h in I.codigos_huerfanos()}
-    assert '99' in codigos, f"no detectó el 99: {sorted(codigos)}"
+    rid = _crudo("SELECT id FROM recursos LIMIT 1")[0][0]
+    conn = d.get_db()
+    conn.execute("UPDATE recursos SET indice_inei='73' WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    assert '73' not in dict(I.catalogo(serie=I.SERIE_2025)), \
+        "el 73 dejó de ser un hueco de la numeración"
+    codigos = {h['codigo'] for h in I.codigos_huerfanos(serie=I.SERIE_2025)}
+    assert '73' in codigos, f"no detectó el huérfano: {sorted(codigos)}"
 
 
 def test_codigos_huerfanos_ignora_el_centinela_00():
@@ -225,25 +272,27 @@ def test_dar_de_alta_los_huerfanos_los_saca_de_la_lista():
 def test_eliminar_un_indice_no_toca_los_insumos():
     """Se enumeran en el aviso, pero conservan su código: reasignar es del usuario."""
     I = _preparar()
-    I.crear_indice('95', 'Con insumos')
+    S = I.SERIE_1992
+    I.crear_indice('95', 'Con insumos', serie=S)
     conn = d.get_db()
     conn.execute("UPDATE recursos SET indice_inei='95' "
                  "WHERE id IN (SELECT id FROM recursos LIMIT 3)")
     conn.commit()
     conn.close()
-    usos = I.contar_usos('95')
+    usos = I.contar_usos('95', serie=S)
     assert usos['recursos'] == 3, usos
-    I.eliminar_indice('95')
+    I.eliminar_indice('95', serie=S)
     quedan = _crudo("SELECT COUNT(*) FROM recursos WHERE indice_inei='95'")[0][0]
     assert quedan == 3, "el borrado del catálogo se llevó los insumos"
 
 
 def test_eliminar_puede_llevarse_el_historico_si_se_pide():
     I = _preparar()
-    I.crear_indice('96', 'Con histórico')
-    I.guardar_valor('96', 2026, 1, 50.0)
-    assert I.contar_usos('96')['valores'] == 1
-    I.eliminar_indice('96', borrar_valores=True)
+    S = I.SERIE_1992
+    I.crear_indice('96', 'Con histórico', serie=S)
+    I.guardar_valor('96', 2020, 1, 50.0)
+    assert I.contar_usos('96', serie=S)['valores'] == 1
+    I.eliminar_indice('96', borrar_valores=True, serie=S)
     assert _crudo("SELECT COUNT(*) FROM indices_inei_valores "
                   "WHERE codigo='96'")[0][0] == 0
 
