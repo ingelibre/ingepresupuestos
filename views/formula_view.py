@@ -40,6 +40,7 @@ from core.formula_polinomica import (
     calcular_por_iu, cargar_componentes, recalcular_coeficientes,
     aplica_formula, listar_formulas, crear_formula, renombrar_formula,
     eliminar_formula, asignar_subpresupuestos, MAX_FORMULAS, desglose_de_iu,
+    incidencias_por_iu,
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
@@ -70,6 +71,149 @@ RED_SOFT     = C.error_soft
 RED_DARK     = C.error_dark
 BLUE_700     = C.info
 PAGE_BG      = "#EEF2F7"   # se ve en los tiradores de los splitters
+
+
+class IndicesDelProyectoDialog(QDialog):
+    """Todos los índices unificados del proyecto, con su incidencia y monomio.
+
+    Es el «cuadro de agrupamiento» que se mira antes de decidir la fórmula: qué
+    índices tiene la obra, cuánto pesa cada uno y en qué monomio quedó. La
+    tarjeta de Composición contesta lo mismo pero monomio por monomio; acá se
+    ve todo junto, que es lo que hace falta para tener perspectiva.
+    """
+
+    def __init__(self, proyecto_id, monomios, moneda='Soles',
+                 formula_id=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Índices unificados del proyecto")
+        self.resize(1040, 620)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 14, 16, 12)
+        v.setSpacing(10)
+
+        inc = incidencias_por_iu(proyecto_id, formula_id=formula_id)
+        ius = inc.get('ius') or []
+        base = inc.get('base') or 0
+
+        # A qué monomio fue a parar cada índice. La clave lleva el TIPO además
+        # del código: el 39 aparece dos veces —una como índice general de los
+        # materiales y otra como el de gastos generales y utilidad— y mapear
+        # solo por código le ponía a los dos el monomio del último.
+        de_monomio = {}
+        for m in monomios:
+            for c in (m.get('componentes') or []):
+                de_monomio[(c.get('codigo'), c.get('tipo'))] = \
+                    m.get('simbolo') or '?'
+
+        sin = inc.get('monto_sin_indice') or 0
+        cab = QLabel(
+            f"<b>{len(ius)}</b> índices · costo directo "
+            f"<b>{fmt(inc.get('cd') or 0, moneda)}</b> · gastos generales y "
+            f"utilidad <b>{fmt(inc.get('gg_utilidad') or 0, moneda)}</b> · "
+            f"base <b>{fmt(base, moneda)}</b>"
+            + (f"<br><span style='color:{ORANGE_DARK}'>{fmt(sin, moneda)} "
+               f"({sin / base * 100:.1f}%) en insumos sin índice propio, "
+               f"contados en el de su tipo</span>" if sin and base else "")
+        )
+        cab.setTextFormat(Qt.RichText)
+        cab.setStyleSheet(f"color:{SLATE_700}; font-size:13px;")
+        v.addWidget(cab)
+
+        self.tbl = QTableWidget(0, 7)
+        self.tbl.setHorizontalHeaderLabels(
+            ["Índice", "Descripción", "Tipo", "Insumos", "Monto",
+             "Incidencia", "Monomio"])
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setAlternatingRowColors(True)
+        self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.setShowGrid(False)
+        self.tbl.setSortingEnabled(False)
+        self.tbl.setStyleSheet(
+            "QTableWidget { background:white; border:1px solid #D4D4D4;"
+            " font-size:12px; }"
+            "QTableWidget::item { padding:4px 6px; }"
+            f"QHeaderView::section {{ background:{SILVER_100};"
+            f" color:{SLATE_500}; padding:6px 8px; border:none;"
+            f" border-bottom:1px solid {SILVER_300};"
+            f" font-size:11px; font-weight:700; }}"
+        )
+        h = self.tbl.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 62)
+        h.setSectionResizeMode(1, QHeaderView.Stretch)
+        for c, w in ((2, 54), (3, 74), (4, 130), (5, 92), (6, 84)):
+            h.setSectionResizeMode(c, QHeaderView.Fixed)
+            h.resizeSection(c, w)
+
+        f_mono = QFont("monospace"); f_mono.setBold(True)
+        for i in ius:
+            r = self.tbl.rowCount()
+            self.tbl.insertRow(r)
+            it_c = QTableWidgetItem(i['codigo'])
+            it_c.setFont(f_mono)
+            it_c.setTextAlignment(Qt.AlignCenter)
+            self.tbl.setItem(r, 0, it_c)
+            self.tbl.setItem(r, 1, QTableWidgetItem(i['nombre']))
+            it_t = QTableWidgetItem(i['tipo'])
+            it_t.setTextAlignment(Qt.AlignCenter)
+            it_t.setForeground(QColor(SLATE_500))
+            self.tbl.setItem(r, 2, it_t)
+            it_n = QTableWidgetItem(str(i['n_insumos'] or '—'))
+            it_n.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            it_n.setForeground(QColor(SLATE_500))
+            self.tbl.setItem(r, 3, it_n)
+            it_m = QTableWidgetItem(fmt(i['monto'], moneda))
+            it_m.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.tbl.setItem(r, 4, it_m)
+            it_i = QTableWidgetItem(f"{i['incidencia'] * 100:.2f}%")
+            it_i.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            f_b = QFont(); f_b.setBold(True)
+            it_i.setFont(f_b)
+            # El 5% del art. 3: por debajo, el índice no puede ser monomio solo.
+            if i['incidencia'] < 0.05:
+                it_i.setForeground(QColor(SLATE_300))
+            self.tbl.setItem(r, 5, it_i)
+            simbolo = de_monomio.get((i['codigo'], i['tipo']), '—')
+            it_s = QTableWidgetItem(simbolo)
+            it_s.setTextAlignment(Qt.AlignCenter)
+            it_s.setFont(f_b)
+            if simbolo == '—':
+                it_s.setForeground(QColor(ORANGE_DARK))
+                it_s.setToolTip("Todavía no está en ningún monomio: "
+                                "auto-calcula la fórmula.")
+            self.tbl.setItem(r, 6, it_s)
+            if not i.get('asignado', True):
+                for c in range(7):
+                    self.tbl.item(r, c).setForeground(QColor(ORANGE_DARK))
+                self.tbl.item(r, 1).setToolTip(
+                    "Parte de este monto viene de insumos sin índice propio, "
+                    "contados en el índice de su tipo.")
+        self.tbl.itemDoubleClicked.connect(self._abrir_desglose)
+        self._pid, self._moneda, self._fid = proyecto_id, moneda, formula_id
+        v.addWidget(self.tbl, 1)
+
+        pie = QLabel(
+            "Ordenado por monto. En ámbar, lo que se apoya en insumos sin "
+            "índice propio. Doble clic en un índice para ver de qué insumos y "
+            "partidas sale su monto."
+        )
+        pie.setWordWrap(True)
+        pie.setStyleSheet(f"color:{SLATE_300}; font-size:11px;")
+        v.addWidget(pie)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Cerrar")
+        bb.rejected.connect(self.accept)
+        bb.accepted.connect(self.accept)
+        v.addWidget(bb)
+
+    def _abrir_desglose(self, item):
+        fila = item.row()
+        cod = self.tbl.item(fila, 0).text()
+        nom = self.tbl.item(fila, 1).text()
+        DesgloseIUDialog(self._pid, cod, nom, self._moneda, self._fid,
+                         self).exec()
 
 
 class DesgloseIUDialog(QDialog):
@@ -335,6 +479,7 @@ class FormulaView(QWidget):
         self._aplica: bool = True      # falso en administración directa
         self._formula_id: int | None = None   # art. 4: hasta 4 por obra
         self._cat_iu: dict | None = None      # códigos → nombre, cacheado
+        self._monomio_activo: int = -1        # el que muestra la Composición
         self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
@@ -437,6 +582,14 @@ class FormulaView(QWidget):
         )
         self.cmb_formula.currentIndexChanged.connect(self._on_formula_change)
         fl.addWidget(self.cmb_formula)
+
+        self.btn_indices = self._btn_barra("Índices del proyecto…",
+                                           "rep-resumen")
+        self.btn_indices.setToolTip(
+            "Todos los índices unificados de la obra, con su incidencia y en "
+            "qué monomio quedaron")
+        self.btn_indices.clicked.connect(self._ver_indices_proyecto)
+        fl.addWidget(self.btn_indices)
 
         self.btn_formulas = self._btn_barra("Fórmulas…")
         self.btn_formulas.setToolTip("Agregar, renombrar o eliminar fórmulas")
@@ -602,21 +755,59 @@ class FormulaView(QWidget):
         return fr
 
     def eventFilter(self, obj, ev):
-        """Impide que la selección de monomios se arrastre con el mouse.
+        """Blinda el monomio activo contra cualquier cosa que mueva el mouse.
 
-        Un micro-arrastre —el botón sigue pulsado una fracción mientras el
-        mouse se mueve— cambiaba la fila seleccionada y con ella la tarjeta de
-        Composición, que saltaba a otro monomio sin que el usuario lo pidiera.
-        El monomio activo solo cambia con un clic deliberado o con el teclado.
+        La tarjeta de Composición NO se pinta desde `currentRow()`: eso lo
+        mueve el arrastre, el hover en algunos entornos y hasta el foco. Se
+        pinta desde `_monomio_activo`, que solo cambia con un clic deliberado o
+        con el teclado — que es lo que pidió el usuario: «debería quedarse fijo
+        al monomio que yo seleccioné».
 
-        Se filtra únicamente el movimiento CON botón pulsado sobre la tabla de
-        monomios: el hover normal, la rueda y el clic siguen pasando.
+        Acá se cortan además los movimientos de mouse CON botón pulsado sobre
+        la tabla, para que ni siquiera la fila resaltada se arrastre.
         """
-        if (obj is self.tbl.viewport()
-                and ev.type() == QEvent.MouseMove
-                and ev.buttons() != Qt.NoButton):
-            return True
+        if obj is self.tbl.viewport():
+            if (ev.type() == QEvent.MouseMove
+                    and ev.buttons() != Qt.NoButton):
+                return True
+        elif obj is self.tbl and ev.type() == QEvent.KeyPress:
+            # Navegar con el teclado SÍ cambia de monomio, pero la fila nueva
+            # se conoce después de que la tabla procese la tecla.
+            if ev.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End,
+                            Qt.Key_PageUp, Qt.Key_PageDown):
+                QTimer.singleShot(0, self._fijar_monomio_actual)
         return super().eventFilter(obj, ev)
+
+    def _fijar_monomio_actual(self):
+        """Fija como activo el monomio de la fila actual y repinta."""
+        self._fijar_monomio(self.tbl.currentRow())
+
+    def _fijar_monomio(self, fila: int):
+        if fila == self._monomio_activo:
+            return
+        self._monomio_activo = fila
+        self._render_composicion()
+
+    def _vigilar_seleccion(self):
+        """Deshace los cambios de selección que no vengan de un clic o del teclado.
+
+        Se aplaza un ciclo de evento: en un clic normal, `itemSelectionChanged`
+        llega ANTES que `clicked`, así que comprobar en el acto desharía la
+        selección legítima. Al correr después, `_monomio_activo` ya está puesto
+        y no hay nada que restaurar.
+        """
+        QTimer.singleShot(0, self._restaurar_seleccion)
+
+    def _restaurar_seleccion(self):
+        activo = self._monomio_activo
+        if not (0 <= activo < self.tbl.rowCount()):
+            return
+        if self.tbl.currentRow() == activo:
+            return
+        self.tbl.blockSignals(True)
+        self.tbl.selectRow(activo)
+        self.tbl.setCurrentCell(activo, 2)
+        self.tbl.blockSignals(False)
 
     def _build_panel_monomios(self) -> QFrame:
         """La tabla de monomios, a sangre. Los botones viven en la barra."""
@@ -649,12 +840,17 @@ class FormulaView(QWidget):
             f"  font-size:11px; font-weight:700; }}"
         )
         self.tbl.itemChanged.connect(self._on_item_changed)
-        # El panel de composición sigue a la fila activa —clic o teclado—, pero
-        # NO al arrastre: eso lo corta el `eventFilter` de más arriba.
-        self.tbl.itemSelectionChanged.connect(self._render_composicion)
-        self.tbl.currentCellChanged.connect(
-            lambda *_: self._render_composicion())
+        # SOLO el clic y el teclado cambian de monomio. Nada de
+        # `itemSelectionChanged` ni `currentCellChanged` a secas: esas señales
+        # también saltan cuando la fila cambia por arrastre o por el foco.
+        self.tbl.clicked.connect(lambda ix: self._fijar_monomio(ix.row()))
+        # Y si algo mueve la selección sin que haya habido un clic —un arrastre
+        # que el compositor entrega raro, un botón que se quedó pulsado, el
+        # foco— se restaura. Es la única manera de garantizar lo que se pidió:
+        # el monomio elegido se queda hasta que se elija otro.
+        self.tbl.itemSelectionChanged.connect(self._vigilar_seleccion)
         self.tbl.viewport().installEventFilter(self)
+        self.tbl.installEventFilter(self)
 
         h = self.tbl.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 36)
@@ -749,6 +945,14 @@ class FormulaView(QWidget):
         self._formula_id = self.cmb_formula.currentData()
         self.cargar()
 
+    def _ver_indices_proyecto(self):
+        """Todos los índices de la obra con su incidencia, para tener el mapa."""
+        IndicesDelProyectoDialog(
+            self.pid, self._monomios,
+            self._proyecto_meta.get('moneda', 'Soles'),
+            self._formula_id, self,
+        ).exec()
+
     def _gestionar_formulas(self):
         """Alta, renombrado, baja y subpresupuestos de cada fórmula."""
         dlg = FormulasDialog(self.pid, self)
@@ -772,10 +976,7 @@ class FormulaView(QWidget):
             return
 
         self.tbl_comp.setRowCount(0)
-        fila = self.tbl.currentRow()
-        if fila < 0:
-            filas = {i.row() for i in self.tbl.selectedIndexes()}
-            fila = min(filas) if filas else -1
+        fila = self._monomio_activo
         if fila < 0 or fila >= len(self._monomios):
             self.lbl_comp_titulo.setText("Composición del monomio")
             self.lbl_comp_badge.setText("")
@@ -903,9 +1104,8 @@ class FormulaView(QWidget):
                     else f"{principal.get('nombre', '')} y {len(cs) - 1} más"
                 )
         recalcular_coeficientes(self._monomios, self._cd)
+        self._monomio_activo = destino
         self._render_tabla()
-        self.tbl.selectRow(destino)
-        self._render_composicion()
 
     # ── panel "Cálculo de Reajuste K" ───────────────────────────────────────
     def _build_panel_reajuste(self) -> QFrame:
@@ -1163,6 +1363,14 @@ class FormulaView(QWidget):
         for i, m in enumerate(self._monomios):
             self._add_row(i, m)
         self.tbl.blockSignals(False)
+        if self._monomio_activo >= len(self._monomios):
+            self._monomio_activo = len(self._monomios) - 1
+        if self._monomio_activo < 0 and self._monomios:
+            self._monomio_activo = 0
+        if 0 <= self._monomio_activo < self.tbl.rowCount():
+            self.tbl.blockSignals(True)
+            self.tbl.selectRow(self._monomio_activo)
+            self.tbl.blockSignals(False)
         self._actualizar_totales()
         self._render_expr()
         self._render_composicion()
@@ -1517,7 +1725,9 @@ class FormulaView(QWidget):
         self._render_tabla()
         self._actualizar_panel_acu()
         if self._monomios:
+            self._fijar_monomio(0)
             self.tbl.selectRow(0)
+        self._calcular_k()
 
     def _actualizar_panel_acu(self):
         """Resumen del reparto, en una línea del pie.
@@ -1557,6 +1767,7 @@ class FormulaView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{e}")
             return
+        self._calcular_k()
         QMessageBox.information(
             self, "Guardado",
             f"Fórmula polinómica guardada ({len(self._monomios)} monomios)."
@@ -1663,7 +1874,8 @@ class FormulaView(QWidget):
             self.lbl_k_badge.setText("K = —")
             self.lbl_k_grande.setText("K = —")
             self.lbl_alerta_k.setText(
-                "No hay monomios definidos. Crea o auto-calcula la fórmula primero."
+                "No hay monomios definidos. Crea o auto-calcula la fórmula "
+                "primero."
             )
             return
 
@@ -1685,7 +1897,25 @@ class FormulaView(QWidget):
             oferta_anio=oa, oferta_mes=om,
             reajuste_anio=ra, reajuste_mes=rm,
             area_inei=area,
+            formula_id=self._formula_id,
         )
+
+        # K se calcula sobre los monomios GUARDADOS. Si la fórmula está recién
+        # auto-calculada y sin guardar, no hay nada que leer y antes quedaba en
+        # pantalla el aviso viejo —«No hay monomios definidos»— con los
+        # monomios a la vista, que es desconcertante.
+        if not r.get('ok') or not r['detalle']:
+            self.tbl_k.setRowCount(0)
+            self.lbl_k_badge.setText("K = —")
+            self.lbl_k_grande.setText("K = —")
+            self.lbl_alerta_k.setText(
+                r.get('msg') or
+                ("La fórmula todavía no está guardada: pulsa «Guardar» para "
+                 "calcular K." if self._monomios else
+                 "No hay monomios definidos. Crea o auto-calcula la fórmula "
+                 "primero.")
+            )
+            return
 
         # Renderear tabla
         self.tbl_k.setRowCount(0)

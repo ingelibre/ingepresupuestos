@@ -733,6 +733,86 @@ def test_un_monomio_con_indice_y_sin_incidencia_se_marca():
     assert 'B' in problemas
 
 
+def test_la_composicion_no_se_mueve_ni_forzando_la_seleccion():
+    """«Debería quedarse fijo al monomio que yo seleccioné.»
+
+    El panel ya no se pinta desde `currentRow()` —eso lo mueve el arrastre, el
+    hover en algunos entornos y hasta el foco— sino desde `_monomio_activo`,
+    que solo cambia con un clic o con el teclado. Y si algo mueve la selección
+    por debajo, se restaura.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    app = QApplication.instance() or QApplication([])
+    QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+    QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+    from views.formula_view import FormulaView
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    F.guardar_monomios(pid, F.calcular_por_iu(pid)['monomios'])
+
+    v = FormulaView(pid, "X")
+    v.resize(1200, 700)
+    v.show()
+    v.cargar()
+    app.processEvents()
+    t = v.tbl
+    assert t.rowCount() >= 5
+
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     t.visualItemRect(t.item(1, 2)).center())
+    app.processEvents()
+    assert v._monomio_activo == 1
+    elegido = v.lbl_comp_titulo.text()
+
+    # Forzar la selección por debajo, como haría un evento que no controlamos.
+    t.selectRow(4)
+    app.processEvents()
+    app.processEvents()
+    assert v._monomio_activo == 1, "el monomio activo se movió solo"
+    assert v.lbl_comp_titulo.text() == elegido, "la composición saltó"
+    assert t.currentRow() == 1, "no se restauró la fila resaltada"
+
+    # El teclado sí manda.
+    QTest.keyClick(t, Qt.Key_Down)
+    app.processEvents()
+    app.processEvents()
+    assert v._monomio_activo == 2, v._monomio_activo
+
+
+def test_la_vista_de_indices_del_proyecto_los_lista_con_su_monomio():
+    """Perspectiva de toda la obra: qué índices hay, cuánto pesan y dónde
+    quedaron. El 39 aparece dos veces —materiales y gastos generales— y cada
+    uno tiene que mostrar SU monomio, no el del otro."""
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from views.formula_view import IndicesDelProyectoDialog
+
+    F, pid = _preparar()
+    r = F.calcular_por_iu(pid)
+    dlg = IndicesDelProyectoDialog(pid, r['monomios'], 'Soles')
+    assert dlg.tbl.rowCount() == len(r['ius']), (dlg.tbl.rowCount(),
+                                                 len(r['ius']))
+    simbolos = {m['simbolo'] for m in r['monomios']}
+    for fila in range(dlg.tbl.rowCount()):
+        assert dlg.tbl.item(fila, 6).text() in simbolos | {'—'}
+    # los dos «39» no comparten monomio
+    filas39 = [f for f in range(dlg.tbl.rowCount())
+               if dlg.tbl.item(f, 0).text() == '39']
+    if len(filas39) == 2:
+        a, b = (dlg.tbl.item(f, 6).text() for f in filas39)
+        assert a != b, f"los dos índices 39 quedaron con el mismo monomio: {a}"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
