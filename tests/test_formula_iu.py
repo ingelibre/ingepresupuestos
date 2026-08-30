@@ -491,6 +491,47 @@ def test_el_reajuste_se_reparte_entre_las_formulas():
     assert abs(r['reajuste'] - 400.0) < 0.01, r['reajuste']
 
 
+# ── Trazabilidad: del índice hasta la partida ────────────────────────────────
+def test_el_desglose_de_un_indice_cuadra_con_su_monto():
+    """Sin esto la fórmula no es auditable: dice cuánto pesa cada índice pero
+    no de dónde sale. Los montos del desglose tienen que sumar el del índice."""
+    F, pid = _preparar()
+    r = F.calcular_por_iu(pid)
+    iu = r['ius'][0]
+    des = F.desglose_de_iu(pid, iu['codigo'])
+    assert des['ok'], des['msg']
+    assert abs(des['monto'] - iu['monto']) < 0.02, (des['monto'], iu['monto'])
+    suma = sum(i['monto'] for i in des['insumos'])
+    assert abs(suma - des['monto']) < 0.02, (suma, des['monto'])
+
+
+def test_el_desglose_llega_hasta_las_partidas():
+    F, pid = _preparar()
+    r = F.calcular_por_iu(pid)
+    des = F.desglose_de_iu(pid, r['ius'][0]['codigo'])
+    ins = des['insumos'][0]
+    assert ins['partidas'], "el insumo no dice en qué partidas se usa"
+    suma = sum(p['monto'] for p in ins['partidas'])
+    assert abs(suma - ins['monto']) < 0.05, (suma, ins['monto'])
+    assert all(p['item'] for p in ins['partidas']), "hay partidas sin ítem"
+
+
+def test_el_desglose_marca_los_insumos_sin_indice_propio():
+    """Caen en el índice de su tipo; hay que poder ver qué se está asumiendo."""
+    F, pid = _preparar()
+    from core.config import INEI_DEFAULT
+    des = F.desglose_de_iu(pid, INEI_DEFAULT['MAT'])
+    if des['ok']:
+        assert any('asignado' in i for i in des['insumos'])
+
+
+def test_el_desglose_de_un_indice_sin_uso_lo_dice():
+    F, pid = _preparar()
+    des = F.desglose_de_iu(pid, '25')      # hueco de la numeración oficial
+    assert not des['ok']
+    assert '25' in des['msg']
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

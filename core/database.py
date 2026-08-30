@@ -1289,7 +1289,8 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
     return result, totales_tipo
 
 
-def get_insumos_para_partidas(conn, partida_ids: list[int]) -> list[dict]:
+def get_insumos_para_partidas(conn, partida_ids: list[int],
+                              detallar_partidas: bool = False) -> list[dict]:
     """Devuelve insumos agrupados por recurso para una lista de partidas hoja.
     INCLUYE items con unidad `%MO`/`%MAT`.
 
@@ -1298,6 +1299,12 @@ def get_insumos_para_partidas(conn, partida_ids: list[int]) -> list[dict]:
     según `parcial_unitario_i / sum(parcial_unitario)`. Esto garantiza que
     `sum(parcial_total de Insumos) == CD del Presupuesto` exactamente,
     sin diferencias por redondeos intermedios.
+
+    Con `detallar_partidas`, cada insumo trae además `por_partida` —{id: {monto,
+    cantidad}}— que es el MISMO reparto abierto por partida. Sirve para
+    rastrear de dónde sale cada monto (la fórmula polinómica lo usa para llegar
+    del índice unificado hasta la partida) sin volver a escribir la regla del
+    reparto, que es la que garantiza que todo cuadre con el costo directo.
     """
     insumos: dict[int, dict] = {}
     for pid_p in partida_ids:
@@ -1329,12 +1336,21 @@ def get_insumos_para_partidas(conn, partida_ids: list[int]) -> list[dict]:
                     'parcial_total':  0.0,
                 }
             ins = insumos[rid]
-            ins['cantidad_total'] += (it.get('cantidad') or 0) * metrado
+            cant = (it.get('cantidad') or 0) * metrado
+            ins['cantidad_total'] += cant
             # Distribución proporcional del partida_total entre recursos.
             # Si sum_p = 0 (partida sin acu_items útiles) → contribución 0.
+            aporte = 0.0
             if sum_p > 0:
                 ratio = (it.get('parcial') or 0) / sum_p
-                ins['parcial_total'] += partida_total * ratio
+                aporte = partida_total * ratio
+                ins['parcial_total'] += aporte
+            if detallar_partidas:
+                det = ins.setdefault('por_partida', {})
+                d = det.setdefault(pid_p, {'partida_id': pid_p,
+                                           'monto': 0.0, 'cantidad': 0.0})
+                d['monto'] += aporte
+                d['cantidad'] += cant
             # Para items `%` el precio varía por partida. Conservar el máx.
             precio = float(it.get('precio') or 0)
             if precio > ins['precio']:
@@ -1348,6 +1364,9 @@ def get_insumos_para_partidas(conn, partida_ids: list[int]) -> list[dict]:
     for ins in insumos.values():
         ins['parcial_total']  = _r2(ins['parcial_total'])
         ins['cantidad_total'] = _r2(ins['cantidad_total'])
+        for d in (ins.get('por_partida') or {}).values():
+            d['monto'] = _r2(d['monto'])
+            d['cantidad'] = _r2(d['cantidad'])
 
     # Ajuste de cuadre: el redondeo individual de cada `parcial_total` deja
     # una diferencia residual (~0.01-0.05 S/). Aplicar el delta al insumo

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog,
+    QTreeWidget, QTreeWidgetItem,
 )
 
 from core.database import get_db
@@ -38,7 +39,7 @@ from core.formula_polinomica import (
     cargar_periodos, guardar_periodos, calcular_reajuste_k,
     calcular_por_iu, cargar_componentes, recalcular_coeficientes,
     aplica_formula, listar_formulas, crear_formula, renombrar_formula,
-    eliminar_formula, asignar_subpresupuestos, MAX_FORMULAS,
+    eliminar_formula, asignar_subpresupuestos, MAX_FORMULAS, desglose_de_iu,
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
@@ -69,6 +70,98 @@ RED_SOFT     = C.error_soft
 RED_DARK     = C.error_dark
 BLUE_700     = C.info
 PAGE_BG      = "#EEF2F7"   # se ve en los tiradores de los splitters
+
+
+class DesgloseIUDialog(QDialog):
+    """De dónde sale el monto de un índice unificado.
+
+    La fórmula dice cuánto pesa cada índice; esto dice de qué insumos y de qué
+    partidas sale ese monto, que es lo primero que pregunta quien revisa una
+    fórmula polinómica. El reparto es el mismo que usa la fórmula, así que los
+    montos de acá suman exactamente el del índice.
+    """
+
+    def __init__(self, proyecto_id: int, codigo: str, nombre: str,
+                 moneda: str = 'Soles', formula_id=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Índice {codigo} — {nombre}")
+        self.resize(1040, 600)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 14, 16, 12)
+        v.setSpacing(10)
+
+        des = desglose_de_iu(proyecto_id, codigo, formula_id)
+
+        cab = QLabel(
+            f"<b>{codigo} · {nombre}</b><br>"
+            f"{len(des['insumos'])} insumo(s) · <b>{fmt(des['monto'], moneda)}</b>"
+        )
+        cab.setTextFormat(Qt.RichText)
+        cab.setStyleSheet(f"color:{SLATE_700}; font-size:13px;")
+        v.addWidget(cab)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(
+            ["Insumo / Partida", "Unidad", "Cantidad", "Monto", "% del índice"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setStyleSheet(
+            "QTreeWidget { background:white; border:1px solid #D4D4D4;"
+            " font-size:12px; }"
+            f"QHeaderView::section {{ background:{SILVER_100};"
+            f" color:{SLATE_500}; padding:6px 8px; border:none;"
+            f" border-bottom:1px solid {SILVER_300};"
+            f" font-size:11px; font-weight:700; }}"
+        )
+        h = self.tree.header()
+        h.setSectionResizeMode(0, QHeaderView.Stretch)
+        for c, w in ((1, 62), (2, 100), (3, 120), (4, 88)):
+            h.setSectionResizeMode(c, QHeaderView.Fixed)
+            h.resizeSection(c, w)
+
+        total = des['monto'] or 1
+        for ins in des['insumos']:
+            it = QTreeWidgetItem([
+                ins['descripcion'], ins['unidad'] or '',
+                f"{ins['cantidad']:,.2f}", fmt(ins['monto'], moneda),
+                f"{ins['monto'] / total * 100:.2f}%",
+            ])
+            f_b = QFont(); f_b.setBold(True)
+            it.setFont(0, f_b)
+            for c in (2, 3, 4):
+                it.setTextAlignment(c, Qt.AlignRight | Qt.AlignVCenter)
+            if not ins['asignado']:
+                it.setForeground(0, QColor(ORANGE_DARK))
+                it.setToolTip(0, "Este insumo no tiene índice unificado propio: "
+                                 "se contabiliza en el de su tipo.")
+            for p in ins['partidas']:
+                hijo = QTreeWidgetItem([
+                    f"{p['item']}  {p['descripcion']}", p['unidad'] or '',
+                    f"{p['cantidad']:,.2f}", fmt(p['monto'], moneda),
+                    f"{p['monto'] / total * 100:.2f}%",
+                ])
+                for c in (2, 3, 4):
+                    hijo.setTextAlignment(c, Qt.AlignRight | Qt.AlignVCenter)
+                hijo.setForeground(0, QColor(SLATE_500))
+                it.addChild(hijo)
+            self.tree.addTopLevelItem(it)
+        if des['insumos']:
+            self.tree.topLevelItem(0).setExpanded(True)
+        v.addWidget(self.tree, 1)
+
+        pie = QLabel(
+            des['msg'] or "Despliega un insumo para ver en qué partidas se usa "
+                          "y cuánto aporta cada una. Los montos son los mismos "
+                          "con que la fórmula calcula la incidencia."
+        )
+        pie.setWordWrap(True)
+        pie.setStyleSheet(f"color:{SLATE_300}; font-size:11px;")
+        v.addWidget(pie)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Cerrar")
+        bb.rejected.connect(self.accept)
+        bb.accepted.connect(self.accept)
+        v.addWidget(bb)
 
 
 class FormulasDialog(QDialog):
@@ -589,6 +682,7 @@ class FormulaView(QWidget):
         for c, w in ((2, 120), (3, 90), (4, 110)):
             h.setSectionResizeMode(c, QHeaderView.Fixed)
             h.resizeSection(c, w)
+        self.tbl_comp.itemDoubleClicked.connect(self._abrir_desglose)
         v.addWidget(self.tbl_comp, 1)
 
         self.lbl_comp_pie = QLabel("")
@@ -718,10 +812,24 @@ class FormulaView(QWidget):
             self.tbl_comp.setCellWidget(r, 4, cmb)
 
         self.lbl_comp_pie.setText(
-            f"El índice del monomio es el de mayor peso; al calcular K los "
-            f"demás entran promediados por su monto. Cambia la columna "
-            f"«Monomio» para mover un índice."
+            f"El índice del monomio es el de mayor peso; al calcular K se "
+            f"promedian los tres de más peso. Cambia la columna «Monomio» para "
+            f"mover un índice, o haz doble clic en uno para ver de qué insumos "
+            f"y partidas sale su monto."
         )
+
+    def _abrir_desglose(self, item):
+        """Doble clic en un índice: de qué insumos y partidas sale su monto."""
+        fila = item.row()
+        it = self.tbl_comp.item(fila, 0)
+        nombre_it = self.tbl_comp.item(fila, 1)
+        if it is None:
+            return
+        DesgloseIUDialog(
+            self.pid, it.text(), nombre_it.text() if nombre_it else '',
+            self._proyecto_meta.get('moneda', 'Soles'),
+            self._formula_id, self,
+        ).exec()
 
     def _mover_componente(self, codigo: str, origen: int, destino: int):
         """Mueve un índice unificado de un monomio a otro y recalcula.

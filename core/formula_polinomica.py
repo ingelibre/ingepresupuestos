@@ -394,6 +394,113 @@ def reajuste_de_valorizacion(proyecto_id: int, anio: int, mes: int,
     }
 
 
+def _subs_de_formula(proyecto_id: int, formula_id: int | None) -> list:
+    """Subpresupuestos que cubre la fórmula. Vacío = toda la obra.
+
+    Art. 4: «el presupuesto se subdividirá en tantas partes como fórmulas se
+    requieran». Sin asignación explícita, la fórmula cubre la obra entera, que
+    es como se comportaba antes de que hubiera varias.
+    """
+    if formula_id is None:
+        return []
+    return [s['id'] for f in listar_formulas(proyecto_id)
+            if f['id'] == formula_id for s in f['subpresupuestos']]
+
+
+def _partidas_de_formula(conn, proyecto_id: int, subs: list) -> list[int]:
+    """Ids de las partidas hoja que le tocan a la fórmula."""
+    if subs:
+        marcas = ','.join('?' * len(subs))
+        filas = conn.execute(
+            f"SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+            f"AND sub_presupuesto_id IN ({marcas})",
+            [proyecto_id, *subs]
+        ).fetchall()
+    else:
+        filas = conn.execute(
+            "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+            (proyecto_id,)
+        ).fetchall()
+    return [r['id'] for r in filas]
+
+
+def desglose_de_iu(proyecto_id: int, codigo: str,
+                   formula_id: int | None = None) -> dict:
+    """De dónde sale el monto de un índice unificado: insumos y partidas.
+
+    La fórmula dice cuánto pesa cada índice, pero sin esto no hay manera de
+    auditar de dónde salió ese monto — y es lo primero que pregunta quien
+    revisa una fórmula polinómica.
+
+    El reparto es el MISMO de `incidencias_por_iu`: sale de
+    `get_insumos_para_partidas(detallar_partidas=True)`, así que los montos de
+    aquí suman exactamente el monto del índice, sin recalcular nada por
+    separado.
+
+    Retorna::
+
+        {'ok', 'codigo', 'monto', 'insumos': [{descripcion, unidad, tipo,
+         cantidad, monto, partidas: [{item, descripcion, cantidad, monto}]}]}
+    """
+    from core.database import get_insumos_para_partidas
+    from core.config import INEI_DEFAULT
+
+    codigo = str(codigo or '').strip()
+    subs = _subs_de_formula(proyecto_id, formula_id)
+    conn = get_db()
+    try:
+        partida_ids = _partidas_de_formula(conn, proyecto_id, subs)
+        insumos = get_insumos_para_partidas(conn, partida_ids,
+                                            detallar_partidas=True)
+        indices = {r['id']: (r['indice_inei'] or '').strip()
+                   for r in conn.execute("SELECT id, indice_inei FROM recursos")}
+        partidas = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, item, descripcion, unidad, metrado FROM partidas "
+            "WHERE proyecto_id=?", (proyecto_id,))}
+    finally:
+        conn.close()
+
+    filas = []
+    total = 0.0
+    for ins in insumos:
+        cod = indices.get(ins['recurso_id'], '')
+        if not cod or cod == '00':
+            # Mismo supuesto que la fórmula: sin índice propio cae en el de su
+            # tipo, y hay que poder verlo acá para saber qué se está asumiendo.
+            cod = INEI_DEFAULT.get(ins.get('tipo') or 'MAT', '39')
+            asignado = False
+        else:
+            asignado = True
+        if cod != codigo:
+            continue
+        det = sorted((ins.get('por_partida') or {}).values(),
+                     key=lambda d: -d['monto'])
+        filas.append({
+            'recurso_id': ins['recurso_id'],
+            'descripcion': ins['descripcion'],
+            'unidad': ins['unidad'],
+            'tipo': ins['tipo'],
+            'cantidad': ins['cantidad_total'],
+            'monto': ins['parcial_total'],
+            'asignado': asignado,
+            'partidas': [{
+                'item': partidas.get(d['partida_id'], {}).get('item', ''),
+                'descripcion': partidas.get(d['partida_id'], {}).get(
+                    'descripcion', ''),
+                'unidad': partidas.get(d['partida_id'], {}).get('unidad', ''),
+                'cantidad': d['cantidad'],
+                'monto': d['monto'],
+            } for d in det if d['monto']],
+        })
+        total += ins['parcial_total']
+
+    filas.sort(key=lambda f: -f['monto'])
+    return {'ok': bool(filas), 'codigo': codigo, 'monto': round(total, 2),
+            'insumos': filas,
+            'msg': '' if filas else
+                   f"Ningún insumo del presupuesto aporta al índice {codigo}."}
+
+
 def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
                        formula_id: int | None = None) -> dict:
     """Reparte el costo directo del proyecto entre los índices unificados.
@@ -430,28 +537,10 @@ def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
         per = cargar_periodos(proyecto_id)
         serie = serie_de(per['oferta_anio'], per['oferta_mes'])
 
-    # Cada fórmula cubre los subpresupuestos que se le asignaron (art. 4: «el
-    # presupuesto se subdividirá en tantas partes como fórmulas»). Sin
-    # asignación explícita, la fórmula cubre la obra entera.
-    subs = []
-    if formula_id is not None:
-        subs = [s['id'] for f in listar_formulas(proyecto_id)
-                if f['id'] == formula_id for s in f['subpresupuestos']]
-
+    subs = _subs_de_formula(proyecto_id, formula_id)
     conn = get_db()
     try:
-        if subs:
-            marcas = ','.join('?' * len(subs))
-            partida_ids = [r['id'] for r in conn.execute(
-                f"SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
-                f"AND sub_presupuesto_id IN ({marcas})",
-                [proyecto_id, *subs]
-            ).fetchall()]
-        else:
-            partida_ids = [r['id'] for r in conn.execute(
-                "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
-                (proyecto_id,)
-            ).fetchall()]
+        partida_ids = _partidas_de_formula(conn, proyecto_id, subs)
         insumos = get_insumos_para_partidas(conn, partida_ids)
         indices = {r['id']: (r['indice_inei'] or '').strip()
                    for r in conn.execute("SELECT id, indice_inei FROM recursos")}
