@@ -3352,11 +3352,9 @@ class ProyectoView(QWidget):
         tab_btns: list[QPushButton] = []
 
         def _tab_style(sel: bool) -> str:
-            bg = BLUE_500 if sel else "transparent"
-            hov = "" if sel else "QPushButton:hover { background:rgba(255,255,255,0.15); color:white; }"
-            return (f"QPushButton {{ background:{bg}; color:white; border:none;"
-                    f" border-radius:6px; font-size:11px; font-weight:700; padding:3px 12px; }}"
-                    + hov)
+            # Pestañas de rubro del pie: las más angostas (ver tab_topbar).
+            from utils.theme import tab_topbar
+            return tab_topbar(sel, padding='3px 12px')
 
         # Recordar el rubro activo entre re-renders (para no rebotar al tab 0
         # cada vez que se toca un botón en otro rubro).

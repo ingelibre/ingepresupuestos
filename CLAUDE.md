@@ -118,6 +118,7 @@ Tokens centralizados. **NO hardcodear hex.**
 - Paleta: `C.brand = '#F37329'` (naranja). Tipos recurso: MO `#F39C12` · MAT `#27AE60` · EQ `#607D8B` · SC `#7A36B1`.
 - Niveles de título (`NIVEL_ESTILO`): N1 rojo `#B71C1C`, N2 arándano `#0D52BF`, N3 morado `#6A1B9A`, N4 rosa `#AD1457`.
 - `accent_color(*, on_dark=False)` = acento ambiental (topbars); NO en CTAs/focus (esos siempre naranjas). `accent_reportes()` → `('#273445','#1F2A38','#F1F5F9')`.
+- **Pestañas de topbar oscura:** `theme.tab_topbar(activo, padding=…)`. Estaba copiada en **cuatro** vistas (Cronograma, Control de Obra, Metrados y las pestañas de rubro del pie en `proyecto_view`) y **tres hardcodeaban el hex de la marca**. Las cuatro daban el mismo CSS salvo el padding: Cronograma y Control de Obra `4px 14px` (el default), Metrados `3px 14px`, pie `3px 12px`. Ese parámetro existe solo para no mover píxeles de barras ya en uso, **no es un punto de extensión**. Tests: `test_tab_topbar_reproduce_las_cuatro_densidades`, `test_ninguna_vista_reescribe_el_estilo_de_pestana`.
 - **Modo sobrio es el único modo** — no reintroducir toggles de tema.
 - Fuente **Inter** estática (NO Variable) bundleada en `resources/fonts/`, auto-instalada system-wide (`core/fonts_installer.py`).
 

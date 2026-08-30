@@ -263,6 +263,48 @@ def test_usuarios_tienen_un_solo_dueno():
     assert not hasattr(core.database, 'hay_usuarios')
 
 
+
+# ── Pestañas de topbar: una sola definición para las cuatro barras ───────────
+
+def test_tab_topbar_reproduce_las_cuatro_densidades():
+    """La pestaña activa va en naranja marca; las demás, transparentes.
+
+    Estaba copiada en Cronograma, Control de Obra, Metrados y el pie de
+    presupuesto, y tres de las cuatro hardcodeaban el hex de la marca. Las
+    cuatro daban exactamente el mismo CSS salvo el padding.
+    """
+    from utils.theme import C, tab_topbar
+
+    activa = tab_topbar(True)
+    assert f"background:{C.brand}" in activa
+    assert "hover" not in activa, "la pestaña activa no lleva hover"
+
+    inactiva = tab_topbar(False)
+    assert "background:transparent" in inactiva
+    assert "QPushButton:hover" in inactiva
+
+    # Las densidades reales de cada barra, tal como estaban antes de unificar.
+    assert "padding:4px 14px" in tab_topbar(True)                        # cronograma · control de obra
+    assert "padding:3px 14px" in tab_topbar(True, padding='3px 14px')    # metrados
+    assert "padding:3px 12px" in tab_topbar(True, padding='3px 12px')    # pie de presupuesto
+
+
+def test_ninguna_vista_reescribe_el_estilo_de_pestana():
+    """Las cuatro delegan; ninguna volvió a armar el CSS a mano."""
+    import io
+    import os
+    raiz = os.path.join(os.path.dirname(__file__), '..')
+    for arch in ('views/cronograma_view.py', 'views/control_obra_view.py',
+                 'views/metrados_view.py', 'views/proyecto_view.py'):
+        src = io.open(os.path.join(raiz, arch), encoding='utf-8').read()
+        i = src.find('def _tab_style')
+        assert i >= 0, f"{arch} ya no tiene _tab_style"
+        cuerpo = src[i:i + 400]
+        assert 'tab_topbar' in cuerpo, f"{arch} dejó de delegar en tab_topbar"
+        assert 'font-weight:700' not in cuerpo, \
+            f"{arch} volvió a escribir el CSS de la pestaña a mano"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

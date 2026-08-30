@@ -127,12 +127,9 @@ class MetradosView(QWidget):
 
         # Pestañas Metrados | Acero (la de Acero solo aparece si hay datos).
         def _tab_style(sel: bool) -> str:
-            bg = ORANGE if sel else "transparent"
-            hov = "" if sel else ("QPushButton:hover { background:rgba(255,255,255,0.15);"
-                                  " color:white; }")
-            return (f"QPushButton {{ background:{bg}; color:white; border:none;"
-                    f" border-radius:6px; font-size:11px; font-weight:700;"
-                    f" padding:3px 14px; }}" + hov)
+            # Barra más apretada que la de Cronograma (ver tab_topbar).
+            from utils.theme import tab_topbar
+            return tab_topbar(sel, padding='3px 14px')
         self._tab_style = _tab_style
         self.btn_tab_met = QPushButton("Metrados")
         self.btn_tab_met.setCursor(Qt.PointingHandCursor)

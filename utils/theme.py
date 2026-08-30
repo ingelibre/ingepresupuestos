@@ -354,6 +354,28 @@ def btn_ghost() -> str:
     )
 
 
+def tab_topbar(activo: bool, *, padding: str = '4px 14px') -> str:
+    """Pestaña de una topbar oscura: la activa va en naranja marca, las demás
+    transparentes con hover blanco translúcido.
+
+    Es el patrón de las barras de Cronograma, Control de Obra, Metrados y del
+    pie de presupuesto. Estaba copiado en las cuatro vistas, tres de ellas
+    hardcodeando el hex de la marca.
+
+    ``padding`` existe solo porque las cuatro barras nacieron con densidades
+    distintas y cambiarlas movería píxeles en pantallas ya en uso: Cronograma y
+    Control de Obra usan el default, Metrados `3px 14px` y el pie de presupuesto
+    `3px 12px`. No es un punto de extensión.
+    """
+    fondo = C.brand if activo else 'transparent'
+    hover = ('' if activo else
+             "QPushButton:hover { background:rgba(255,255,255,0.15);"
+             " color:white; }")
+    return (f"QPushButton {{ background:{fondo}; color:white; border:none;"
+            f" border-radius:{R.md}px; font-size:{F_PX.label}px;"
+            f" font-weight:{W.bold}; padding:{padding}; }}" + hover)
+
+
 def btn_danger(*, height: int = 32) -> str:
     """Botón destructivo (eliminar). Uso restringido a confirmaciones."""
     return (

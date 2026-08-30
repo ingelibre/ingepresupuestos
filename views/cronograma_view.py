@@ -53,7 +53,6 @@ SLATE_300 = "#667885"
 SLATE_100 = "#95A3AB"
 SILVER_100 = "#F8F9FA"
 SILVER_300 = "#D4D4D4"
-BLUE_500 = "#F37329"
 BLUE_700 = "#C0621A"
 RED_500 = "#C6262E"
 GREEN_500 = "#68B723"
@@ -122,12 +121,8 @@ class CronogramaView(QWidget):
         self._tab_btns: list[QPushButton] = []
 
         def _tab_style(sel: bool) -> str:
-            bg = BLUE_500 if sel else "transparent"
-            hov = ("" if sel
-                    else "QPushButton:hover { background:rgba(255,255,255,0.15); color:white; }")
-            return (f"QPushButton {{ background:{bg}; color:white; border:none;"
-                    f" border-radius:6px; font-size:11px; font-weight:700;"
-                    f" padding:4px 14px; }}" + hov)
+            from utils.theme import tab_topbar
+            return tab_topbar(sel)
 
         def _select_tab(idx: int):
             self._stack.setCurrentIndex(idx)
