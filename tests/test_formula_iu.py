@@ -583,14 +583,14 @@ def test_ir_a_indices_no_se_llama_a_si_mismo():
     assert mw.llamado, "no llegó al método de MainWindow"
 
 
-def test_solo_se_selecciona_un_monomio_y_el_panel_lo_sigue():
-    """Reportado probando: «selecciono un monomio pero si el mouse se va al
-    otro deja de seleccionarse».
+def test_el_monomio_activo_no_se_mueve_con_el_arrastre():
+    """Reportado probando: «selecciono un monomio, me voy a Composición y si
+    accidentalmente el mouse pasa por otro, la composición cambia; debería
+    quedarse fija en el que yo seleccioné».
 
-    La tabla estaba en `ExtendedSelection`, así que un arrastre involuntario
-    desde una fila hasta otra marcaba TRES monomios — y encima la tarjeta de
-    Composición se quedaba mostrando el primero. Un monomio a la vez, y el
-    panel sigue a la fila activa.
+    La causa es un micro-arrastre —el botón sigue pulsado una fracción mientras
+    el mouse se mueve—, que en una tabla normal mueve la selección. Acá el
+    monomio activo solo cambia con un clic deliberado o con el teclado.
     """
     import os as _os
     _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -613,32 +613,42 @@ def test_solo_se_selecciona_un_monomio_y_el_panel_lo_sigue():
     v.cargar()
     app.processEvents()
     t = v.tbl
-    assert t.rowCount() >= 3, "hacen falta al menos tres monomios para probarlo"
+    assert t.rowCount() >= 4, "hacen falta al menos cuatro monomios"
     assert t.selectionMode() == QAbstractItemView.SingleSelection
 
     def centro(f):
         return t.visualItemRect(t.item(f, 2)).center()
 
-    def titulo():
-        return v.lbl_comp_titulo.text()
-
-    QTest.mouseClick(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(0))
+    # Clic deliberado: eso SÍ manda.
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(1))
     app.processEvents()
-    assert t.currentRow() == 0
-    primero = titulo()
+    assert t.currentRow() == 1
+    elegido = v.lbl_comp_titulo.text()
 
-    # El arrastre involuntario: pulsar en la 0 y que el mouse llegue a la 2.
-    QTest.mousePress(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(0))
+    # Micro-arrastre hasta otra fila: no debe mover nada.
+    QTest.mousePress(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(1))
+    QTest.mouseMove(t.viewport(), centro(3))
+    app.processEvents()
+    QTest.mouseRelease(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(3))
+    app.processEvents()
+    assert t.currentRow() == 1, f"el arrastre movió la selección a {t.currentRow()}"
+    assert v.lbl_comp_titulo.text() == elegido, "la composición saltó de monomio"
+    assert len({i.row() for i in t.selectedIndexes()}) == 1
+
+    # Mover el mouse sin botón tampoco.
     QTest.mouseMove(t.viewport(), centro(2))
     app.processEvents()
-    QTest.mouseRelease(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(2))
-    app.processEvents()
+    assert t.currentRow() == 1
+    assert v.lbl_comp_titulo.text() == elegido
 
-    filas = {i.row() for i in t.selectedIndexes()}
-    assert len(filas) == 1, f"quedaron {len(filas)} monomios seleccionados"
-    assert t.currentRow() == 2, t.currentRow()
-    assert titulo() != primero, "el panel se quedó en el monomio anterior"
-    assert v._monomios[2]['simbolo'] in titulo(), titulo()
+    # Pero un clic nuevo y el teclado sí cambian de monomio.
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(3))
+    app.processEvents()
+    assert t.currentRow() == 3
+    assert v.lbl_comp_titulo.text() != elegido, "el clic no cambió la composición"
+    QTest.keyClick(t, Qt.Key_Down)
+    app.processEvents()
+    assert t.currentRow() == 4, "el teclado dejó de mover el monomio activo"
 
 
 if __name__ == "__main__":

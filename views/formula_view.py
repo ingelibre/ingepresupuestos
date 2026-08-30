@@ -23,7 +23,7 @@ de monomios quedaba en 70 px, fila y media visible.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent
 from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
@@ -600,6 +600,23 @@ class FormulaView(QWidget):
         hl.addWidget(self.lbl_pie_info)
         return fr
 
+    def eventFilter(self, obj, ev):
+        """Impide que la selección de monomios se arrastre con el mouse.
+
+        Un micro-arrastre —el botón sigue pulsado una fracción mientras el
+        mouse se mueve— cambiaba la fila seleccionada y con ella la tarjeta de
+        Composición, que saltaba a otro monomio sin que el usuario lo pidiera.
+        El monomio activo solo cambia con un clic deliberado o con el teclado.
+
+        Se filtra únicamente el movimiento CON botón pulsado sobre la tabla de
+        monomios: el hover normal, la rueda y el clic siguen pasando.
+        """
+        if (obj is self.tbl.viewport()
+                and ev.type() == QEvent.MouseMove
+                and ev.buttons() != Qt.NoButton):
+            return True
+        return super().eventFilter(obj, ev)
+
     def _build_panel_monomios(self) -> QFrame:
         """La tabla de monomios, a sangre. Los botones viven en la barra."""
         fr, v, hl, _ = self._panel("Monomios")
@@ -631,12 +648,12 @@ class FormulaView(QWidget):
             f"  font-size:11px; font-weight:700; }}"
         )
         self.tbl.itemChanged.connect(self._on_item_changed)
-        # `currentCellChanged` además de la selección: mover con el teclado o
-        # arrastrar cambia la fila activa sin que cambie la selección, y el
-        # panel tiene que seguir a la fila activa siempre.
+        # El panel de composición sigue a la fila activa —clic o teclado—, pero
+        # NO al arrastre: eso lo corta el `eventFilter` de más arriba.
         self.tbl.itemSelectionChanged.connect(self._render_composicion)
         self.tbl.currentCellChanged.connect(
             lambda *_: self._render_composicion())
+        self.tbl.viewport().installEventFilter(self)
 
         h = self.tbl.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 36)
