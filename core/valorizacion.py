@@ -258,13 +258,21 @@ def get_valorizacion_detalle(val_id: int) -> tuple[list[dict], dict]:
         'sal_val': _r2(base_tot - acu_tot),
         'pct_fisico': (acu_tot / base_tot * 100) if base_tot else 0.0,
     }
+    # Lo valorizado en el período, repartido por subpresupuesto: con varias
+    # fórmulas polinómicas cada una reajusta la parte que cubre.
+    por_sub: dict = {}
+    for f in filas:
+        if f['es_titulo']:
+            continue
+        por_sub[f['sub_presupuesto_id']] = (
+            por_sub.get(f['sub_presupuesto_id'], 0.0) + (f['act_val'] or 0))
     resumen['reajuste'] = _reajuste_del_periodo(
-        pid, val['periodo_hasta'], resumen['act_val'])
+        pid, val['periodo_hasta'], resumen['act_val'], por_sub)
     return filas, resumen
 
 
 def _reajuste_del_periodo(proyecto_id: int, periodo_hasta: str,
-                          monto: float) -> dict:
+                          monto: float, por_sub: dict | None = None) -> dict:
     """Reajuste por fórmula polinómica de lo valorizado en el período.
 
     El coeficiente K se toma del mes en que se paga la valorización, que es lo
@@ -286,7 +294,8 @@ def _reajuste_del_periodo(proyecto_id: int, periodo_hasta: str,
         return {'aplica': False, 'k': None, 'monto': monto, 'reajuste': 0.0,
                 'motivo': "La valorización no tiene definido el período."}
     try:
-        return reajuste_de_valorizacion(proyecto_id, anio, mes, monto)
+        return reajuste_de_valorizacion(proyecto_id, anio, mes, monto,
+                                        por_sub)
     except Exception as e:
         return {'aplica': False, 'k': None, 'monto': monto, 'reajuste': 0.0,
                 'motivo': f"No se pudo calcular el reajuste: {e}"}

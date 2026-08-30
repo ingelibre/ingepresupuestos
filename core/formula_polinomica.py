@@ -53,14 +53,17 @@ SIMBOLO_GU = 'GU'
 SIMBOLO_POR_TIPO = {'MO': 'J', 'MAT': 'M', 'EQ': 'E', 'SC': 'S'}
 
 
-def cargar_monomios(proyecto_id: int) -> list[dict]:
-    """Lista los monomios persistidos para el proyecto, ordenados."""
+def cargar_monomios(proyecto_id: int,
+                    formula_id: int | None = None) -> list[dict]:
+    """Lista los monomios persistidos de una fórmula, ordenados."""
+    if formula_id is None:
+        formula_id = formula_por_defecto(proyecto_id)
     conn = get_db()
     rows = conn.execute(
         "SELECT id, orden, simbolo, descripcion, indice_inei, coeficiente "
-        "FROM formula_monomios WHERE proyecto_id=? "
+        "FROM formula_monomios WHERE proyecto_id=? AND formula_id=? "
         "ORDER BY orden, id",
-        (proyecto_id,)
+        (proyecto_id, formula_id)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -156,6 +159,132 @@ def calcular_desde_acu(proyecto_id: int) -> dict:
     }
 
 
+# Art. 4: hasta 4 fórmulas por obra; 8 si el contrato tiene obras de diversa
+# naturaleza. El presupuesto se subdivide en tantas partes como fórmulas.
+MAX_FORMULAS = 4
+MAX_FORMULAS_DIVERSA = 8
+
+
+def listar_formulas(proyecto_id: int) -> list[dict]:
+    """Las fórmulas polinómicas del proyecto, con sus subpresupuestos.
+
+    Siempre hay al menos una: si el proyecto no tiene ninguna se crea la
+    primera, para que todo lo demás pueda referirse a ella.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM formulas WHERE proyecto_id=? ORDER BY numero",
+            (proyecto_id,)
+        ).fetchall()
+        if not rows:
+            conn.execute(
+                "INSERT INTO formulas (proyecto_id, numero, nombre) "
+                "VALUES (?,1,'Fórmula 01')", (proyecto_id,)
+            )
+            # Lo que ya estuviera guardado sin fórmula pasa a ser la primera.
+            fid = conn.execute("SELECT id FROM formulas WHERE proyecto_id=? "
+                               "AND numero=1", (proyecto_id,)).fetchone()['id']
+            for tabla in ('formula_monomios', 'formula_monomio_iu'):
+                conn.execute(
+                    f"UPDATE {tabla} SET formula_id=? "
+                    f"WHERE proyecto_id=? AND formula_id IS NULL", (fid, proyecto_id)
+                )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT * FROM formulas WHERE proyecto_id=? ORDER BY numero",
+                (proyecto_id,)
+            ).fetchall()
+        subs = {}
+        for r in conn.execute(
+            "SELECT fs.formula_id, fs.sub_presupuesto_id, s.nombre "
+            "FROM formula_subpresupuestos fs "
+            "LEFT JOIN sub_presupuestos s ON s.id = fs.sub_presupuesto_id"
+        ):
+            subs.setdefault(r['formula_id'], []).append(
+                {'id': r['sub_presupuesto_id'], 'nombre': r['nombre'] or 'Principal'})
+    finally:
+        conn.close()
+    return [{**dict(r), 'subpresupuestos': subs.get(r['id'], [])} for r in rows]
+
+
+def formula_por_defecto(proyecto_id: int) -> int:
+    """Id de la primera fórmula del proyecto, creándola si hace falta."""
+    return listar_formulas(proyecto_id)[0]['id']
+
+
+def crear_formula(proyecto_id: int, nombre: str = '',
+                  diversa_naturaleza: bool = False) -> int:
+    """Agrega una fórmula al proyecto, dentro del máximo del art. 4."""
+    existentes = listar_formulas(proyecto_id)
+    tope = MAX_FORMULAS_DIVERSA if diversa_naturaleza else MAX_FORMULAS
+    if len(existentes) >= tope:
+        raise ValueError(
+            f"El D.S. 011-79-VC permite hasta {tope} fórmulas polinómicas por "
+            f"obra" + ("" if diversa_naturaleza else
+                       " (8 si el contrato tiene obras de diversa naturaleza).")
+        )
+    numero = max(f['numero'] for f in existentes) + 1
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO formulas (proyecto_id, numero, nombre) VALUES (?,?,?)",
+            (proyecto_id, numero, (nombre or '').strip() or f"Fórmula {numero:02d}")
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def renombrar_formula(formula_id: int, nombre: str) -> None:
+    conn = get_db()
+    try:
+        conn.execute("UPDATE formulas SET nombre=? WHERE id=?",
+                     ((nombre or '').strip(), formula_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def eliminar_formula(formula_id: int) -> None:
+    """Borra una fórmula con sus monomios. La última no se puede borrar."""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT proyecto_id FROM formulas WHERE id=?",
+                           (formula_id,)).fetchone()
+        if not row:
+            return
+        n = conn.execute("SELECT COUNT(*) FROM formulas WHERE proyecto_id=?",
+                         (row['proyecto_id'],)).fetchone()[0]
+        if n <= 1:
+            raise ValueError("El proyecto tiene que conservar al menos una "
+                             "fórmula polinómica.")
+        conn.execute("DELETE FROM formula_monomios WHERE formula_id=?", (formula_id,))
+        conn.execute("DELETE FROM formula_monomio_iu WHERE formula_id=?", (formula_id,))
+        conn.execute("DELETE FROM formulas WHERE id=?", (formula_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def asignar_subpresupuestos(formula_id: int, sub_ids: list) -> None:
+    """Qué subpresupuestos cubre la fórmula. Lista vacía = todo el proyecto."""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM formula_subpresupuestos WHERE formula_id=?",
+                     (formula_id,))
+        for s in sub_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO formula_subpresupuestos "
+                "(formula_id, sub_presupuesto_id) VALUES (?,?)",
+                (formula_id, s)
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def aplica_formula(proyecto_id: int) -> tuple[bool, str]:
     """¿Corresponde fórmula polinómica en este proyecto?
 
@@ -184,48 +313,89 @@ def aplica_formula(proyecto_id: int) -> tuple[bool, str]:
 
 
 def reajuste_de_valorizacion(proyecto_id: int, anio: int, mes: int,
-                             monto: float) -> dict:
+                             monto: float,
+                             montos_por_sub: dict | None = None) -> dict:
     """Reajuste de una valorización: R = V·(K−1).
 
-    Es para lo que existe la fórmula polinómica, y hasta ahora la app calculaba
-    K y ahí moría: las valorizaciones no lo aplicaban nunca.
+    Es para lo que existe la fórmula polinómica, y hasta la 3.0.4 la app
+    calculaba K y ahí moría: las valorizaciones no lo aplicaban nunca.
 
-    `anio`/`mes` son los del período de pago de la valorización; el presupuesto
-    base sale de `formula_periodos`. Devuelve siempre un dict con `aplica` y,
-    cuando no, el `motivo` — que puede ser la modalidad de la obra, que no haya
-    fórmula guardada, que falten índices o que el período cruce el cambio de
-    base del INEI.
+    Con VARIAS fórmulas (art. 4) cada una reajusta la parte del presupuesto que
+    cubre, así que hace falta `montos_por_sub` —{sub_presupuesto_id: monto}—
+    para repartir lo valorizado. Con una sola fórmula se reajusta el total.
+
+    `anio`/`mes` son los del período de pago; el presupuesto base sale de
+    `formula_periodos`. Devuelve siempre un dict con `aplica` y, cuando no, el
+    `motivo`: la modalidad de la obra, que no haya fórmula guardada, que falten
+    índices o que el período cruce el cambio de base del INEI.
     """
     vacio = {'aplica': False, 'motivo': '', 'k': None,
-             'monto': monto, 'reajuste': 0.0}
+             'monto': monto, 'reajuste': 0.0, 'formulas': []}
 
     ok, motivo = aplica_formula(proyecto_id)
     if not ok:
         return {**vacio, 'motivo': motivo}
 
-    if not cargar_monomios(proyecto_id):
-        return {**vacio, 'motivo': "El proyecto todavía no tiene fórmula "
-                                   "polinómica guardada."}
-
+    formulas = listar_formulas(proyecto_id)
     per = cargar_periodos(proyecto_id)
-    r = calcular_reajuste_k(proyecto_id, per['oferta_anio'], per['oferta_mes'],
-                            anio, mes, per['area_inei'])
-    if not r.get('ok'):
-        return {**vacio, 'motivo': r.get('msg', '')}
-    if r['monomios_sin_datos']:
-        return {**vacio, 'k': r['k_total'],
-                'motivo': (f"Faltan índices INEI de {mes:02d}/{anio} para "
-                           f"{r['monomios_sin_datos']} monomio(s): el reajuste "
-                           f"sería parcial.")}
+    detalle = []
+    total_reajuste = 0.0
+    total_monto = 0.0
+    problemas = []
 
-    k = r['k_total']
-    return {'aplica': True, 'motivo': '', 'k': k, 'monto': monto,
-            'reajuste': round(monto * (k - 1), 2),
-            'oferta': r['oferta'], 'reajuste_periodo': r['reajuste']}
+    for f in formulas:
+        if len(formulas) == 1:
+            monto_f = monto
+        elif montos_por_sub is None:
+            problemas.append(f"«{f['nombre']}»: no se pudo repartir lo "
+                             f"valorizado entre las fórmulas.")
+            continue
+        else:
+            subs = [s['id'] for s in f['subpresupuestos']]
+            monto_f = (sum(v for k, v in montos_por_sub.items() if k in subs)
+                       if subs else sum(montos_por_sub.values()))
+        if not cargar_monomios(proyecto_id, f['id']):
+            problemas.append(f"«{f['nombre']}» no tiene monomios guardados.")
+            continue
+        r = calcular_reajuste_k(proyecto_id, per['oferta_anio'],
+                                per['oferta_mes'], anio, mes,
+                                per['area_inei'], formula_id=f['id'])
+        if not r.get('ok'):
+            problemas.append(r.get('msg', ''))
+            continue
+        if r['monomios_sin_datos']:
+            problemas.append(
+                f"«{f['nombre']}»: faltan índices INEI de {mes:02d}/{anio} "
+                f"para {r['monomios_sin_datos']} monomio(s)."
+            )
+            continue
+        reaj = round(monto_f * (r['k_total'] - 1), 2)
+        total_reajuste += reaj
+        total_monto += monto_f
+        detalle.append({'formula_id': f['id'], 'nombre': f['nombre'],
+                        'k': r['k_total'], 'monto': monto_f, 'reajuste': reaj})
+
+    if not detalle:
+        motivo = (problemas[0] if problemas
+                  else "El proyecto todavía no tiene fórmula polinómica "
+                       "guardada.")
+        return {**vacio, 'motivo': motivo}
+
+    k_global = (round(1 + total_reajuste / total_monto, 4)
+                if total_monto else None)
+    return {
+        'aplica': True,
+        'motivo': ' · '.join(problemas),
+        'k': detalle[0]['k'] if len(detalle) == 1 else k_global,
+        'monto': monto, 'reajuste': round(total_reajuste, 2),
+        'formulas': detalle,
+        'oferta': {'anio': per['oferta_anio'], 'mes': per['oferta_mes']},
+        'reajuste_periodo': {'anio': anio, 'mes': mes},
+    }
 
 
-def incidencias_por_iu(proyecto_id: int,
-                       serie: str | None = None) -> dict:
+def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
+                       formula_id: int | None = None) -> dict:
     """Reparte el costo directo del proyecto entre los índices unificados.
 
     Es lo que faltaba para armar una fórmula polinómica de verdad. Hasta ahora
@@ -260,12 +430,28 @@ def incidencias_por_iu(proyecto_id: int,
         per = cargar_periodos(proyecto_id)
         serie = serie_de(per['oferta_anio'], per['oferta_mes'])
 
+    # Cada fórmula cubre los subpresupuestos que se le asignaron (art. 4: «el
+    # presupuesto se subdividirá en tantas partes como fórmulas»). Sin
+    # asignación explícita, la fórmula cubre la obra entera.
+    subs = []
+    if formula_id is not None:
+        subs = [s['id'] for f in listar_formulas(proyecto_id)
+                if f['id'] == formula_id for s in f['subpresupuestos']]
+
     conn = get_db()
     try:
-        partida_ids = [r['id'] for r in conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
-            (proyecto_id,)
-        ).fetchall()]
+        if subs:
+            marcas = ','.join('?' * len(subs))
+            partida_ids = [r['id'] for r in conn.execute(
+                f"SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+                f"AND sub_presupuesto_id IN ({marcas})",
+                [proyecto_id, *subs]
+            ).fetchall()]
+        else:
+            partida_ids = [r['id'] for r in conn.execute(
+                "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+                (proyecto_id,)
+            ).fetchall()]
         insumos = get_insumos_para_partidas(conn, partida_ids)
         indices = {r['id']: (r['indice_inei'] or '').strip()
                    for r in conn.execute("SELECT id, indice_inei FROM recursos")}
@@ -314,7 +500,12 @@ def incidencias_por_iu(proyecto_id: int,
     try:
         _, tot = calcular_totales(proyecto_id)
         gg_util = float(tot.get('gf') or 0) + float(tot.get('utilidad') or 0)
-        base = float(tot.get('subtotal') or 0) or (cd + gg_util)
+        cd_obra = float(tot.get('cd') or 0) or cd
+        # Con varias fórmulas, a cada una le toca la parte de gastos generales
+        # y utilidad proporcional al costo directo que cubre.
+        if subs and cd_obra > 0:
+            gg_util *= cd / cd_obra
+        base = cd + gg_util
     except Exception:
         gg_util, base = 0.0, cd
     if gg_util > 0:
@@ -376,7 +567,8 @@ def _simbolos_unicos(monomios: list[dict]) -> None:
 
 def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
                     min_incidencia: float = MIN_INCIDENCIA,
-                    serie: str | None = None) -> dict:
+                    serie: str | None = None,
+                    formula_id: int | None = None) -> dict:
     """Arma los monomios agrupando los índices unificados por su incidencia.
 
     Criterio, que es el estándar del D.S. 011-79-VC:
@@ -393,7 +585,7 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
     la composición completa queda en `componentes` para poder verla, editarla y
     —al calcular K— promediar los índices por su peso.
     """
-    inc = incidencias_por_iu(proyecto_id, serie)
+    inc = incidencias_por_iu(proyecto_id, serie, formula_id)
     if not inc['ok']:
         return {'ok': False, 'msg': inc['msg'], 'monomios': [],
                 'cd': 0.0, 'base': 0.0, 'ius': []}
@@ -545,8 +737,8 @@ def _ajustar_a_uno(monomios: list[dict]) -> None:
         mayor['coeficiente'] = round(mayor['coeficiente'] + dif, DECIMALES_K)
 
 
-def cargar_componentes(proyecto_id: int,
-                       serie: str | None = None) -> dict[int, list[dict]]:
+def cargar_componentes(proyecto_id: int, serie: str | None = None,
+                       formula_id: int | None = None) -> dict[int, list[dict]]:
     """Composición guardada de cada monomio: {orden: [{codigo, nombre, monto}]}.
 
     Los monomios de proyectos anteriores a esta versión no tienen composición
@@ -562,6 +754,8 @@ def cargar_componentes(proyecto_id: int,
     if serie is None:
         per = cargar_periodos(proyecto_id)
         serie = serie_de(per['oferta_anio'], per['oferta_mes'])
+    if formula_id is None:
+        formula_id = formula_por_defecto(proyecto_id)
     conn = get_db()
     try:
         rows = conn.execute(
@@ -570,9 +764,9 @@ def cargar_componentes(proyecto_id: int,
                  FROM formula_monomio_iu c
                  LEFT JOIN indices_inei i
                         ON i.codigo = c.indice_inei AND i.serie = ?
-                WHERE c.proyecto_id=?
+                WHERE c.proyecto_id=? AND c.formula_id=?
                 ORDER BY c.orden, c.monto DESC""",
-            (serie, proyecto_id)
+            (serie, proyecto_id, formula_id)
         ).fetchall()
     finally:
         conn.close()
@@ -586,23 +780,28 @@ def cargar_componentes(proyecto_id: int,
     return out
 
 
-def guardar_monomios(proyecto_id: int, monomios: list[dict]) -> None:
+def guardar_monomios(proyecto_id: int, monomios: list[dict],
+                     formula_id: int | None = None) -> None:
     """Reemplaza los monomios del proyecto. ``monomios`` es lista de dicts
     con claves: simbolo, descripcion, indice_inei, coeficiente."""
+    if formula_id is None:
+        formula_id = formula_por_defecto(proyecto_id)
     conn = get_db()
     try:
         conn.execute(
-            "DELETE FROM formula_monomios WHERE proyecto_id=?", (proyecto_id,)
+            "DELETE FROM formula_monomios WHERE proyecto_id=? AND formula_id=?",
+            (proyecto_id, formula_id)
         )
         conn.execute(
-            "DELETE FROM formula_monomio_iu WHERE proyecto_id=?", (proyecto_id,)
+            "DELETE FROM formula_monomio_iu WHERE proyecto_id=? AND formula_id=?",
+            (proyecto_id, formula_id)
         )
         for i, m in enumerate(monomios):
             conn.execute(
                 "INSERT INTO formula_monomios "
-                "(proyecto_id, orden, simbolo, descripcion, indice_inei, coeficiente) "
-                "VALUES (?,?,?,?,?,?)",
-                (proyecto_id, i,
+                "(proyecto_id, formula_id, orden, simbolo, descripcion, "
+                " indice_inei, coeficiente) VALUES (?,?,?,?,?,?,?)",
+                (proyecto_id, formula_id, i,
                  (m.get('simbolo') or '').strip(),
                  (m.get('descripcion') or '').strip(),
                  (m.get('indice_inei') or '').strip(),
@@ -617,8 +816,9 @@ def guardar_monomios(proyecto_id: int, monomios: list[dict]) -> None:
                     continue
                 conn.execute(
                     "INSERT INTO formula_monomio_iu "
-                    "(proyecto_id, orden, indice_inei, monto) VALUES (?,?,?,?)",
-                    (proyecto_id, i, cod, float(c.get('monto') or 0))
+                    "(proyecto_id, formula_id, orden, indice_inei, monto) "
+                    "VALUES (?,?,?,?,?)",
+                    (proyecto_id, formula_id, i, cod, float(c.get('monto') or 0))
                 )
         conn.commit()
     finally:
@@ -748,7 +948,8 @@ def calcular_reajuste_k(proyecto_id: int,
                         oferta_mes: int | None = None,
                         reajuste_anio: int | None = None,
                         reajuste_mes: int | None = None,
-                        area_inei: str | None = None) -> dict:
+                        area_inei: str | None = None,
+                        formula_id: int | None = None) -> dict:
     """Calcula el coeficiente K de reajuste con los valores INEI cargados.
 
     Fórmula:  K = Σ k_i · (I_r / I_o)  donde I_r es el valor del índice en el
@@ -808,8 +1009,8 @@ def calcular_reajuste_k(proyecto_id: int,
             'series': (s_oferta, s_reajuste),
         }
 
-    monomios = cargar_monomios(proyecto_id)
-    componentes = cargar_componentes(proyecto_id)
+    monomios = cargar_monomios(proyecto_id, formula_id)
+    componentes = cargar_componentes(proyecto_id, formula_id=formula_id)
     detalle = []
     k_total = 0.0
     sin_datos = 0

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
+    QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog,
 )
 
 from core.database import get_db
@@ -36,7 +37,8 @@ from core.formula_polinomica import (
     cargar_monomios, guardar_monomios,
     cargar_periodos, guardar_periodos, calcular_reajuste_k,
     calcular_por_iu, cargar_componentes, recalcular_coeficientes,
-    aplica_formula,
+    aplica_formula, listar_formulas, crear_formula, renombrar_formula,
+    eliminar_formula, asignar_subpresupuestos, MAX_FORMULAS,
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
@@ -69,6 +71,161 @@ BLUE_700     = C.info
 PAGE_BG      = "#EEF2F7"   # se ve en los tiradores de los splitters
 
 
+class FormulasDialog(QDialog):
+    """Las fórmulas polinómicas del proyecto y qué parte cubre cada una.
+
+    Art. 4 del D.S. 011-79-VC: hasta cuatro por obra (ocho si el contrato tiene
+    obras de diversa naturaleza), «subdividiendo el presupuesto en tantas
+    partes como fórmulas se requieran». Esa subdivisión son los
+    subpresupuestos.
+    """
+
+    def __init__(self, proyecto_id: int, parent=None):
+        super().__init__(parent)
+        self.pid = proyecto_id
+        self.formula_activa = None
+        self.setWindowTitle("Fórmulas polinómicas de la obra")
+        self.resize(620, 420)
+        self._build()
+        self._recargar()
+
+    def _build(self):
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 14, 16, 12)
+        v.setSpacing(10)
+
+        ayuda = QLabel(
+            f"El D.S. 011-79-VC permite hasta <b>{MAX_FORMULAS} fórmulas</b> "
+            f"por obra (8 si el contrato tiene obras de diversa naturaleza), "
+            f"subdividiendo el presupuesto en tantas partes como fórmulas. "
+            f"Marca los subpresupuestos que cubre cada una; sin marcar ninguno, "
+            f"la fórmula cubre toda la obra."
+        )
+        ayuda.setWordWrap(True)
+        ayuda.setStyleSheet(f"color:{SLATE_500}; font-size:12px;")
+        v.addWidget(ayuda)
+
+        self.lst = QListWidget()
+        self.lst.currentRowChanged.connect(self._on_sel)
+        v.addWidget(self.lst, 1)
+
+        acc = QHBoxLayout()
+        b_add = QPushButton("Agregar"); b_add.setIcon(icon("add"))
+        b_add.clicked.connect(self._agregar); acc.addWidget(b_add)
+        b_ren = QPushButton("Renombrar"); b_ren.setIcon(icon("editar"))
+        b_ren.clicked.connect(self._renombrar); acc.addWidget(b_ren)
+        b_del = QPushButton("Eliminar"); b_del.setIcon(icon("eliminar"))
+        b_del.clicked.connect(self._eliminar); acc.addWidget(b_del)
+        acc.addStretch(1)
+        v.addLayout(acc)
+
+        lbl = QLabel("Subpresupuestos que cubre:")
+        lbl.setStyleSheet(f"color:{SLATE_700}; font-weight:700; font-size:12px;")
+        v.addWidget(lbl)
+        self.lst_subs = QListWidget()
+        self.lst_subs.itemChanged.connect(self._on_subs)
+        v.addWidget(self.lst_subs, 1)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Cerrar")
+        bb.rejected.connect(self.accept)
+        bb.accepted.connect(self.accept)
+        v.addWidget(bb)
+
+    def _recargar(self):
+        self._formulas = listar_formulas(self.pid)
+        fila = self.lst.currentRow()
+        self.lst.blockSignals(True)
+        self.lst.clear()
+        for f in self._formulas:
+            subs = f['subpresupuestos']
+            txt = f"{f['numero']:02d} · {f['nombre']}"
+            txt += (f"   —  {', '.join(s['nombre'] for s in subs)}" if subs
+                    else "   —  toda la obra")
+            self.lst.addItem(txt)
+        self.lst.blockSignals(False)
+        self.lst.setCurrentRow(min(max(fila, 0), len(self._formulas) - 1))
+
+    def _actual(self):
+        i = self.lst.currentRow()
+        return self._formulas[i] if 0 <= i < len(self._formulas) else None
+
+    def _on_sel(self):
+        f = self._actual()
+        if not f:
+            return
+        self.formula_activa = f['id']
+        conn = get_db()
+        subs = conn.execute(
+            "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=? "
+            "ORDER BY orden, id", (self.pid,)
+        ).fetchall()
+        conn.close()
+        marcados = {s['id'] for s in f['subpresupuestos']}
+        self.lst_subs.blockSignals(True)
+        self.lst_subs.clear()
+        for s in subs:
+            it = QListWidgetItem(s['nombre'])
+            it.setData(Qt.UserRole, s['id'])
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if s['id'] in marcados else Qt.Unchecked)
+            self.lst_subs.addItem(it)
+        self.lst_subs.blockSignals(False)
+        if not subs:
+            self.lst_subs.addItem("(el proyecto no tiene subpresupuestos)")
+
+    def _on_subs(self):
+        f = self._actual()
+        if not f:
+            return
+        ids = [self.lst_subs.item(i).data(Qt.UserRole)
+               for i in range(self.lst_subs.count())
+               if self.lst_subs.item(i).checkState() == Qt.Checked
+               and self.lst_subs.item(i).data(Qt.UserRole) is not None]
+        asignar_subpresupuestos(f['id'], ids)
+        self._recargar()
+
+    def _agregar(self):
+        nombre, ok = QInputDialog.getText(self, "Nueva fórmula",
+                                          "Nombre de la fórmula:")
+        if not ok:
+            return
+        try:
+            self.formula_activa = crear_formula(self.pid, nombre)
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo agregar", str(e))
+            return
+        self._recargar()
+
+    def _renombrar(self):
+        f = self._actual()
+        if not f:
+            return
+        nombre, ok = QInputDialog.getText(self, "Renombrar fórmula",
+                                          "Nombre:", text=f['nombre'])
+        if ok and nombre.strip():
+            renombrar_formula(f['id'], nombre)
+            self._recargar()
+
+    def _eliminar(self):
+        f = self._actual()
+        if not f:
+            return
+        r = QMessageBox.question(
+            self, "Eliminar fórmula",
+            f"¿Eliminar «{f['nombre']}» con sus monomios?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if r != QMessageBox.Yes:
+            return
+        try:
+            eliminar_formula(f['id'])
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo eliminar", str(e))
+            return
+        self.formula_activa = None
+        self._recargar()
+
+
 class FormulaView(QWidget):
     """Editor de fórmula polinómica para un proyecto."""
 
@@ -83,6 +240,7 @@ class FormulaView(QWidget):
         self._totales_acu: dict | None = None
         self._cd: float = 0.0          # costo directo con que se armó la fórmula
         self._aplica: bool = True      # falso en administración directa
+        self._formula_id: int | None = None   # art. 4: hasta 4 por obra
         self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
@@ -174,6 +332,22 @@ class FormulaView(QWidget):
         fl = QHBoxLayout(barra)
         fl.setContentsMargins(12, 6, 12, 6)
         fl.setSpacing(8)
+
+        # Art. 4 del D.S.: una obra puede tener hasta cuatro fórmulas, cada una
+        # sobre una parte del presupuesto. Con una sola, el selector no estorba.
+        self.cmb_formula = QComboBox()
+        self.cmb_formula.setMinimumWidth(180)
+        self.cmb_formula.setToolTip(
+            "Fórmula polinómica del proyecto. Cada una cubre los "
+            "subpresupuestos que se le asignen."
+        )
+        self.cmb_formula.currentIndexChanged.connect(self._on_formula_change)
+        fl.addWidget(self.cmb_formula)
+
+        self.btn_formulas = self._btn_barra("Fórmulas…")
+        self.btn_formulas.setToolTip("Agregar, renombrar o eliminar fórmulas")
+        self.btn_formulas.clicked.connect(self._gestionar_formulas)
+        fl.addWidget(self.btn_formulas)
 
         self.btn_calcular = self._btn_barra("Auto-calcular desde ACU",
                                             "rep-acus", primary=True)
@@ -426,6 +600,38 @@ class FormulaView(QWidget):
         )
         v.addWidget(self.lbl_comp_pie)
         return fr
+
+    def _refrescar_formulas(self):
+        """Puebla el selector de fórmulas y fija la activa."""
+        formulas = listar_formulas(self.pid)
+        self.cmb_formula.blockSignals(True)
+        self.cmb_formula.clear()
+        for f in formulas:
+            etiqueta = f"{f['numero']:02d} · {f['nombre']}"
+            subs = f['subpresupuestos']
+            if subs:
+                etiqueta += f"  ({len(subs)} subp.)"
+            self.cmb_formula.addItem(etiqueta, f['id'])
+        if self._formula_id is None:
+            self._formula_id = formulas[0]['id']
+        ix = self.cmb_formula.findData(self._formula_id)
+        self.cmb_formula.setCurrentIndex(max(ix, 0))
+        self._formula_id = self.cmb_formula.currentData()
+        self.cmb_formula.blockSignals(False)
+        # Con una sola fórmula el selector sobra, pero el botón se queda para
+        # poder crear la segunda.
+        self.cmb_formula.setVisible(len(formulas) > 1)
+
+    def _on_formula_change(self):
+        self._formula_id = self.cmb_formula.currentData()
+        self.cargar()
+
+    def _gestionar_formulas(self):
+        """Alta, renombrado, baja y subpresupuestos de cada fórmula."""
+        dlg = FormulasDialog(self.pid, self)
+        dlg.exec()
+        self._formula_id = dlg.formula_activa or self._formula_id
+        self.cargar()
 
     def _render_composicion(self):
         """Pinta la composición del monomio seleccionado en la tabla.
@@ -779,11 +985,13 @@ class FormulaView(QWidget):
             self._render_tabla()
             return
 
-        self._monomios = cargar_monomios(self.pid)
+        self._refrescar_formulas()
+        self._monomios = cargar_monomios(self.pid, self._formula_id)
         # La composición vive en su propia tabla, enlazada por `orden`. Los
         # monomios escritos a mano (o de versiones anteriores) no tienen, y la
         # tarjeta lo dice en vez de fingir un desglose.
-        comps = cargar_componentes(self.pid)
+        comps = cargar_componentes(self.pid,
+                                   formula_id=self._formula_id)
         for m in self._monomios:
             m['componentes'] = [dict(c) for c in comps.get(m.get('orden'), [])]
         self._cd = sum(float(c.get('monto') or 0)
@@ -1042,7 +1250,7 @@ class FormulaView(QWidget):
         self.btn_calcular.setEnabled(False)
         self.btn_calcular.setText("Calculando…")
         try:
-            r = calcular_por_iu(self.pid)
+            r = calcular_por_iu(self.pid, formula_id=self._formula_id)
         finally:
             self.btn_calcular.setEnabled(True)
             self.btn_calcular.setText("Auto-calcular desde ACU")
@@ -1107,7 +1315,7 @@ class FormulaView(QWidget):
             if res != QMessageBox.Yes:
                 return
         try:
-            guardar_monomios(self.pid, self._monomios)
+            guardar_monomios(self.pid, self._monomios, self._formula_id)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{e}")
             return
@@ -1170,7 +1378,7 @@ class FormulaView(QWidget):
 
         try:
             # Asegurar que esté guardada antes de exportar
-            guardar_monomios(self.pid, self._monomios)
+            guardar_monomios(self.pid, self._monomios, self._formula_id)
             from core.pdf_reports import generar_pdf_archivo
             generar_pdf_archivo('formula_polinomica', self.pid, path)
         except Exception as e:

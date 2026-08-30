@@ -394,6 +394,103 @@ def test_sin_formula_guardada_no_hay_reajuste():
     assert 'fórmula' in r['motivo'].lower(), r['motivo']
 
 
+# ── Art. 4: varias fórmulas por obra ─────────────────────────────────────────
+def _proyecto_con_subs():
+    """(módulo, pid, [sub_ids]) de un proyecto con varios subpresupuestos."""
+    F, _ = _preparar()
+    conn = d.get_db()
+    pid = conn.execute("SELECT proyecto_id FROM sub_presupuestos "
+                       "GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1").fetchone()[0]
+    subs = [r[0] for r in conn.execute(
+        "SELECT id FROM sub_presupuestos WHERE proyecto_id=? ORDER BY id", (pid,))]
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    # Los tests comparten la misma BD: dejar una sola fórmula para que el que
+    # llena el proyecto hasta el tope no arruine a los siguientes.
+    fs = F.listar_formulas(pid)
+    for f in fs[1:]:
+        F.eliminar_formula(f['id'])
+    return F, pid, subs
+
+
+def test_siempre_hay_al_menos_una_formula():
+    F, pid = _preparar()
+    fs = F.listar_formulas(pid)
+    assert len(fs) >= 1 and fs[0]['numero'] == 1
+
+
+def test_no_se_pasa_del_maximo_del_articulo_4():
+    """«Cada obra podrá tener hasta un máximo de cuatro (4) fórmulas»."""
+    F, pid, _ = _proyecto_con_subs()
+    while len(F.listar_formulas(pid)) < F.MAX_FORMULAS:
+        F.crear_formula(pid)
+    try:
+        F.crear_formula(pid)
+    except ValueError as e:
+        assert str(F.MAX_FORMULAS) in str(e), str(e)
+        return
+    raise AssertionError("dejó pasar del máximo de fórmulas")
+
+
+def test_la_ultima_formula_no_se_puede_eliminar():
+    F, pid = _preparar()
+    fid = F.formula_por_defecto(pid)
+    for f in F.listar_formulas(pid):
+        if f['id'] != fid:
+            F.eliminar_formula(f['id'])
+    try:
+        F.eliminar_formula(fid)
+    except ValueError:
+        return
+    raise AssertionError("borró la única fórmula del proyecto")
+
+
+def test_cada_formula_cubre_su_subpresupuesto():
+    """Art. 4: «el presupuesto se subdividirá en tantas partes como fórmulas»."""
+    F, pid, subs = _proyecto_con_subs()
+    f1 = F.formula_por_defecto(pid)
+    f2 = F.crear_formula(pid, 'ELÉCTRICAS')
+    F.asignar_subpresupuestos(f1, [subs[0]])
+    F.asignar_subpresupuestos(f2, [subs[1]])
+    r1 = F.calcular_por_iu(pid, formula_id=f1)
+    r2 = F.calcular_por_iu(pid, formula_id=f2)
+    assert r1['ok'] and r2['ok'], (r1.get('msg'), r2.get('msg'))
+    assert abs(r1['base'] - r2['base']) > 1, "las dos fórmulas dieron la misma base"
+    F.guardar_monomios(pid, r1['monomios'], formula_id=f1)
+    F.guardar_monomios(pid, r2['monomios'], formula_id=f2)
+    assert len(F.cargar_monomios(pid, f1)) == len(r1['monomios'])
+    assert len(F.cargar_monomios(pid, f2)) == len(r2['monomios'])
+    assert F.cargar_monomios(pid, f1) != F.cargar_monomios(pid, f2)
+
+
+def test_el_reajuste_se_reparte_entre_las_formulas():
+    """Cada fórmula reajusta lo valorizado de la parte que cubre."""
+    F, pid, subs = _proyecto_con_subs()
+    import core.indices_inei as I
+    f1 = F.formula_por_defecto(pid)
+    f2 = F.crear_formula(pid, 'SEGUNDA')
+    F.asignar_subpresupuestos(f1, [subs[0]])
+    F.asignar_subpresupuestos(f2, [subs[1]])
+    I.guardar_valor('21', 2026, 1, 100.0)
+    I.guardar_valor('21', 2026, 3, 120.0)   # +20%
+    I.guardar_valor('47', 2026, 1, 100.0)
+    I.guardar_valor('47', 2026, 3, 110.0)   # +10%
+    F.guardar_monomios(pid, [{'simbolo': 'C', 'descripcion': 'Cemento',
+                              'indice_inei': '21', 'coeficiente': 1.0}], f1)
+    F.guardar_monomios(pid, [{'simbolo': 'J', 'descripcion': 'Mano de obra',
+                              'indice_inei': '47', 'coeficiente': 1.0}], f2)
+    F.guardar_periodos(pid, 2026, 1, 2026, 3, '01')
+    r = F.reajuste_de_valorizacion(pid, 2026, 3, 3000.0,
+                                   {subs[0]: 1000.0, subs[1]: 2000.0})
+    assert r['aplica'], r['motivo']
+    assert len(r['formulas']) == 2, r['formulas']
+    por_id = {f['formula_id']: f for f in r['formulas']}
+    assert abs(por_id[f1]['reajuste'] - 200.0) < 0.01, por_id[f1]
+    assert abs(por_id[f2]['reajuste'] - 200.0) < 0.01, por_id[f2]
+    assert abs(r['reajuste'] - 400.0) < 0.01, r['reajuste']
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

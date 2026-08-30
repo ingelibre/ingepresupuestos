@@ -305,9 +305,27 @@ def init_db():
             activo INTEGER DEFAULT 1,
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        -- Art. 4 del D.S. 011-79-VC: «cada obra podrá tener hasta un máximo de
+        -- cuatro (4) fórmulas polinómicas. En caso que en un contrato existan
+        -- obras de diversa naturaleza, sólo podrá emplearse hasta ocho (8)», y
+        -- el presupuesto se subdivide en tantas partes como fórmulas. Cada
+        -- fórmula cubre uno o más subpresupuestos.
+        CREATE TABLE IF NOT EXISTS formulas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+            numero INTEGER NOT NULL DEFAULT 1,
+            nombre TEXT DEFAULT '',
+            UNIQUE(proyecto_id, numero)
+        );
+        CREATE TABLE IF NOT EXISTS formula_subpresupuestos (
+            formula_id INTEGER NOT NULL REFERENCES formulas(id) ON DELETE CASCADE,
+            sub_presupuesto_id INTEGER,
+            PRIMARY KEY (formula_id, sub_presupuesto_id)
+        );
         CREATE TABLE IF NOT EXISTS formula_monomios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+            formula_id INTEGER DEFAULT NULL,
             orden INTEGER DEFAULT 0,
             simbolo TEXT DEFAULT 'A',
             descripcion TEXT DEFAULT '',
@@ -320,6 +338,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS formula_monomio_iu (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+            formula_id INTEGER DEFAULT NULL,
             orden INTEGER NOT NULL DEFAULT 0,
             indice_inei TEXT NOT NULL,
             monto REAL DEFAULT 0
@@ -579,6 +598,12 @@ def init_db():
         # Color «post-it» de la card del dashboard (hex). Vacío = hereda el
         # color de su portafolio; ver utils.theme.color_postit.
         ('proy_color',    "ALTER TABLE proyectos ADD COLUMN color TEXT DEFAULT ''"),
+        # Art. 4: varias fórmulas polinómicas por obra.
+        ('fm_formula_id',  "ALTER TABLE formula_monomios ADD COLUMN formula_id INTEGER"),
+        ('fmiu_formula_id',"ALTER TABLE formula_monomio_iu ADD COLUMN formula_id INTEGER"),
+        # `formula_periodos` NO lleva formula_id: la fecha del presupuesto base,
+        # la del reajuste y el área geográfica son de la OBRA, y todas sus
+        # fórmulas comparten las mismas.
     ]:
         try:
             conn.execute(ddl)
