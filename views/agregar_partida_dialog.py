@@ -753,8 +753,9 @@ class AgregarPartidaDialog(QDialog):
                 tot[t] += d['parcial']
                 normales.append(d)
         for d in pct:
-            u = (d['unidad'] or '').lower()
-            base = tot.get('MO' if '%mo' in u else 'MAT' if '%mat' in u else 'MO', 0)
+            # Misma regla que el ACU real: una sola definición en core.database.
+            from core.database import base_overhead
+            base = tot.get(base_overhead(d['unidad']), 0)
             d['parcial'] = _rn((d['cantidad'] or 0) / 100 * base, 2)
 
         # Render agrupado por tipo

@@ -579,6 +579,71 @@ def test_importador_delphin_subpartidas_no_duplican():
             os.unlink(dbtmp)
 
 
+
+# ── Unidades «porcentaje»: sobre qué subtotal se aplica cada una ─────────────
+
+def test_base_overhead_reconoce_las_grafias_reales():
+    """`%mt` es «% de materiales» en S10 y en PowerCost, no «% de MO».
+
+    El estándar peruano usa cinco unidades porcentaje (ver
+    ingeconverter/docs/s10_schema_notes.md). La app resuelve las tres que son
+    subtotales del propio ACU; `%pu` y `%cd` conservan la base MO histórica
+    porque su base no vive dentro del ACU.
+
+    Antes sólo se reconocían `%mo` y `%mat` —esta última una grafía propia de
+    la app que NO usa ningún archivo real— y todo lo demás caía en MO.
+    """
+    b = d.base_overhead
+    # mano de obra
+    assert b('%mo') == 'MO' and b('%MO') == 'MO'
+    # materiales: la grafía real del mercado y la propia de la app
+    assert b('%mt') == 'MAT' and b('%MT') == 'MAT'
+    assert b('%mat') == 'MAT' and b('%MAT') == 'MAT'
+    # equipos
+    assert b('%eq') == 'EQ' and b('%EQ') == 'EQ'
+    # sin resolver: se quedan en la base histórica, no se inventa semántica
+    assert b('%pu') == 'MO', "«% del precio unitario» es recursivo, no se resuelve"
+    assert b('%cd') == 'MO', "«% del costo directo» es de presupuesto, no de ACU"
+    assert b('%') == 'MO'
+    # entradas degeneradas
+    assert b(None) == 'MO' and b('') == 'MO' and b('kg') == 'MO'
+
+
+def test_overhead_porcentaje_de_materiales_usa_los_materiales():
+    """Un insumo `%MT` se calcula sobre el subtotal de MATERIALES."""
+    items = [
+        {'cantidad': 2.0,  'precio': 50.0, 'unidad': 'hh',  'tipo': 'MO'},   # MO  = 100
+        {'cantidad': 4.0,  'precio': 25.0, 'unidad': 'kg',  'tipo': 'MAT'},  # MAT = 100... 
+        {'cantidad': 10.0, 'precio': 40.0, 'unidad': 'kg',  'tipo': 'MAT'},  # +400 → MAT = 500
+        {'cantidad': 3.0,  'precio': 0.0,  'unidad': '%MT', 'tipo': 'MAT'},  # 3% de MAT
+    ]
+    # MO=100 · MAT=500 · 3% de 500 = 15  →  100 + 500 + 15 = 615
+    assert d._pu_desde_items(items) == 615.0
+    # con la regla vieja habría dado 100+500+3 = 603 (3% de la MO)
+
+    # y el mismo ACU con %MO sí se calcula sobre la mano de obra
+    items[-1] = {'cantidad': 3.0, 'precio': 0.0, 'unidad': '%MO', 'tipo': 'EQ'}
+    assert d._pu_desde_items(items) == 603.0   # 3% de 100 = 3
+
+
+def test_la_regla_de_overhead_tiene_un_solo_dueno():
+    """Los tres sitios que resolvían la base usan el helper, no una copia.
+
+    Estaba escrita tres veces —`_pu_desde_items`, `get_acu_items` y el diálogo
+    de agregar partida— con el mismo ternario. Arreglar dos de tres dejaba la
+    vista previa del diálogo mostrando otro número que el ACU real.
+    """
+    import inspect
+    import views.agregar_partida_dialog as apd
+    fuentes = {
+        'core.database': inspect.getsource(d),
+        'views.agregar_partida_dialog': inspect.getsource(apd),
+    }
+    for nombre, src in fuentes.items():
+        assert "'%mo' in" not in src, \
+            f"{nombre} volvió a resolver la base a mano en vez de base_overhead()"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

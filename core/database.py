@@ -594,6 +594,38 @@ def init_db():
     except Exception:
         pass
 
+    # Biblioteca: refrescar el costo unitario de los CU cuyo overhead cambió de
+    # base al reconocerse `%mt` y `%eq` (antes caían en MO). Sin esto la lista
+    # muestra un número y al insertar el CU en un proyecto sale otro. Solo toca
+    # los CU que llevan una de esas dos unidades — el resto no se recalcula, que
+    # podría pisar un costo tecleado a mano. One-shot con bandera.
+    try:
+        ya = conn.execute(
+            "SELECT 1 FROM configuracion WHERE clave='overhead_mt_eq'"
+        ).fetchone()
+        if not ya:
+            afectados = [r['id'] for r in conn.execute(
+                """SELECT DISTINCT cu.id FROM biblioteca_cu cu
+                   JOIN biblioteca_acu_items ai ON ai.cu_id = cu.id
+                   JOIN recursos r ON r.id = ai.recurso_id
+                   WHERE LOWER(COALESCE(r.unidad,'')) LIKE '%mt%'
+                      OR LOWER(COALESCE(r.unidad,'')) LIKE '%eq%'""")]
+            for cu_id in afectados:
+                items = [dict(x) for x in conn.execute(
+                    """SELECT ai.cantidad, COALESCE(ai.precio, r.precio, 0) AS precio,
+                              r.unidad, r.tipo
+                       FROM biblioteca_acu_items ai
+                       JOIN recursos r ON r.id = ai.recurso_id
+                       WHERE ai.cu_id=?""", (cu_id,))]
+                if items:
+                    conn.execute("UPDATE biblioteca_cu SET costo_unitario=? WHERE id=?",
+                                 (_pu_desde_items(items), cu_id))
+            conn.execute("INSERT OR REPLACE INTO configuracion (clave, valor)"
+                         " VALUES ('overhead_mt_eq', '1')")
+            conn.commit()
+    except Exception:
+        pass
+
     try:
         conn.execute("UPDATE proyectos SET modificado_en = creado_en WHERE modificado_en IS NULL")
         conn.commit()
@@ -982,6 +1014,47 @@ def calcular_totales(proyecto_id):
     }
 
 
+# ── Unidades «porcentaje» (overhead dentro del ACU) ──────────────────────────
+# El estándar peruano usa cinco, iguales en S10 y en PowerCost (documentadas en
+# ingeconverter/docs/s10_schema_notes.md · CodUnidad entre paréntesis):
+#
+#     %mo (006) del subtotal de mano de obra     ← herramientas manuales
+#     %mt (007) del subtotal de materiales       ← «VARIOS (% MATERIALES)»
+#     %eq (003) del subtotal de equipos
+#     %pu (008) del precio unitario              ← recursivo, no resuelto
+#     %cd (002) del costo directo                ← nivel presupuesto, no ACU
+#
+# La app resuelve las TRES primeras, que son subtotales que ya tiene a mano.
+# `%pu` y `%cd` necesitan una base que no vive dentro del ACU, así que
+# conservan la base MO histórica hasta que se decida su semántica (decisión
+# del autor, 2026-08-29). `%mat` es la grafía propia de la app y se acepta
+# como sinónimo de `%mt`; ningún archivo de S10 ni de PowerCost la usa.
+#
+# ANTES sólo se reconocían `%mo` y `%mat`, y TODO lo demás caía en base MO.
+# Como el mundo real escribe `%mt`, un «% de materiales» se calculaba sobre la
+# mano de obra: en la biblioteca del seed eso desviaba hasta 986 soles en un
+# solo CU (TANQUE HIDRONEUMATICO: 10 160,16 en vez de 11 145,99).
+_BASES_OVERHEAD = (
+    ('%mo',  'MO'),     # primero: '%mo' no aparece dentro de '%mat' ni '%mt'
+    ('%mat', 'MAT'),
+    ('%mt',  'MAT'),
+    ('%eq',  'EQ'),
+)
+
+
+def base_overhead(unidad) -> str:
+    """Sobre qué subtotal del ACU se aplica un insumo con unidad «porcentaje».
+
+    Devuelve 'MO', 'MAT' o 'EQ'. Lo que no reconoce cae en 'MO', que es la
+    conducta histórica: cambiarla movería números de proyectos existentes.
+    """
+    u = (unidad or '').lower()
+    for marca, base in _BASES_OVERHEAD:
+        if marca in u:
+            return base
+    return 'MO'
+
+
 def _pu_desde_items(items) -> float:
     """Suma el costo unitario a partir de filas (cantidad, precio, unidad, tipo)
     del ACU. Mismas reglas que la app: parciales redondeados a decimales de
@@ -997,8 +1070,7 @@ def _pu_desde_items(items) -> float:
             totales_tipo[tipo] += parcial
     cu = sum(totales_tipo.values())
     for it in pct_pending:
-        unidad_l = (it['unidad'] or '').lower()
-        base = totales_tipo.get('MO' if '%mo' in unidad_l else 'MAT' if '%mat' in unidad_l else 'MO', 0)
+        base = totales_tipo.get(base_overhead(it['unidad']), 0)
         cu += _rn((it['cantidad'] or 0) / 100 * base, _DECIMALES_PPTO)
     return _rn(cu, _DECIMALES_PPTO)
 
@@ -1104,8 +1176,7 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
             totales_tipo[tipo] += parcial
 
     for it in pct_pending:
-        unidad_l = (it['unidad'] or '').lower()
-        base = totales_tipo.get('MO' if '%mo' in unidad_l else 'MAT' if '%mat' in unidad_l else 'MO', 0)
+        base = totales_tipo.get(base_overhead(it['unidad']), 0)
         it['parcial'] = _r2((it['cantidad'] or 0) / 100 * base)
         it['precio'] = _r2(base)
         tipo = it['tipo'] if it['tipo'] in totales_tipo else 'EQ'
