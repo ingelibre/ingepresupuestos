@@ -172,19 +172,71 @@ Topbar (← Inicio · pestañas · Total) + toolbar + `QSplitter` H/V. Panel der
 - **INEI:** el catálogo es **editable** y vive en la tabla `indices_inei`; la lista del código es solo semilla (72 códigos, no 80 — la numeración oficial va del 01 al 80 con huecos 25/35/36/58/63/67/75/76). 6 áreas, auto-detección por HEAD requests.
 - **Export MS Project (MSPDI XML):** formato abierto (abre en ProjectLibre/GanttProject). Reglas críticas: `Manual=0` (sin esto → duración 0), NO emitir `Finish`/`ManualFinish`; tareas sin predecesora → SNET; `id` incrustado en Text29 «IngeID».
 
-### Índices unificados y fórmula por IU (3.0.4)
+### Índices unificados y fórmula polinómica (3.0.4)
 
-Pedido por correo de un usuario: poder editar la relación de IU, un diccionario
-insumo→IU, y ver/editar qué compone cada monomio. Lo que apareció al abrirlo:
+Pedido por correo de un usuario: poder editar la relación de IU, el diccionario
+insumo→IU, y ver/editar qué compone cada monomio. Al abrirlo apareció que el
+INEI había cambiado el régimen entero.
 
-- **El catálogo estaba escrito DOS veces** (`core/indices_inei.py: CATALOGO_INEI` y `views/recursos_view.py: INEI_CATALOG`), ambas rotuladas «80 entradas» cuando son 72. Ahora la verdad es la **tabla** `indices_inei` y las vistas la leen con `catalogo()`. **NO volver a hardcodear la lista**: con el catálogo editable, una copia significa que el alta del usuario no llega a ese combo.
-- **`indices_inei_valores` no tiene clave foránea**, así que los valores de un código ausente del catálogo SÍ se guardaban pero quedaban invisibles (la lista sale de `indices_inei`). Por eso los códigos > 80 del archivo oficial entraban y desaparecían. `guardar_valores` los da de alta solo con `asegurar_codigos`.
-- **La semilla corre una vez por `SEED_VERSION`** (flag `seed_inei_ver`), o los borrados del usuario resucitan al reiniciar. Subir `SEED_VERSION` al agregar entradas nuevas a `CATALOGO_INEI`. El alta/edición/baja llaman a `asegurar_seed` ANTES de escribir: si no, un borrado sobre una BD donde la semilla aún no corrió se deshace en la siguiente lectura.
-- **`incidencias_por_iu`** reparte el CD entre los índices usando `get_insumos_para_partidas` —el camino del reporte de insumos, que cuadra el redondeo— y NO una consulta nueva: así la fórmula no puede discrepar del presupuesto impreso (verificado: dif 0.0000 en tres proyectos de la semilla).
-- **`calcular_por_iu`**: índice ≥5% → monomio propio; el resto al afín (mismo tipo → el del índice general 39 → el mayor); máx. 8; si ninguno llega al 5% degrada a J/M/E. La composición se guarda en `formula_monomio_iu` enlazada por **`orden`, no por id** (`guardar_monomios` borra y reinserta, los ids no son estables).
-- **K de un monomio agrupado** usa el promedio de sus índices ponderado por monto (`_indice_ponderado`). Los monomios sin composición (anteriores a la 3.0.4) siguen con su índice único y NO cambian de número.
-- **`core/diccionario_iu.py`**: propuestas por parecido de descripción. La trampa del dominio es que `token_set_ratio("cemento portland tipo v", "…tipo i") = 95.7` y son índices distintos (23 y 21); ningún scorer los separa. De ahí `MARGEN_AMBIGUO = 3.0`: si el mejor candidato de OTRO índice queda a menos de 3 puntos, la propuesta sale marcada y desmarcada. **Nunca aplicar propuestas sin revisión**: un índice mal asignado mueve costo de un monomio a otro.
-- El '00' NO es un índice del INEI: es el centinela de `core.parte_diario` para lo sin clasificar. Excluirlo siempre de huérfanos y de «clasificados».
+**RJ 016-2026-INEI (20-01-2026)** — base `Julio 1992 = 100` → `Diciembre 2025 =
+100`, 6 áreas → **13**, relación de 68 → **77 índices (01-95)**, y un **Anexo 2:
+Diccionario de Elementos de la Construcción** de 1930 elementos. Todo eso viaja
+en `resources/indices_inei_oficial.json` (empaquetado en el `.spec`).
+
+- **Las dos series conviven y NO se mezclan.** 30 códigos cambiaron de
+  significado —el 21 era «Cemento Portland Tipo I» y ahora es «Cemento Portland
+  e hidráulico», que absorbió el 22 y el 23, desaparecidos— así que `serie`
+  entra en la clave primaria de las tres tablas de índices. `serie_de(anio,mes)`
+  decide por fecha (corte: 2025-12) y `obtener_valor` la deduce sola.
+  `calcular_reajuste_k` SE NIEGA si oferta y reajuste caen en bases distintas.
+  **Cuidado con los JOIN a `indices_inei`: SIEMPRE filtrar por serie**, o cada
+  fila sale duplicada (nos pasó en `cargar_componentes` y partía a la mitad los
+  pesos del promedio ponderado de K).
+- **El importador oficial leía el archivo al revés.** Las hojas del INEI son UNA
+  POR MES y sus columnas son ÁREAS; el lector tomaba `wb.active` y trataba los
+  números 1..6 como MESES. Sacaba 376 valores inventados donde hay 36 444.
+  `_importar_oficial` reconoce el formato real (dos bloques de códigos lado a
+  lado, marcador `(*) Sin índice`); si no es ese formato cae al lector libre.
+- **La semilla corre una vez POR SERIE** (`seed_inei_<serie>`), y el alta,
+  edición y baja llaman a `asegurar_seed` ANTES de escribir: sin eso un borrado
+  sobre una BD sin sembrar se deshacía en la siguiente lectura. Ojo también con
+  llamarla en todo camino que lea nombres del catálogo (`incidencias_por_iu`,
+  `sugerencias`), o salen como «Índice 49».
+- **NO volver a hardcodear la lista de índices.** Estuvo duplicada en
+  `core/indices_inei.py` y `views/recursos_view.py`; la verdad es la tabla y se
+  lee con `catalogo(serie=…)`. La constante queda solo como respaldo.
+
+**La fórmula, artículo por artículo (D.S. 011-79-VC):**
+
+- **Base = SUBTOTAL del presupuesto** (CD + gastos generales + utilidad), no el
+  costo directo, y GG+utilidad son SIEMPRE un monomio (`GU`). Sale de
+  `calcular_totales`, el mismo subtotal que imprime el presupuesto.
+- **El índice de un monomio agrupado promedia HASTA TRES** componentes, los de
+  mayor peso (`MAX_IU_POR_INDICE`). El monomio sí puede agrupar más incidencia
+  —el tope es sobre el ÍNDICE, no sobre el reparto del costo.
+- **Coeficientes al milésimo** (`DECIMALES_K = 3`), ≥ 0.050, ≤ 8 monomios.
+- **Hasta 4 fórmulas por obra** (8 con obras de diversa naturaleza), cada una
+  sobre los subpresupuestos que se le asignen (`formulas`,
+  `formula_subpresupuestos`, `formula_id`). `formula_periodos` NO lleva
+  formula_id: las fechas y el área son de la obra.
+- La composición se guarda en `formula_monomio_iu` enlazada por **`orden` y
+  `formula_id`, no por id** (`guardar_monomios` borra y reinserta).
+
+**ADMINISTRACIÓN DIRECTA: la fórmula polinómica NO aplica.** Es de obras por
+contrata. `aplica_formula(pid)` lo resuelve por `proyectos.modalidad` y la regla
+se aplica en los tres sitios: el botón del presupuesto, la vista, y el reajuste
+de la valorización. Antes solo existía como frase en los docs y en el asistente.
+
+**K llega a las valorizaciones**: `get_valorizacion_detalle` devuelve un bloque
+`reajuste` con R = V·(K−1), repartido por fórmula según el subpresupuesto de
+cada partida.
+
+**El diccionario oficial manda** sobre el parecido con la biblioteca propia:
+aprender de la biblioteca propaga sus errores de clasificación. `MARGEN_AMBIGUO
+= 3.0` marca las propuestas con un rival cercano de OTRO índice —«CEMENTO
+PORTLAND TIPO V» se parece 95.7% a «TIPO I»— y esas NO se aplican solas.
+
+El '00' NO es un índice del INEI: es el centinela de `core.parte_diario`.
 
 ---
 
