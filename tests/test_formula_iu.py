@@ -122,19 +122,74 @@ def test_no_pasa_de_ocho_monomios():
     assert len(F.calcular_por_iu(pid)['monomios']) <= 8
 
 
-def test_agrupar_no_pierde_costo_directo():
-    """Todo índice termina en algún monomio: los montos deben cerrar."""
+def test_agrupar_no_pierde_nada_de_la_base():
+    """Todo termina en algún monomio: los montos deben cerrar con el subtotal.
+
+    La base NO es el costo directo sino el subtotal del presupuesto —costo
+    directo + gastos generales + utilidad—, que es sobre lo que el art. 2 del
+    D.S. 011-79-VC calcula las incidencias.
+    """
     F, pid = _preparar()
     r = F.calcular_por_iu(pid)
     suma = sum(c['monto'] for m in r['monomios'] for c in m['componentes'])
-    assert abs(suma - r['cd']) < 0.01, f"se perdieron S/ {r['cd'] - suma:,.2f}"
+    assert abs(suma - r['base']) < 0.01, f"se perdieron S/ {r['base'] - suma:,.2f}"
+    assert r['base'] > r['cd'], "la base no incluyó gastos generales y utilidad"
 
 
 def test_cada_indice_esta_en_un_solo_monomio():
+    """Salvo el de gastos generales y utilidad, que lleva el índice general y
+    puede coincidir con el del monomio de materiales varios."""
     F, pid = _preparar()
     r = F.calcular_por_iu(pid)
-    vistos = [c['codigo'] for m in r['monomios'] for c in m['componentes']]
+    vistos = [c['codigo'] for m in r['monomios'] if m['tipo'] != 'GU'
+              for c in m['componentes']]
     assert len(vistos) == len(set(vistos)), "un índice quedó en dos monomios"
+
+
+def test_gastos_generales_y_utilidad_son_un_monomio_propio():
+    """Art. 2: «e·(GU/GUo)». Sin él, ese 13-19% del contrato no se reajusta."""
+    F, pid = _preparar()
+    r = F.calcular_por_iu(pid)
+    gu = [m for m in r['monomios'] if m['tipo'] == 'GU']
+    assert len(gu) == 1, f"monomios GU: {len(gu)}"
+    assert gu[0]['simbolo'] == 'GU'
+    assert gu[0]['coeficiente'] > 0
+    esperado = r['gg_utilidad'] / r['base']
+    assert abs(gu[0]['coeficiente'] - esperado) < 0.002, (
+        gu[0]['coeficiente'], esperado)
+
+
+def test_los_coeficientes_van_al_milesimo():
+    """Art. 2: «cifras decimales con aproximación al milésimo»."""
+    F, pid = _preparar()
+    for m in F.calcular_por_iu(pid)['monomios']:
+        k = m['coeficiente']
+        assert abs(k - round(k, 3)) < 1e-9, f"{m['simbolo']} = {k}"
+
+
+def test_el_indice_del_monomio_sale_de_tres_componentes_como_mucho():
+    """Art. 2: «promedio ponderado de los índices hasta de tres elementos».
+
+    El monomio puede agrupar la incidencia de más —descartarlos perdería costo
+    directo— pero solo los tres de mayor peso forman su índice.
+    """
+    F, pid = _preparar()
+    import core.indices_inei as I
+    comps = [{'codigo': c, 'nombre': f'IU {c}', 'monto': m}
+             for c, m in (('21', 50.0), ('43', 30.0), ('05', 15.0), ('04', 5.0))]
+    for c in ('21', '43', '05', '04'):
+        I.guardar_valor(c, 2020, 1, 100.0)
+        I.guardar_valor(c, 2021, 1, 200.0)
+    F.guardar_monomios(pid, [{'simbolo': 'M', 'descripcion': 'Agrupado',
+                              'indice_inei': '21', 'coeficiente': 1.0,
+                              'componentes': comps}])
+    fila = F.calcular_reajuste_k(pid, 2020, 1, 2021, 1, '01')['detalle'][0]
+    assert len(fila['componentes']) == 3, \
+        f"el índice usó {len(fila['componentes'])} componentes"
+    assert fila['componentes'][0]['acompanantes'] == 1, \
+        "no informó cuántos índices quedaron fuera del promedio"
+    assert abs(sum(c['peso'] for c in fila['componentes']) - 1.0) < 1e-9, \
+        "los pesos no se renormalizaron sobre los tres"
 
 
 def test_el_simbolo_de_cada_monomio_es_unico_y_sin_tilde():
@@ -170,7 +225,7 @@ def test_la_composicion_se_guarda_y_se_relee():
     comps = F.cargar_componentes(pid)
     assert comps, "no se guardó la composición"
     total_guardado = sum(c['monto'] for lista in comps.values() for c in lista)
-    assert abs(total_guardado - r['cd']) < 0.01
+    assert abs(total_guardado - r['base']) < 0.01
     assert len(comps) == len(r['monomios'])
 
 

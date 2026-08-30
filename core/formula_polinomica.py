@@ -27,13 +27,26 @@ from __future__ import annotations
 import unicodedata
 
 from core.config import INEI_DEFAULT
-from core.indices_inei import SERIE_ACTUAL as SERIE_NOMBRES
 from core.database import get_db, get_insumos_para_partidas
 
 
-# Reglas del D.S. 011-79-VC que acota la fórmula.
-MIN_INCIDENCIA = 0.05     # cada monomio pesa al menos 5%
-MAX_MONOMIOS = 8          # y no puede haber más de ocho
+# Reglas del D.S. 011-79-VC que acotan la fórmula.
+MIN_INCIDENCIA = 0.05     # art. 3: cada monomio pesa al menos 5%
+MAX_MONOMIOS = 8          # art. 3: y no puede haber más de ocho
+DECIMALES_K = 3           # art. 2: coeficientes «con aproximación al milésimo»
+
+# Art. 2: «el índice de precio considerado en cada monomio podrá corresponder
+# al índice del elemento más representativo o al promedio ponderado de los
+# índices HASTA DE TRES (3) ELEMENTOS COMO MÁXIMO». Un monomio puede agrupar la
+# incidencia de más insumos —si no, se perdería costo directo— pero el índice
+# que lo representa sale de sus tres componentes de mayor peso.
+MAX_IU_POR_INDICE = 3
+
+# Índice del monomio de gastos generales y utilidad. El D.S. lo trata siempre
+# como UN solo monomio y no fija su índice; la práctica usa el índice general
+# de precios al consumidor.
+IU_GASTOS_GENERALES = '39'
+SIMBOLO_GU = 'GU'
 
 # Letra con la que se nombra el monomio según el tipo que lo domina. J de
 # jornal, M de materiales, E de equipo: la convención de las fórmulas peruanas.
@@ -143,7 +156,8 @@ def calcular_desde_acu(proyecto_id: int) -> dict:
     }
 
 
-def incidencias_por_iu(proyecto_id: int) -> dict:
+def incidencias_por_iu(proyecto_id: int,
+                       serie: str | None = None) -> dict:
     """Reparte el costo directo del proyecto entre los índices unificados.
 
     Es lo que faltaba para armar una fórmula polinómica de verdad. Hasta ahora
@@ -170,6 +184,14 @@ def incidencias_por_iu(proyecto_id: int) -> dict:
                   'asignado'}],
          'monto_sin_indice': float}
     """
+    # Los códigos de índice de los insumos pertenecen a una SERIE: el 22 es
+    # «Cemento Portland Tipo II» en la base 1992 y no existe en la de 2025. La
+    # que manda es la del presupuesto base, así que los nombres se buscan ahí.
+    from core.indices_inei import asegurar_seed, serie_de
+    if serie is None:
+        per = cargar_periodos(proyecto_id)
+        serie = serie_de(per['oferta_anio'], per['oferta_mes'])
+
     conn = get_db()
     try:
         partida_ids = [r['id'] for r in conn.execute(
@@ -179,9 +201,13 @@ def incidencias_por_iu(proyecto_id: int) -> dict:
         insumos = get_insumos_para_partidas(conn, partida_ids)
         indices = {r['id']: (r['indice_inei'] or '').strip()
                    for r in conn.execute("SELECT id, indice_inei FROM recursos")}
+        # La fórmula puede ser el primer camino que toque los índices, y sin
+        # esto el catálogo de la serie estaría vacío y todo saldría como
+        # «Índice 80» en vez de su nombre.
+        asegurar_seed(conn)
         nombres = dict(conn.execute(
             "SELECT codigo, nombre FROM indices_inei WHERE serie=?",
-            (SERIE_NOMBRES,)).fetchall())
+            (serie,)).fetchall())
     finally:
         conn.close()
 
@@ -210,24 +236,44 @@ def incidencias_por_iu(proyecto_id: int) -> dict:
     cd = sum(a['monto'] for a in acum.values())
     if cd <= 0:
         return {'ok': False, 'msg': "El proyecto no tiene costos en el ACU.",
-                'cd': 0.0, 'ius': [], 'monto_sin_indice': 0.0}
+                'cd': 0.0, 'base': 0.0, 'ius': [], 'monto_sin_indice': 0.0}
+
+    # La base de las incidencias es el SUBTOTAL del presupuesto —costo directo
+    # + gastos generales + utilidad—, no el costo directo. Es lo que dice el
+    # art. 2 con su `e·(GU/GUo)`: si se reparte solo el CD, ese 15-20% del
+    # contrato se queda sin reajustar.
+    from core.database import calcular_totales
+    try:
+        _, tot = calcular_totales(proyecto_id)
+        gg_util = float(tot.get('gf') or 0) + float(tot.get('utilidad') or 0)
+        base = float(tot.get('subtotal') or 0) or (cd + gg_util)
+    except Exception:
+        gg_util, base = 0.0, cd
+    if gg_util > 0:
+        acum[IU_GASTOS_GENERALES + '@GU'] = {
+            'codigo': IU_GASTOS_GENERALES, 'monto': gg_util, 'n_insumos': 0,
+            'por_tipo': {'GU': gg_util}, 'monto_asignado': gg_util,
+        }
 
     ius = []
     for a in acum.values():
         # El tipo del índice es el que aporta más plata dentro de él: decide
         # con qué monomio se agrupa cuando su incidencia no llega al mínimo.
         tipo = max(a['por_tipo'].items(), key=lambda kv: kv[1])[0]
+        nombre = ("Gastos generales y utilidad" if tipo == 'GU'
+                  else nombres.get(a['codigo'], f"Índice {a['codigo']}"))
         ius.append({
             'codigo': a['codigo'],
-            'nombre': nombres.get(a['codigo'], f"Índice {a['codigo']}"),
+            'nombre': nombre,
             'tipo': tipo,
             'monto': a['monto'],
-            'incidencia': a['monto'] / cd,
+            'incidencia': a['monto'] / base,
             'n_insumos': a['n_insumos'],
             'asignado': a['monto_asignado'] >= a['monto'] - 1e-9,
         })
     ius.sort(key=lambda x: -x['monto'])
-    return {'ok': True, 'msg': '', 'cd': cd, 'ius': ius,
+    return {'ok': True, 'msg': '', 'cd': cd, 'base': base, 'ius': ius,
+            'serie': serie, 'gg_utilidad': gg_util,
             'monto_sin_indice': sin_indice}
 
 
@@ -239,7 +285,7 @@ def _simbolos_unicos(monomios: list[dict]) -> None:
     encabeza — C de cemento, A de acero, M de madera, T de tubería. Numerar
     M2, M3, M4 sería correcto y ilegible.
     """
-    usados: set[str] = set()
+    usados: set[str] = {SIMBOLO_GU}
     for m in monomios:
         tipo = m.get('tipo') or 'MAT'
         if tipo in ('MO', 'EQ'):
@@ -261,7 +307,8 @@ def _simbolos_unicos(monomios: list[dict]) -> None:
 
 
 def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
-                    min_incidencia: float = MIN_INCIDENCIA) -> dict:
+                    min_incidencia: float = MIN_INCIDENCIA,
+                    serie: str | None = None) -> dict:
     """Arma los monomios agrupando los índices unificados por su incidencia.
 
     Criterio, que es el estándar del D.S. 011-79-VC:
@@ -278,13 +325,20 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
     la composición completa queda en `componentes` para poder verla, editarla y
     —al calcular K— promediar los índices por su peso.
     """
-    inc = incidencias_por_iu(proyecto_id)
+    inc = incidencias_por_iu(proyecto_id, serie)
     if not inc['ok']:
         return {'ok': False, 'msg': inc['msg'], 'monomios': [],
-                'cd': 0.0, 'ius': []}
+                'cd': 0.0, 'base': 0.0, 'ius': []}
 
-    cd = inc['cd']
-    ius = inc['ius']
+    base = inc['base']
+    ius = list(inc['ius'])
+
+    # Gastos generales y utilidad van SIEMPRE en un monomio propio (art. 2), y
+    # ni ese ni el de mano de obra están sujetos al tope de tres índices.
+    gu = next((i for i in ius if i['tipo'] == 'GU'), None)
+    if gu:
+        ius.remove(gu)
+
     grandes = [i for i in ius if i['incidencia'] >= min_incidencia]
     chicos = [i for i in ius if i['incidencia'] < min_incidencia]
 
@@ -300,10 +354,11 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
             chicos = [c for c in chicos if c is not lista[0]]
         grandes.sort(key=lambda x: -x['monto'])
 
-    # Sobre el máximo: los excedentes se reparten como los chicos.
-    if len(grandes) > max_monomios:
-        chicos = chicos + grandes[max_monomios:]
-        grandes = grandes[:max_monomios]
+    # El tope de monomios deja sitio al de gastos generales y utilidad.
+    tope = max_monomios - (1 if gu else 0)
+    if len(grandes) > tope:
+        chicos = chicos + grandes[tope:]
+        grandes = grandes[:tope]
 
     monomios = [{
         'tipo': g['tipo'],
@@ -320,21 +375,34 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
     def _destino(iu):
         """El monomio afín al que se suma un índice que no llega al mínimo.
 
-        Por orden: el de más peso de su MISMO tipo; si no hay, el que lleva el
-        índice general; y recién entonces el mayor. Sin el paso del medio, un
-        equipo del 2% se fundía en el monomio de mano de obra solo por ser el
-        más grande — que no es afín ni de lejos.
+        Por orden: el de más peso de su MISMO tipo que todavía tenga hueco
+        (menos de tres índices); si no hay, el que lleva el índice general; y
+        recién entonces el mayor. Sin el paso del medio, un equipo del 2% se
+        fundía en el monomio de mano de obra solo por ser el más grande — que
+        no es afín ni de lejos.
         """
+        def con_hueco(cands):
+            libres = [m for m in cands
+                      if len(m['componentes']) < MAX_IU_POR_INDICE]
+            return libres or cands
+
         mismos = [m for m in monomios if m['tipo'] == iu['tipo']]
         if mismos:
-            return max(mismos, key=lambda m: m['monto'])
+            return max(con_hueco(mismos), key=lambda m: m['monto'])
         generales = [m for m in monomios
                      if any(c['codigo'] == IU_GENERAL for c in m['componentes'])]
         if generales:
-            return max(generales, key=lambda m: m['monto'])
-        return max(monomios, key=lambda m: m['monto'])
+            return max(con_hueco(generales), key=lambda m: m['monto'])
+        return max(con_hueco(monomios), key=lambda m: m['monto'])
 
     for c in sorted(chicos, key=lambda x: -x['monto']):
+        # Si todavía cabe un monomio más y el índice llega solo al mínimo,
+        # dejarlo aparte antes que engordar otro: menos índices por monomio.
+        if (len(monomios) < tope and c['incidencia'] >= min_incidencia):
+            monomios.append({'tipo': c['tipo'], 'descripcion': c['nombre'],
+                             'indice_inei': c['codigo'],
+                             'componentes': [dict(c)], 'monto': c['monto']})
+            continue
         d = _destino(c)
         d['componentes'].append(dict(c))
         d['monto'] += c['monto']
@@ -353,10 +421,21 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
     monomios.sort(key=lambda m: -m['monto'])
     _simbolos_unicos(monomios)
 
-    recalcular_coeficientes(monomios, cd)
+    # Gastos generales y utilidad, al final y con su símbolo propio.
+    if gu:
+        monomios.append({
+            'tipo': 'GU', 'simbolo': SIMBOLO_GU,
+            'descripcion': 'Gastos generales y utilidad',
+            'indice_inei': IU_GASTOS_GENERALES,
+            'componentes': [dict(gu)], 'monto': gu['monto'],
+        })
 
-    return {'ok': True, 'msg': '', 'monomios': monomios, 'cd': cd,
-            'ius': ius, 'monto_sin_indice': inc['monto_sin_indice']}
+    recalcular_coeficientes(monomios, base)
+
+    return {'ok': True, 'msg': '', 'monomios': monomios, 'cd': inc['cd'],
+            'base': base, 'ius': inc['ius'], 'serie': inc.get('serie'),
+            'gg_utilidad': inc.get('gg_utilidad', 0.0),
+            'monto_sin_indice': inc['monto_sin_indice']}
 
 
 def recalcular_coeficientes(monomios: list[dict], cd: float) -> None:
@@ -378,23 +457,24 @@ def recalcular_coeficientes(monomios: list[dict], cd: float) -> None:
         comps = m.get('componentes') or []
         if comps:
             m['monto'] = sum(float(c.get('monto') or 0) for c in comps)
-        m['coeficiente'] = round(float(m.get('monto') or 0) / cd, 4)
+        m['coeficiente'] = round(float(m.get('monto') or 0) / cd,
+                                 DECIMALES_K)
     _ajustar_a_uno(monomios)
 
 
 def _ajustar_a_uno(monomios: list[dict]) -> None:
-    """Corrige el cuarto decimal para que los coeficientes sumen 1.000 exactos.
+    """Corrige el último decimal para que los coeficientes sumen 1.000 exactos.
 
     El sobrante va al monomio más grande: es donde menos se nota y es lo que ya
     hacía `calcular_desde_acu` (que se lo daba a materiales).
     """
     if not monomios:
         return
-    total = round(sum(m['coeficiente'] for m in monomios), 4)
-    dif = round(1.0 - total, 4)
+    total = round(sum(m['coeficiente'] for m in monomios), DECIMALES_K)
+    dif = round(1.0 - total, DECIMALES_K)
     if dif:
         mayor = max(monomios, key=lambda m: m['coeficiente'])
-        mayor['coeficiente'] = round(mayor['coeficiente'] + dif, 4)
+        mayor['coeficiente'] = round(mayor['coeficiente'] + dif, DECIMALES_K)
 
 
 def cargar_componentes(proyecto_id: int,
@@ -560,9 +640,17 @@ def _indice_ponderado(comps, obtener_valor, oa, om, ra, rm, area):
 
     Devuelve (valor_oferta, valor_reajuste, n_sin_dato, detalle_componentes).
     """
+    # Art. 2: el índice del monomio es el del elemento más representativo o el
+    # promedio ponderado de HASTA TRES. El monomio puede agrupar la incidencia
+    # de más índices —si no, se perdería costo directo— pero solo los tres de
+    # mayor peso forman su índice.
+    comps = sorted(comps, key=lambda c: -float(c.get('monto') or 0))
+    representativos = comps[:MAX_IU_POR_INDICE]
+    acompanantes = len(comps) - len(representativos)
+
     utiles = []
     sin_dato = 0
-    for c in comps:
+    for c in representativos:
         cod = str(c.get('codigo') or '').strip().zfill(2)[:2]
         vo = obtener_valor(cod, oa, om, area) if cod else None
         vr = obtener_valor(cod, ra, rm, area) if cod else None
@@ -582,6 +670,8 @@ def _indice_ponderado(comps, obtener_valor, oa, om, ra, rm, area):
         det.append({'codigo': cod, 'nombre': c.get('nombre') or '',
                     'peso': peso, 'valor_o': vo, 'valor_r': vr})
     det.sort(key=lambda x: -x['peso'])
+    for d in det:
+        d['acompanantes'] = acompanantes
     return vo_p, vr_p, sin_dato, det
 
 
