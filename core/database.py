@@ -314,6 +314,16 @@ def init_db():
             indice_inei TEXT DEFAULT '',
             coeficiente REAL DEFAULT 0
         );
+        -- Composición de cada monomio: qué índices unificados lo forman y con
+        -- cuánto monto. Se enlaza por `orden` porque `guardar_monomios` borra y
+        -- reinserta los monomios enteros, así que sus ids no son estables.
+        CREATE TABLE IF NOT EXISTS formula_monomio_iu (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proyecto_id INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+            orden INTEGER NOT NULL DEFAULT 0,
+            indice_inei TEXT NOT NULL,
+            monto REAL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS acero_detalle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             partida_id INTEGER NOT NULL REFERENCES partidas(id) ON DELETE CASCADE,
@@ -770,6 +780,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_biblioteca_grupo     ON biblioteca_cu(grupo)",
         "CREATE INDEX IF NOT EXISTS idx_biblioteca_acu_cu    ON biblioteca_acu_items(cu_id)",
         "CREATE INDEX IF NOT EXISTS idx_inei_codigo          ON indices_inei_valores(codigo, anio, mes, area)",
+        "CREATE INDEX IF NOT EXISTS idx_formula_mono_iu     ON formula_monomio_iu(proyecto_id, orden)",
         # ── Dashboard (filtros por portafolio + ordenamiento) ─────────────
         "CREATE INDEX IF NOT EXISTS idx_proyectos_portafolio ON proyectos(portafolio_id)",
         "CREATE INDEX IF NOT EXISTS idx_proyectos_usuario    ON proyectos(usuario_id)",
