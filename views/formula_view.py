@@ -1053,11 +1053,26 @@ class FormulaView(QWidget):
         return fr
 
     def _ir_a_indices_inei(self):
-        """Navega al editor de Índices INEI a través de MainWindow."""
-        w = self
+        """Navega al editor de Índices INEI a través de los widgets padre.
+
+        El recorrido arranca en el PADRE, no en `self`. Arrancando en uno mismo
+        el primer `hasattr` daba positivo sobre este mismo método y se llamaba
+        en bucle: `RecursionError` al pulsar «Cargar valores INEI →».
+
+        Dos caminos válidos según quién sea el ancestro: `ProyectoView` expone
+        la señal `ir_a_indices_inei` y `MainWindow` el método
+        `_ir_a_indices_inei`, que además decide si abrir con el sidebar o como
+        atajo modal con banner de vuelta al proyecto.
+        """
+        w = self.parent()
         while w is not None:
-            if hasattr(w, "_ir_a_indices_inei"):
-                w._ir_a_indices_inei()
+            señal = getattr(w, 'ir_a_indices_inei', None)
+            if señal is not None and hasattr(señal, 'emit'):
+                señal.emit()
+                return
+            metodo = getattr(w, '_ir_a_indices_inei', None)
+            if callable(metodo):
+                metodo()
                 return
             w = w.parent()
         QMessageBox.information(

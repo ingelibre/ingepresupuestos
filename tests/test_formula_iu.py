@@ -532,6 +532,57 @@ def test_el_desglose_de_un_indice_sin_uso_lo_dice():
     assert '25' in des['msg']
 
 
+# ── Navegación: el botón «Cargar valores INEI →» ─────────────────────────────
+def test_ir_a_indices_no_se_llama_a_si_mismo():
+    """Bug encontrado probando: `RecursionError` al pulsar el botón.
+
+    El recorrido de los widgets padre arrancaba en `self`, y como esta misma
+    vista tiene el método buscado, el primer `hasattr` daba positivo sobre ella
+    y se llamaba en bucle hasta agotar la pila.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox
+    from PySide6.QtCore import Signal
+    app = QApplication.instance() or QApplication([])
+    QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+    from views.formula_view import FormulaView
+
+    conn = d.get_db()
+    pid = conn.execute("SELECT id FROM proyectos LIMIT 1").fetchone()[0]
+    conn.close()
+
+    # Sin ningún ancestro que sepa navegar: avisa, no revienta.
+    FormulaView(pid, "X")._ir_a_indices_inei()
+
+    # Con el ProyectoView, que expone la señal.
+    class FakeProyecto(QWidget):
+        ir_a_indices_inei = Signal()
+    padre = FakeProyecto()
+    lay = QVBoxLayout(padre)
+    v = FormulaView(pid, "X")
+    lay.addWidget(v)
+    recibido = []
+    padre.ir_a_indices_inei.connect(lambda: recibido.append(True))
+    v._ir_a_indices_inei()
+    assert recibido, "no emitió la señal del ProyectoView"
+
+    # Con el MainWindow, que expone el método.
+    class FakeMain(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.llamado = False
+
+        def _ir_a_indices_inei(self):
+            self.llamado = True
+    mw = FakeMain()
+    lay2 = QVBoxLayout(mw)
+    v2 = FormulaView(pid, "X")
+    lay2.addWidget(v2)
+    v2._ir_a_indices_inei()
+    assert mw.llamado, "no llegó al método de MainWindow"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
