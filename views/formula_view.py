@@ -616,6 +616,11 @@ class FormulaView(QWidget):
             | QAbstractItemView.AnyKeyPressed
         )
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # Un monomio a la vez: la tarjeta de Composición muestra el de la fila
+        # activa, así que seleccionar varios no significa nada. Con el modo
+        # extendido de serie, arrastrar sin querer desde una fila hasta otra
+        # marcaba TRES monomios y dejaba el panel mostrando el primero.
+        self.tbl.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tbl.setShowGrid(False)
         self.tbl.setStyleSheet(
             "QTableWidget { background:white; border:none; font-size:12px; }"
@@ -626,7 +631,12 @@ class FormulaView(QWidget):
             f"  font-size:11px; font-weight:700; }}"
         )
         self.tbl.itemChanged.connect(self._on_item_changed)
+        # `currentCellChanged` además de la selección: mover con el teclado o
+        # arrastrar cambia la fila activa sin que cambie la selección, y el
+        # panel tiene que seguir a la fila activa siempre.
         self.tbl.itemSelectionChanged.connect(self._render_composicion)
+        self.tbl.currentCellChanged.connect(
+            lambda *_: self._render_composicion())
 
         h = self.tbl.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 36)
@@ -666,6 +676,7 @@ class FormulaView(QWidget):
         self.tbl_comp.verticalHeader().setVisible(False)
         self.tbl_comp.setAlternatingRowColors(True)
         self.tbl_comp.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_comp.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tbl_comp.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl_comp.setShowGrid(False)
         self.tbl_comp.setStyleSheet(
@@ -744,6 +755,9 @@ class FormulaView(QWidget):
 
         self.tbl_comp.setRowCount(0)
         fila = self.tbl.currentRow()
+        if fila < 0:
+            filas = {i.row() for i in self.tbl.selectedIndexes()}
+            fila = min(filas) if filas else -1
         if fila < 0 or fila >= len(self._monomios):
             self.lbl_comp_titulo.setText("Composición del monomio")
             self.lbl_comp_badge.setText("")

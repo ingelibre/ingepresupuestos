@@ -583,6 +583,64 @@ def test_ir_a_indices_no_se_llama_a_si_mismo():
     assert mw.llamado, "no llegó al método de MainWindow"
 
 
+def test_solo_se_selecciona_un_monomio_y_el_panel_lo_sigue():
+    """Reportado probando: «selecciono un monomio pero si el mouse se va al
+    otro deja de seleccionarse».
+
+    La tabla estaba en `ExtendedSelection`, así que un arrastre involuntario
+    desde una fila hasta otra marcaba TRES monomios — y encima la tarjeta de
+    Composición se quedaba mostrando el primero. Un monomio a la vez, y el
+    panel sigue a la fila activa.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QAbstractItemView
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    app = QApplication.instance() or QApplication([])
+    from views.formula_view import FormulaView
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    F.guardar_monomios(pid, F.calcular_por_iu(pid)['monomios'])
+
+    v = FormulaView(pid, "X")
+    v.resize(1200, 700)
+    v.show()
+    v.cargar()
+    app.processEvents()
+    t = v.tbl
+    assert t.rowCount() >= 3, "hacen falta al menos tres monomios para probarlo"
+    assert t.selectionMode() == QAbstractItemView.SingleSelection
+
+    def centro(f):
+        return t.visualItemRect(t.item(f, 2)).center()
+
+    def titulo():
+        return v.lbl_comp_titulo.text()
+
+    QTest.mouseClick(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(0))
+    app.processEvents()
+    assert t.currentRow() == 0
+    primero = titulo()
+
+    # El arrastre involuntario: pulsar en la 0 y que el mouse llegue a la 2.
+    QTest.mousePress(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(0))
+    QTest.mouseMove(t.viewport(), centro(2))
+    app.processEvents()
+    QTest.mouseRelease(t.viewport(), Qt.LeftButton, Qt.NoModifier, centro(2))
+    app.processEvents()
+
+    filas = {i.row() for i in t.selectedIndexes()}
+    assert len(filas) == 1, f"quedaron {len(filas)} monomios seleccionados"
+    assert t.currentRow() == 2, t.currentRow()
+    assert titulo() != primero, "el panel se quedó en el monomio anterior"
+    assert v._monomios[2]['simbolo'] in titulo(), titulo()
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
