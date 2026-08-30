@@ -651,6 +651,88 @@ def test_el_monomio_activo_no_se_mueve_con_el_arrastre():
     assert t.currentRow() == 4, "el teclado dejó de mover el monomio activo"
 
 
+def test_escribir_un_indice_pone_su_nombre_y_avisa_si_ya_esta_en_otro():
+    """Dos cosas que se esperan al teclear un código en la columna Índice."""
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    app = QApplication.instance() or QApplication([])
+    from views.formula_view import FormulaView
+    from core.indices_inei import catalogo
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    F.guardar_monomios(pid, F.calcular_por_iu(pid)['monomios'])
+
+    respuesta = {'v': QMessageBox.Yes}
+    QMessageBox.question = staticmethod(lambda *a, **k: respuesta['v'])
+    QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+
+    v = FormulaView(pid, "X")
+    v.resize(1200, 700)
+    v.show()
+    v.cargar()
+    app.processEvents()
+    assert len(v._monomios[0].get('componentes') or []) > 1, \
+        "hace falta un monomio con varios índices para probarlo"
+
+    # ── un índice libre: solo rellena el nombre
+    usados = {c['codigo'] for m in v._monomios
+              for c in (m.get('componentes') or [])}
+    libre, nombre_libre = next((c, n) for c, n in catalogo() if c not in usados)
+    v._agregar_monomio()
+    app.processEvents()
+    fila = len(v._monomios) - 1
+    v.tbl.item(fila, 3).setText(libre)
+    app.processEvents()
+    assert v._monomios[fila]['descripcion'] == nombre_libre, \
+        v._monomios[fila]['descripcion']
+
+    # ── una descripción escrita a mano NO se pisa
+    v.tbl.item(fila, 2).setText('Mi texto propio')
+    app.processEvents()
+    otro = next(c for c, _ in catalogo() if c not in usados and c != libre)
+    v.tbl.item(fila, 3).setText(otro)
+    app.processEvents()
+    assert v._monomios[fila]['descripcion'] == 'Mi texto propio'
+
+    # ── un índice YA agrupado en otro monomio: ofrece moverlo
+    cod = v._monomios[0]['componentes'][1]['codigo']
+    n_origen = len(v._monomios[0]['componentes'])
+    v._agregar_monomio()
+    app.processEvents()
+    f2 = len(v._monomios) - 1
+    v.tbl.item(f2, 3).setText(cod)
+    app.processEvents()
+    assert len(v._monomios[0]['componentes']) == n_origen - 1, \
+        "no lo sacó del monomio de origen"
+    assert len(v._monomios[f2]['componentes']) == 1
+    assert abs(sum(m['coeficiente'] for m in v._monomios) - 1.0) < 0.002
+
+
+def test_un_monomio_con_indice_y_sin_incidencia_se_marca():
+    """Queda así al crear uno nuevo y no moverle ningún índice."""
+    F, pid = _preparar()
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from views.formula_view import FormulaView
+    v = FormulaView(pid, "X")
+    v._monomios = [
+        {'simbolo': 'J', 'descripcion': 'Mano de obra', 'indice_inei': '47',
+         'coeficiente': 1.0},
+        {'simbolo': 'B', 'descripcion': 'Vacío', 'indice_inei': '21',
+         'coeficiente': 0.0},
+    ]
+    problemas = ' '.join(v._validar_formula())
+    assert 'Sin incidencia' in problemas, problemas
+    assert 'B' in problemas
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

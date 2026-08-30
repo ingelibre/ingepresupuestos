@@ -334,6 +334,7 @@ class FormulaView(QWidget):
         self._cd: float = 0.0          # costo directo con que se armó la fórmula
         self._aplica: bool = True      # falso en administración directa
         self._formula_id: int | None = None   # art. 4: hasta 4 por obra
+        self._cat_iu: dict | None = None      # códigos → nombre, cacheado
         self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
@@ -1139,6 +1140,7 @@ class FormulaView(QWidget):
             self._render_tabla()
             return
 
+        self._cat_iu = None
         self._refrescar_formulas()
         self._monomios = cargar_monomios(self.pid, self._formula_id)
         # La composición vive en su propia tabla, enlazada por `orden`. Los
@@ -1252,7 +1254,9 @@ class FormulaView(QWidget):
         elif col == 2:
             m['descripcion'] = item.text().strip()
         elif col == 3:
+            anterior = m.get('indice_inei', '')
             m['indice_inei'] = item.text().strip()
+            self._al_cambiar_indice(row, m, anterior)
         elif col == 4:
             m['coeficiente'] = max(0.0, parse_num(item.text()))
             self.tbl.blockSignals(True)
@@ -1265,6 +1269,74 @@ class FormulaView(QWidget):
 
         self._actualizar_totales()
         self._render_expr()
+
+    def _catalogo_iu(self) -> dict:
+        """Códigos → nombre de la serie del presupuesto base, cacheado."""
+        if getattr(self, '_cat_iu', None) is None:
+            from core.indices_inei import catalogo, serie_de
+            per = cargar_periodos(self.pid)
+            serie = serie_de(per['oferta_anio'], per['oferta_mes'])
+            try:
+                self._cat_iu = dict(catalogo(serie=serie))
+            except Exception:
+                self._cat_iu = {}
+        return self._cat_iu
+
+    def _al_cambiar_indice(self, row: int, m: dict, anterior: str):
+        """Escribir un código de índice: pone su nombre y avisa si ya está en uso.
+
+        Dos cosas que el usuario espera al teclear «21» en la columna Índice:
+
+        1. Que aparezca su nombre. La descripción se rellena si estaba vacía o
+           si era el nombre del código anterior — si el usuario escribió un
+           texto propio, no se le pisa.
+        2. Que le avise si ese índice YA forma parte de otro monomio. Dejar el
+           mismo índice en dos sitios descuadra la fórmula: su monto sigue
+           contado en el monomio viejo y este se queda sin composición, con
+           coeficiente cero. Se ofrece MOVERLO, que es lo que se quiere hacer.
+        """
+        codigo = (m.get('indice_inei') or '').strip()
+        cat = self._catalogo_iu()
+        nombre = cat.get(codigo, '')
+
+        # 1) el nombre en la descripción
+        actual = (m.get('descripcion') or '').strip()
+        if nombre and (not actual or actual == cat.get(anterior, '\x00')):
+            m['descripcion'] = nombre
+            self.tbl.blockSignals(True)
+            it = self.tbl.item(row, 2)
+            if it:
+                it.setText(nombre)
+            self.tbl.blockSignals(False)
+
+        if not codigo:
+            return
+
+        # 2) ¿ese índice ya está agrupado en otro monomio?
+        origen = next(
+            (i for i, mm in enumerate(self._monomios)
+             if i != row and any(c.get('codigo') == codigo
+                                 for c in (mm.get('componentes') or []))),
+            None)
+        if origen is None:
+            return
+
+        m_orig = self._monomios[origen]
+        comp = next(c for c in m_orig['componentes'] if c['codigo'] == codigo)
+        moneda = self._proyecto_meta.get('moneda', 'Soles')
+        r = QMessageBox.question(
+            self, "El índice ya está en otro monomio",
+            f"«{nombre or codigo}» ({fmt(comp.get('monto', 0), moneda)}) ya "
+            f"forma parte del monomio «{m_orig.get('simbolo')}».\n\n"
+            f"¿Moverlo a «{m.get('simbolo')}»?\n\n"
+            f"Si no lo mueves, su monto sigue contando en "
+            f"«{m_orig.get('simbolo')}» y este monomio se queda sin "
+            f"composición, con coeficiente cero.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if r != QMessageBox.Yes:
+            return
+        self._mover_componente(codigo, origen, row)
 
     def _eliminar_fila(self, row: int):
         """Elimina un monomio. Sus índices se pasan al mayor de los que quedan.
@@ -1346,6 +1418,18 @@ class FormulaView(QWidget):
             issues.append(
                 "Incidencia menor al 5% (mínimo legal 0.050): "
                 + ", ".join(bajos) + ".")
+        # Coeficiente CERO con un índice ya escrito: el monomio no aporta nada
+        # a la fórmula. Pasa al crear uno nuevo y no moverle ningún índice, y
+        # antes no lo marcaba nadie —la regla de arriba excluye el cero a
+        # propósito, para no dar la lata mientras se teclea una fila vacía.
+        vacios = [(m.get('simbolo') or '?') for m in monos
+                  if float(m.get('coeficiente') or 0) == 0
+                  and (m.get('indice_inei') or '').strip()]
+        if vacios:
+            issues.append(
+                "Sin incidencia (coeficiente 0), no aportan a la fórmula: "
+                + ", ".join(vacios)
+                + ". Muévele índices desde la composición o elimínalos.")
         return issues
 
     def _actualizar_totales(self):
