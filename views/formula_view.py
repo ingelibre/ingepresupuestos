@@ -119,13 +119,19 @@ class DecretoDialog(QDialog):
             "<b>Texto concordado</b> con sus modificatorias: D.S. 022-80-VC, "
             "006-86-VC, 004-88-VC, 011-89-VC y 012-91-VC — las anotaciones "
             "«Modificado por…» y «Derogado por…» están en el propio texto.<br>"
-            "El marco de contrataciones vigente es la <b>Ley 32069</b> y su "
-            "Reglamento <b>D.S. 009-2025-EF</b> (en vigor desde el 22/04/2025); "
+            "El marco de contrataciones vigente es la "
+            "<a href='https://www.gob.pe/institucion/oece/colecciones/"
+            "45029-ley-n-32069-ley-general-de-contrataciones-publicas-y-su-"
+            "reglamento'><b>Ley 32069</b></a> y su Reglamento "
+            "<a href='https://www.gob.pe/institucion/mef/normas-legales/"
+            "6401561-009-2025-ef'><b>D.S. 009-2025-EF</b></a> (en vigor desde "
+            "el 22/04/2025, modificado por D.S. 001-2026-EF del 08/01/2026); "
             "el régimen de fórmulas polinómicas sigue apoyado en este decreto. "
             "Conviene contrastar con la versión oficial antes de un "
             "procedimiento."
         )
         aviso.setWordWrap(True)
+        aviso.setOpenExternalLinks(True)
         aviso.setTextFormat(Qt.RichText)
         aviso.setStyleSheet(
             f"color:{SLATE_500}; font-size:11px; padding:8px 10px;"
@@ -294,8 +300,15 @@ class IndicesDelProyectoDialog(QDialog):
         pie = QLabel(
             "Ordenado por monto. En ámbar, lo que se apoya en insumos sin "
             "índice propio. Doble clic en un índice para ver de qué insumos y "
-            "partidas sale su monto."
+            "partidas sale su monto.<br>"
+            "La base del reajuste es <b>costo directo + gastos generales + "
+            "utilidad</b>. Quedan FUERA la supervisión, el expediente técnico, "
+            "la liquidación y el IGV: no son parte del presupuesto que se le "
+            "reajusta al contratista. Los gastos generales entran como un solo "
+            "monomio (GU), sin desglosarse en insumos, tal como manda el art. 2 "
+            "del D.S. 011-79-VC."
         )
+        pie.setTextFormat(Qt.RichText)
         pie.setWordWrap(True)
         pie.setStyleSheet(f"color:{SLATE_300}; font-size:11px;")
         v.addWidget(pie)

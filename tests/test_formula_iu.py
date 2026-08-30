@@ -987,6 +987,45 @@ def test_el_decreto_empaquetado_es_el_texto_concordado():
     assert len(anotaciones) >= 3, f"solo {len(anotaciones)} concordancias"
 
 
+def test_la_base_del_reajuste_no_incluye_supervision_ni_igv():
+    """Preocupación de Marco: si la fórmula tomara gastos generales de
+    supervisión o expediente técnico, habría un hueco — el pie de presupuesto
+    no desglosa esos rubros en insumos con índice.
+
+    No lo hace: la base es costo directo + gastos generales + utilidad, y la
+    suma de los montos por índice la cubre exactamente. Supervisión, expediente
+    técnico, liquidación e IGV quedan fuera, que es lo correcto: no son parte
+    del presupuesto que se le reajusta al contratista.
+    """
+    F, _ = _preparar()
+    conn = d.get_db()
+    fila = conn.execute(
+        "SELECT proyecto_id FROM pie_rubros WHERE codigo IN ('SUP','ET','LQ') "
+        "GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1").fetchone()
+    conn.close()
+    if not fila:
+        return                      # la semilla no trae un pie así
+    pid = fila[0]
+
+    _, tot = d.calcular_totales(pid)
+    inc = F.incidencias_por_iu(pid)
+    assert inc['ok'], inc['msg']
+
+    esperado = (tot['cd'] or 0) + (tot['gf'] or 0) + (tot['utilidad'] or 0)
+    assert abs(inc['base'] - esperado) < 0.01, (inc['base'], esperado)
+    assert abs(inc['gg_utilidad'] - ((tot['gf'] or 0) + (tot['utilidad'] or 0))) < 0.01
+
+    # Nada se queda sin repartir: si faltara, `_ajustar_a_uno` inflaría un
+    # coeficiente para cuadrar y el reajuste saldría torcido en silencio.
+    suma = sum(i['monto'] for i in inc['ius'])
+    assert abs(suma - inc['base']) < 0.01, f"hueco de {inc['base'] - suma:,.2f}"
+
+    # Y el IGV nunca entra.
+    assert inc['base'] <= (tot['total'] or 0) + 0.01
+    if tot.get('igv'):
+        assert inc['base'] < tot['total']
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
