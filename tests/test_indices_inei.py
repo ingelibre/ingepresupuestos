@@ -150,6 +150,24 @@ def test_la_semilla_no_resucita_un_indice_borrado():
     assert '01' not in dict(I.catalogo()), "el índice borrado volvió"
 
 
+def test_borrar_antes_de_que_corra_la_semilla_igual_manda():
+    """El borrado tiene que asentarse aunque la semilla no haya corrido nunca.
+
+    Bug real: `asegurar_seed` marca `seed_inei_ver` recién cuando siembra. Si
+    el usuario borraba un índice en una BD donde todavía no había corrido, la
+    PRIMERA lectura posterior ejecutaba la semilla y devolvía la fila — el
+    borrado se deshacía solo. Por eso el alta, la edición y la baja llaman a
+    `asegurar_seed` antes de escribir.
+    """
+    I = _preparar()
+    conn = d.get_db()
+    conn.execute("DELETE FROM configuracion WHERE clave='seed_inei_ver'")
+    conn.commit()
+    conn.close()
+    I.eliminar_indice('44')
+    assert '44' not in dict(I.catalogo()), "la semilla resucitó el borrado"
+
+
 def test_la_semilla_respeta_un_renombre():
     I = _preparar()
     I.actualizar_indice('02', nombre='Acero liso (mi nombre)')

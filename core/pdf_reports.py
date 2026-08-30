@@ -4378,6 +4378,71 @@ def _html_formula_polinomica(pid: int, proy: dict) -> str:
         f'</tr>'
         f'{filas}'
         f'</table>'
+        f'{_html_composicion_monomios(pid, monomios)}'
+    )
+
+
+def _html_composicion_monomios(pid: int, monomios) -> str:
+    """Cuadro de agrupamiento: qué índices unificados forman cada monomio.
+
+    Es el desglose que el reporte no traía y que hace auditable la fórmula: sin
+    él, un monomio agrupado es un coeficiente sin origen. Los monomios de una
+    sola línea se listan igual, para que el cuadro cierre contra el costo
+    directo.
+
+    Vacío si la fórmula no tiene composición guardada (escrita a mano, o de una
+    versión anterior a la 3.0.4).
+    """
+    from core.formula_polinomica import cargar_componentes
+    comps = cargar_componentes(pid)
+    if not comps:
+        return ''
+
+    cd = sum(c['monto'] for lista in comps.values() for c in lista)
+    if cd <= 0:
+        return ''
+
+    bloques = ''
+    for mo in monomios:
+        lista = comps.get(mo['orden'], [])
+        if not lista:
+            continue
+        monto_mono = sum(c['monto'] for c in lista) or 1
+        filas = ''
+        for i, c in enumerate(lista):
+            alt = ' class="alt"' if i % 2 else ''
+            filas += (
+                f'<tr{alt}>'
+                f'<td class="c">{escape(c["codigo"])}</td>'
+                f'<td>{escape(c["nombre"])}</td>'
+                f'<td class="r">{c["monto"] / monto_mono * 100:.2f}%</td>'
+                f'<td class="r">{c["monto"] / cd * 100:.2f}%</td>'
+                f'</tr>'
+            )
+        bloques += (
+            f'<p style="font-weight:700;color:{SLATE_900};'
+            f'padding:8pt 0 3pt 0">'
+            f'{escape(mo["simbolo"] or "?")} — {escape(mo["descripcion"] or "")}'
+            f'  ({len(lista)} índice{"s" if len(lista) != 1 else ""})</p>'
+            f'<table class="data" width="100%">'
+            f'<tr>'
+            f'<th style="text-align:center">Índice</th>'
+            f'<th>Descripción</th>'
+            f'<th style="text-align:right">% del monomio</th>'
+            f'<th style="text-align:right">% del C.D.</th>'
+            f'</tr>{filas}</table>'
+        )
+
+    if not bloques:
+        return ''
+    return (
+        f'<p style="font-size:11pt;font-weight:700;color:{SLATE_900};'
+        f'padding:14pt 0 2pt 0">Composición de los monomios</p>'
+        f'<p style="font-size:8pt;color:#667885;padding:0 0 4pt 0">'
+        f'Índices unificados agrupados en cada monomio. Al calcular el '
+        f'reajuste, el índice de un monomio agrupado es el promedio de los '
+        f'suyos ponderado por estos pesos.</p>'
+        f'{bloques}'
     )
 
 

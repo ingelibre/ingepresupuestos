@@ -368,6 +368,60 @@ def exportar_formula_polinomica(proyecto_id):
     ws.cell(r, 5).alignment          = al_r
     ws.cell(r, 5).border             = b_tot
 
+    # ── Composición de los monomios ──────────────────────────────────────────
+    # El cuadro de agrupamiento: qué índices unificados forman cada monomio.
+    # Sin esto un monomio agrupado es un coeficiente sin origen, imposible de
+    # auditar. Vacío en fórmulas escritas a mano o anteriores a la 3.0.4.
+    from core.formula_polinomica import cargar_componentes
+    comps = cargar_componentes(proyecto_id)
+    cd_total = sum(c['monto'] for lista in comps.values() for c in lista)
+    if comps and cd_total > 0:
+        r += 2
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+        ws.cell(r, 1, 'COMPOSICIÓN DE LOS MONOMIOS').font = Font(
+            name='Inter', bold=True, italic=True, size=12)
+        ws.cell(r, 1).alignment = al_c
+        r += 1
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+        ws.cell(r, 1, 'El índice de un monomio agrupado es el promedio de los '
+                      'suyos, ponderado por estos pesos.').font = Font(
+            name='Inter', italic=True, size=9, color='FF667885')
+        r += 2
+
+        for mo in monomios:
+            lista = comps.get(mo['orden'], [])
+            if not lista:
+                continue
+            monto_mono = sum(c['monto'] for c in lista) or 1
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+            ws.cell(r, 1, f"{mo['simbolo'] or '?'} — {mo['descripcion'] or ''}"
+                          f"  ({len(lista)} índice"
+                          f"{'s' if len(lista) != 1 else ''})").font = Font(
+                name='Inter', bold=True, size=11)
+            r += 1
+            for c, h in enumerate(
+                    ['Índice', 'Descripción', '', '% del monomio',
+                     '% del C.D.'], 1):
+                cell = ws.cell(r, c, h)
+                cell.font = Font(name='Inter', bold=True, italic=True, size=10)
+                cell.alignment = al_c
+                cell.border = b_hdr
+            r += 1
+            for comp in lista:
+                vals = [comp['codigo'], comp['nombre'], '',
+                        comp['monto'] / monto_mono,
+                        comp['monto'] / cd_total]
+                for c, v in enumerate(vals, 1):
+                    cell = ws.cell(r, c, v)
+                    cell.font = Font(name='Inter', size=10)
+                    cell.border = b_data
+                    cell.alignment = al_r if c in (4, 5) else (
+                        al_c if c == 1 else al_l)
+                    if c in (4, 5):
+                        cell.number_format = '0.00%'
+                r += 1
+            r += 1
+
     # ── Anchos de columna ────────────────────────────────────────────────────
     ws.column_dimensions['A'].width = 12
     ws.column_dimensions['B'].width = 36

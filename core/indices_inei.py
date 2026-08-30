@@ -130,6 +130,11 @@ def asegurar_seed(conn=None) -> None:
     así que un índice borrado por el usuario resucitaba al reiniciar. Ahora la
     siembra se salta si `seed_inei_ver` ya alcanzó SEED_VERSION, y los borrados
     y renombres del usuario mandan.
+
+    OJO: el alta, la edición y la baja la llaman ANTES de escribir. Si no, un
+    borrado hecho sobre una BD donde la semilla todavía no corrió se deshacía
+    solo en la siguiente lectura —la semilla se ejecutaba después y devolvía la
+    fila—, que es como si no se hubiera borrado nada.
     """
     own = conn is None
     if own:
@@ -205,6 +210,7 @@ def crear_indice(codigo: str, nombre: str, conn=None) -> str:
     if own:
         conn = get_db()
     try:
+        asegurar_seed(conn)
         ya = conn.execute(
             "SELECT nombre FROM indices_inei WHERE codigo=?", (codigo,)
         ).fetchone()
@@ -242,6 +248,7 @@ def actualizar_indice(codigo: str, nombre: str | None = None,
     if own:
         conn = get_db()
     try:
+        asegurar_seed(conn)
         conn.execute(
             f"UPDATE indices_inei SET {', '.join(sets)} WHERE codigo=?", params
         )
@@ -289,6 +296,7 @@ def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None) -> Non
     if own:
         conn = get_db()
     try:
+        asegurar_seed(conn)
         conn.execute("DELETE FROM indices_inei WHERE codigo=?", (codigo,))
         if borrar_valores:
             conn.execute(

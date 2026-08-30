@@ -217,6 +217,14 @@ class IndicesINEIView(QWidget):
         self.btn_exp_json.clicked.connect(self._exportar_json)
         top.addWidget(self.btn_exp_json)
 
+        self.btn_diccionario = self._mk_btn("Diccionario", icon_name="rep-insumos")
+        self.btn_diccionario.setToolTip(
+            "Qué índice unificado le corresponde a cada insumo — es lo que usa "
+            "la fórmula polinómica para agrupar el costo"
+        )
+        self.btn_diccionario.clicked.connect(self._abrir_diccionario)
+        top.addWidget(self.btn_diccionario)
+
         root.addLayout(top)
 
         # ── KPIs ──
@@ -662,6 +670,19 @@ class IndicesINEIView(QWidget):
             f"{n} índice(s) dados de alta. Edítalos para ponerles su nombre "
             "oficial del INEI."
         )
+
+    def _abrir_diccionario(self):
+        """El diccionario insumo → índice unificado.
+
+        Vive acá y no en la vista de Insumos porque es lo que hace utilizable
+        el catálogo: sin la asignación, los índices son una lista de precios
+        sin nada que agrupar.
+        """
+        from views.diccionario_iu_dialog import DiccionarioIUDialog
+        dlg = DiccionarioIUDialog(self)
+        dlg.exec()
+        self._refrescar_lista()
+        self._actualizar_kpis()
 
     # ── Eventos ─────────────────────────────────────────────────────────────
     def _on_area_change(self):
