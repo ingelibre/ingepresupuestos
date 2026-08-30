@@ -68,7 +68,11 @@ Rutas (`core/config.py`): `BASE_DIR` (read-only; bajo PyInstaller = `_internal/`
 COALESCE(ai.precio, r.precio, 0)
 
 # Cantidad MO en ACU — y equipo por hora (unidad hh/hm): se DERIVA de la cuadrilla.
-#   Helper proyecto_view._recurso_por_hora(tipo, unidad) (también en recurso_selector_dialog).
+#   Helpers en core/database.py: recurso_por_hora · recurso_por_dia · partida_global.
+#   UNA sola definición (2026-08-29): antes vivían tres veces, con un comentario
+#   que pedía «mantener en sync» a mano. Las vistas las importan con su nombre
+#   local (_recurso_por_hora en proyecto_view, _es_por_hora en el selector).
+#   NO volver a copiarlas: deciden la cantidad de MO de TODO el presupuesto.
 cantidad = (cuadrilla / rendimiento) * jornada_laboral
 # MO/EQ por DÍA (unidad día/jor): cuadrilla habilitada pero SIN jornada →
 #   cantidad = cuadrilla / rendimiento   (rendimiento ya es por día). Helper _recurso_por_dia.

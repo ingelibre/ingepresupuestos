@@ -41,7 +41,13 @@ from core.database import (
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
     precios_inconsistentes, unificar_precio_recurso, precio_recurso_en_proyecto,
-    partidas_pu_inconsistente, partida_usa_acero
+    partidas_pu_inconsistente, partida_usa_acero,
+    # Regla crítica del ACU (cant = cuadrilla/rendimiento × jornada): una sola
+    # definición, en core.database. Los nombres locales se conservan por los
+    # call sites.
+    recurso_por_hora as _recurso_por_hora,
+    recurso_por_dia as _recurso_por_dia,
+    partida_global as _partida_global,
 )
 from models.usuario import Usuario
 from utils.formatting import fmt, fmt_num, parse_num, parse_num_opt
@@ -122,31 +128,6 @@ def _cols_acu():
 COLS_ACU  = ["Tip", "Descripción", "Und.", "Cuadrilla", "Cantidad", "Precio", "Parcial"]
 
 
-def _recurso_por_hora(tipo, unidad):
-    """True si la cantidad se deriva de la cuadrilla: MO y equipo por hora (hh/hm).
-    Fórmula canónica: cant = cuadrilla / rendimiento × jornada."""
-    u = (unidad or '').strip().lower()
-    return (tipo == 'MO'
-            or u in ('hh', 'hm', 'h-h', 'h-m', 'jph', 'jh')
-            or 'hora' in u)
-
-
-def _recurso_por_dia(tipo, unidad):
-    """True si la cantidad se deriva de la cuadrilla SIN jornada: MO/EQ con
-    unidad día/jor. El rendimiento ya es producción por DÍA, entonces:
-        cant = cuadrilla / rendimiento
-    (validado contra bases PowerCost/Delphin: 23/33 items día cumplen exacto)."""
-    u = (unidad or '').strip().rstrip('.').lower()
-    return (tipo in ('MO', 'EQ')
-            and u in ('día', 'dia', 'días', 'dias', 'jor', 'jornada'))
-
-
-def _partida_global(unidad):
-    """True si la PARTIDA es global (glb/est/serv): el ACU no usa
-    cuadrilla/rendimiento y la cantidad se llena directa en todos los
-    insumos, incluida la MO (comportamiento PowerCost)."""
-    u = (unidad or '').strip().rstrip('.').lower()
-    return u in ('glb', 'gbl', 'est', 'serv')
 
 
 class _SubPptoTab(QPushButton):

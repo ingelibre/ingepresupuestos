@@ -63,8 +63,11 @@ def set_decimales_cant_acu(n: int):
 
 # ── Derivación de cantidad desde la cuadrilla (reglas canónicas peruanas) ──
 # Únicas funciones de verdad para decidir si la cantidad de un insumo se deriva
-# de la cuadrilla. Mantener en sync con las copias de views/proyecto_view.py y
-# views/recurso_selector_dialog.py.
+# de la cuadrilla. Hasta 2026-08-29 vivían TRES veces —acá, en
+# views/proyecto_view.py y en views/recurso_selector_dialog.py— con un comentario
+# que pedía «mantener en sync» a mano. Ahora las vistas las importan de acá con
+# su nombre local (`_recurso_por_hora`, `_es_por_hora`, …). No volver a copiarlas:
+# es la regla que decide la cantidad de MO de TODO el presupuesto.
 
 def recurso_por_hora(tipo, unidad) -> bool:
     """True si la cantidad se deriva de la cuadrilla: MO y equipo por hora

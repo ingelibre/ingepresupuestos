@@ -644,6 +644,59 @@ def test_la_regla_de_overhead_tiene_un_solo_dueno():
             f"{nombre} volvió a resolver la base a mano en vez de base_overhead()"
 
 
+
+# ── La regla de la cuadrilla tiene un solo dueño ─────────────────────────────
+
+def test_la_regla_de_la_cuadrilla_no_esta_duplicada():
+    """`cant = (cuadrilla/rendimiento) × jornada` decide la MO de TODO el
+    presupuesto, y hasta 2026-08-29 estaba escrita tres veces: en
+    `core.database`, en `proyecto_view` y en `recurso_selector_dialog`, con un
+    comentario que pedía «mantener en sync» a mano.
+
+    Las vistas ahora la importan. Se comprueba por IDENTIDAD (`is`), no por
+    igualdad de resultados: mientras sean el mismo objeto función es imposible
+    que diverjan, que es justamente lo que un comentario no garantiza.
+    """
+    import os
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    import views.proyecto_view as PV
+    import views.recurso_selector_dialog as RS
+
+    assert PV._recurso_por_hora is d.recurso_por_hora
+    assert PV._recurso_por_dia is d.recurso_por_dia
+    assert PV._partida_global is d.partida_global
+    assert RS._es_por_hora is d.recurso_por_hora
+    assert RS._es_por_dia is d.recurso_por_dia
+    assert RS._es_partida_global is d.partida_global
+
+
+def test_unidades_que_derivan_la_cantidad_de_la_cuadrilla():
+    """Fija el vocabulario de unidades de la regla, que es lo que de verdad
+    decide si un insumo deriva su cantidad o la lleva directa."""
+    # por HORA: toda la MO, y el equipo con unidad de hora
+    for t, u in (('MO', 'kg'), ('MO', None), ('EQ', 'hh'), ('EQ', 'hm'),
+                 ('EQ', 'h-h'), ('EQ', 'jph'), ('MAT', 'hora'), ('EQ', 'HORA')):
+        assert d.recurso_por_hora(t, u), (t, u)
+    for t, u in (('MAT', 'kg'), ('EQ', 'und'), ('SC', 'glb'), ('MAT', None)):
+        assert not d.recurso_por_hora(t, u), (t, u)
+
+    # por DÍA: MO/EQ con unidad día o jornada — el rendimiento ya es por día
+    for t, u in (('MO', 'día'), ('MO', 'dia'), ('EQ', 'jor'), ('EQ', 'JOR.'),
+                 ('MO', 'jornada'), ('EQ', 'dias')):
+        assert d.recurso_por_dia(t, u), (t, u)
+    for t, u in (('MAT', 'día'), ('SC', 'jor'), ('MO', 'hh')):
+        assert not d.recurso_por_dia(t, u), (t, u)
+
+    # partida GLOBAL: sin cuadrilla, cantidad directa en todos los insumos
+    for u in ('glb', 'GLB.', 'gbl', 'est', 'serv'):
+        assert d.partida_global(u), u
+    for u in ('m3', 'und', 'día', '', None):
+        assert not d.partida_global(u), u
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

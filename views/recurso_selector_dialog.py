@@ -14,37 +14,18 @@ from PySide6.QtGui import QColor, QFont
 
 from core.config import DB_PATH, TIPOS_RECURSO
 from core.database import (get_db, _rn, _recalcular_pu, _siguiente_codigo_inei,
-                           precio_recurso_en_proyecto, get_decimales_cant_acu)
+                           precio_recurso_en_proyecto, get_decimales_cant_acu,
+                           # Regla crítica del ACU — definición única en
+                           # core.database; acá solo se les da el nombre local.
+                           recurso_por_hora as _es_por_hora,
+                           recurso_por_dia as _es_por_dia,
+                           partida_global as _es_partida_global)
 from utils.formatting import parse_num
 
 _TIPO_BG  = {'MO': '#FFF3CD', 'MAT': '#D1E7DD', 'EQ':  '#CCE5FF',
              'SC': '#E5D6F8'}
 _TIPO_FG  = {'MO': '#856404', 'MAT': '#0F5132', 'EQ':  '#084298',
              'SC': '#6A36B1'}
-
-
-def _es_por_hora(tipo: str, unidad: str | None) -> bool:
-    """True si la cantidad se deriva de la cuadrilla: MO y equipo por hora (hh/hm).
-    Fórmula canónica: cant = cuadrilla / rendimiento × jornada."""
-    u = (unidad or '').strip().lower()
-    return (tipo == 'MO'
-            or u in ('hh', 'hm', 'h-h', 'h-m', 'jph', 'jh')
-            or 'hora' in u)
-
-
-def _es_por_dia(tipo: str, unidad: str | None) -> bool:
-    """True si la cantidad se deriva de la cuadrilla SIN jornada: MO/EQ con
-    unidad día/jor (el rendimiento ya es por día): cant = cuadrilla / rend."""
-    u = (unidad or '').strip().rstrip('.').lower()
-    return (tipo in ('MO', 'EQ')
-            and u in ('día', 'dia', 'días', 'dias', 'jor', 'jornada'))
-
-
-def _es_partida_global(unidad: str | None) -> bool:
-    """True si la PARTIDA es global (glb/est/serv): el ACU no usa
-    cuadrilla/rendimiento; la cantidad se llena directa (PowerCost)."""
-    u = (unidad or '').strip().rstrip('.').lower()
-    return u in ('glb', 'gbl', 'est', 'serv')
 
 
 class RecursoSelectorDialog(QDialog):
