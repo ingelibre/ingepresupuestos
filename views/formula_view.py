@@ -2,15 +2,24 @@
 # Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
 # Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
-"""formula_view — Editor de Fórmula Polinómica (≈ formula_polinomica.html).
+"""formula_view — Editor de Fórmula Polinómica.
 
-Vista anclada al ``_root_stack`` de ProyectoView. Layout:
-    - Topbar:          ← Presupuesto · Fórmula Polinómica · nombre proyecto
-    - Card "Expresión": muestra la fórmula textualmente con badge Σk
-    - Card "Monomios":  tabla editable (Símbolo · Descripción · INEI · k · %)
-    - Sidebar:          info proyecto · costos ACU (después de calcular) ·
-                        explicación · listado INEI frecuentes
-    - Acciones:         Auto-calcular · Agregar · Guardar · Exportar Excel
+Vista anclada al ``_root_stack`` de ProyectoView, con el mismo armado que
+Cronograma y Control de Obra: topbar slate, barra fina de acciones, contenido
+a sangre repartido en splitters y una pista en el pie.
+
+    - Topbar:      ← Presupuesto · Fórmula Polinómica · chip Σk
+    - Barra:       Auto-calcular · Agregar · Guardar · Excel · PDF · Σ
+    - Tira:        la expresión K = … y su validación normativa
+    - Cuerpo:      [ Monomios ↔ Composición del monomio ]
+                   [ Cálculo de Reajuste K              ]
+    - Pie:         ayuda breve + costo directo, nº de índices y cuánto va
+                   sin índice propio
+
+Hasta la 3.0.4 era la única pantalla del programa con lenguaje de dashboard
+—cuatro tarjetas redondeadas de cabecera oscura, apiladas, más una columna
+lateral de tarjetas—; además de desentonar, no entraba: en 1366×768 la tabla
+de monomios quedaba en 70 px, fila y media visible.
 """
 from __future__ import annotations
 
@@ -19,7 +28,7 @@ from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox,
+    QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
 )
 
 from core.database import get_db
@@ -56,27 +65,7 @@ RED_500      = C.error
 RED_SOFT     = C.error_soft
 RED_DARK     = C.error_dark
 BLUE_700     = C.info
-PAGE_BG      = "#EEF2F7"   # fondo de la vista (canvas detrás de cards)
-
-# Algunos índices INEI que aparecen con frecuencia en proyectos de obra
-INEI_FRECUENTES = [
-    ("04", "Agregado fino"),
-    ("05", "Agregado grueso"),
-    ("21", "Cemento Portland tipo I"),
-    ("30", "Dólar + inflación (importados)"),
-    ("32", "Flete terrestre"),
-    ("37", "Herramienta manual"),
-    ("38", "Hormigón"),
-    ("39", "Índice general de precios (IPC)"),
-    ("43", "Madera nacional encofrado"),
-    ("47", "Mano de obra inc. leyes sociales"),
-    ("48", "Maquinaria y equipo nacional"),
-    ("49", "Maquinaria y equipo importado"),
-    ("53", "Petróleo diesel"),
-    ("54", "Pintura látex"),
-    ("65", "Tubería de acero negro/galvanizado"),
-    ("72", "Tubería de PVC para agua"),
-]
+PAGE_BG      = "#EEF2F7"   # se ve en los tiradores de los splitters
 
 
 class FormulaView(QWidget):
@@ -97,19 +86,45 @@ class FormulaView(QWidget):
 
     # ── construcción UI ─────────────────────────────────────────────────────
     def _build(self):
-        # Canvas slate-100 detrás de los cards (mismo patrón que Cronograma /
-        # Hoja de Metrados).
+        """Mismo armado que Cronograma y Control de Obra.
+
+        Antes esta pantalla era la única del programa con lenguaje de dashboard
+        —cuatro tarjetas redondeadas con cabecera oscura apiladas, más una
+        columna lateral de tarjetas—, y encima no entraba: en 1366×768 la tabla
+        de monomios quedaba en 70 px, fila y media. El resto del programa va a
+        sangre, con splitters y una pista en el pie; ahora esta también.
+        """
         self.setObjectName("formulaRoot")
-        self.setStyleSheet(
-            f"QWidget#formulaRoot {{ background:{PAGE_BG}; }}"
-        )
+        self.setStyleSheet(f"QWidget#formulaRoot {{ background:{PAGE_BG}; }}")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Topbar oscuro slate-700 (mismo patrón que Cronograma) ───────────
-        # Barra única compacta (mismo patrón que Cronograma/Metrados/Pie): sin
-        # título grande ni nombre de proyecto repetido (ya está en las pestañas).
+        root.addWidget(self._build_topbar())
+        root.addWidget(self._build_barra_acciones())
+        root.addWidget(self._build_tira_expresion())
+
+        # Cuerpo: monomios ↔ composición arriba, reajuste abajo. Todo
+        # arrastrable, que es como se reparte el alto en el resto del programa.
+        self.split_arriba = QSplitter(Qt.Horizontal)
+        self.split_arriba.setChildrenCollapsible(False)
+        self.split_arriba.addWidget(self._build_panel_monomios())
+        self.card_composicion = self._build_panel_composicion()
+        self.split_arriba.addWidget(self.card_composicion)
+        self.split_arriba.setStretchFactor(0, 5)
+        self.split_arriba.setStretchFactor(1, 4)
+
+        self.split_cuerpo = QSplitter(Qt.Vertical)
+        self.split_cuerpo.setChildrenCollapsible(False)
+        self.split_cuerpo.addWidget(self.split_arriba)
+        self.split_cuerpo.addWidget(self._build_panel_reajuste())
+        self.split_cuerpo.setStretchFactor(0, 3)
+        self.split_cuerpo.setStretchFactor(1, 2)
+        root.addWidget(self.split_cuerpo, 1)
+
+        root.addWidget(self._build_pie())
+
+    def _build_topbar(self) -> QFrame:
         hdr = QFrame()
         hdr.setFixedHeight(36)
         hdr.setStyleSheet(f"background:{SLATE_500}; border:none;")
@@ -125,7 +140,8 @@ class FormulaView(QWidget):
             f" font-size:11px; padding:3px 10px; }}"
             f"QPushButton:hover {{ background:rgba(255,255,255,0.22); }}"
         )
-        btn_back.clicked.connect(lambda: self._on_back() if self._on_back else None)
+        btn_back.clicked.connect(
+            lambda: self._on_back() if self._on_back else None)
         hl.addWidget(btn_back)
         hl.addSpacing(8)
 
@@ -134,64 +150,106 @@ class FormulaView(QWidget):
             "color:white; font-size:12px; font-weight:700;"
             " background:transparent; border:none;")
         hl.addWidget(lbl_title)
-
         hl.addStretch(1)
 
-        root.addWidget(hdr)
-
-        # ── Área de contenido con márgenes y canvas slate-100 ───────────────
-        content = QWidget()
-        content_vl = QVBoxLayout(content)
-        content_vl.setContentsMargins(20, 14, 20, 14)
-        content_vl.setSpacing(0)
-
-        body = QHBoxLayout()
-        body.setSpacing(12)
-        body.addLayout(self._build_col_principal(), 7)
-        body.addLayout(self._build_col_lateral(), 3)
-
-        content_vl.addLayout(body, 1)
-        root.addWidget(content, 1)
-
-    # ── columna principal: fórmula + tabla ──────────────────────────────────
-    def _build_col_principal(self) -> QVBoxLayout:
-        from utils.theme import apply_shadow
-        col = QVBoxLayout()
-        col.setSpacing(12)
-
-        # Card: Expresión de la fórmula
-        card_expr = QFrame()
-        card_expr.setStyleSheet(
-            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(card_expr, 'sm')
-        ev = QVBoxLayout(card_expr)
-        ev.setContentsMargins(0, 0, 0, 0)
-        ev.setSpacing(0)
-
-        head = QFrame()
-        head.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                            f"  border-radius:8px 8px 0 0; }}")
-        hl = QHBoxLayout(head); hl.setContentsMargins(12, 8, 12, 8); hl.setSpacing(6)
-        ti_h = QLabel(); ti_h.setPixmap(icon("rep-acus").pixmap(16, 16))
-        ti_h.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(ti_h)
-        ttl = QLabel("Expresión de la fórmula")
-        ttl.setStyleSheet(
-            "color:white; font-weight:600; font-size:13px;"
-            " background:transparent; border:none;"
-        )
-        hl.addWidget(ttl)
-        hl.addStretch(1)
-
+        # Chip de estado a la derecha, como el «Plazo: 60 días» del Gantt.
         self.lbl_suma_badge = QLabel("Σk = 0.0000")
         self.lbl_suma_badge.setStyleSheet(
-            f"background:{WHITE}; color:{SLATE_500}; padding:3px 10px;"
-            f"  border-radius:4px; font-weight:600; font-size:11px;"
+            "color:white; font-size:11px; font-weight:700;"
+            " background:rgba(255,255,255,0.12); border-radius:4px;"
+            " padding:3px 10px;"
         )
         hl.addWidget(self.lbl_suma_badge)
-        ev.addWidget(head)
+        return hdr
+
+    def _build_barra_acciones(self) -> QFrame:
+        """Barra fina de controles, el patrón de Cronograma y Metrados."""
+        barra = QFrame()
+        barra.setStyleSheet(
+            f"QFrame {{ background:{SILVER_50};"
+            f" border-bottom:1px solid {SILVER_300}; }}"
+        )
+        fl = QHBoxLayout(barra)
+        fl.setContentsMargins(12, 6, 12, 6)
+        fl.setSpacing(8)
+
+        self.btn_calcular = self._btn_barra("Auto-calcular desde ACU",
+                                            "rep-acus", primary=True)
+        self.btn_calcular.clicked.connect(self._calcular_desde_acu)
+        fl.addWidget(self.btn_calcular)
+
+        btn_add = self._btn_barra("Agregar monomio", "add")
+        btn_add.clicked.connect(self._agregar_monomio)
+        fl.addWidget(btn_add)
+
+        self.btn_guardar = self._btn_barra("Guardar", "guardar")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fl.addWidget(self.btn_guardar)
+
+        self.btn_export = self._btn_barra("Exportar Excel", "exportar")
+        self.btn_export.clicked.connect(self._exportar_excel)
+        fl.addWidget(self.btn_export)
+
+        self.btn_export_pdf = self._btn_barra("Exportar PDF", "exportar")
+        self.btn_export_pdf.clicked.connect(self._exportar_pdf)
+        fl.addWidget(self.btn_export_pdf)
+
+        # Aviso de las fórmulas sin composición (a mano o previas a la 3.0.4).
+        self.lbl_sin_composicion = QLabel(
+            "Sin composición: auto-calcula para ver de qué índices sale cada "
+            "monomio."
+        )
+        self.lbl_sin_composicion.setStyleSheet(
+            f"color:{SLATE_300}; font-size:11px; padding-left:10px;"
+            f" background:transparent; border:none;"
+        )
+        self.lbl_sin_composicion.setVisible(False)
+        fl.addWidget(self.lbl_sin_composicion)
+
+        fl.addStretch(1)
+
+        self.lbl_suma_foot = QLabel("Σ = 0.0000  ·  0.00%")
+        self.lbl_suma_foot.setStyleSheet(
+            f"color:{SLATE_500}; font-size:11px; font-weight:600;"
+            f" background:transparent; border:none;"
+        )
+        fl.addWidget(self.lbl_suma_foot)
+        return barra
+
+    def _btn_barra(self, texto: str, ico: str | None = None,
+                   primary: bool = False) -> QPushButton:
+        b = QPushButton(texto)
+        b.setCursor(Qt.PointingHandCursor)
+        if ico:
+            b.setIcon(icon(ico))
+            b.setIconSize(QSize(15, 15))
+        if primary:
+            b.setStyleSheet(
+                f"QPushButton {{ background:{ORANGE}; color:white; border:none;"
+                f" border-radius:6px; padding:4px 12px; font-weight:600;"
+                f" font-size:11px; }}"
+                f"QPushButton:hover {{ background:{ORANGE_DARK}; }}"
+            )
+        else:
+            b.setStyleSheet(
+                f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
+                f" border:1px solid {SILVER_300}; border-radius:6px;"
+                f" padding:4px 12px; font-size:11px; }}"
+                f"QPushButton:hover {{ background:{ORANGE_SOFT};"
+                f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
+            )
+        return b
+
+    def _build_tira_expresion(self) -> QFrame:
+        """La fórmula, en una tira propia: es lo que se viene a ver."""
+        fr = QFrame()
+        fr.setStyleSheet(
+            f"QFrame {{ background:{WHITE};"
+            f" border-bottom:1px solid {SILVER_300}; }}"
+        )
+        v = QVBoxLayout(fr)
+        v.setContentsMargins(12, 8, 12, 8)
+        v.setSpacing(2)
 
         self.lbl_expr = QLabel("K = …")
         self.lbl_expr.setWordWrap(True)
@@ -199,68 +257,88 @@ class FormulaView(QWidget):
         f_mono = QFont("monospace"); f_mono.setPointSize(11)
         self.lbl_expr.setFont(f_mono)
         self.lbl_expr.setStyleSheet(
-            f"padding:14px 16px; color:#1E2635; line-height:1.8;"
-            f" background:transparent; border:none;"
-        )
-        ev.addWidget(self.lbl_expr)
+            "color:#1E2635; background:transparent; border:none;")
+        v.addWidget(self.lbl_expr)
 
         # Validación normativa (D.S. 011-79-VC): suma=1, incidencia ≥5%, máx 8.
         self.lbl_validacion = QLabel("")
         self.lbl_validacion.setWordWrap(True)
         self.lbl_validacion.setTextFormat(Qt.RichText)
         self.lbl_validacion.setStyleSheet(
-            "padding:0 16px 12px 16px; font-size:11px;"
-            " background:transparent; border:none;"
-        )
+            "font-size:11px; background:transparent; border:none;")
         self.lbl_validacion.setVisible(False)
-        ev.addWidget(self.lbl_validacion)
+        v.addWidget(self.lbl_validacion)
+        return fr
 
-        col.addWidget(card_expr)
+    def _panel(self, titulo: str):
+        """Panel a sangre con título fino, como «Insumos del proyecto» de
+        Control de Obra. Devuelve (frame, layout_vertical, layout_del_título)."""
+        fr = QFrame()
+        fr.setStyleSheet(f"QFrame {{ background:{WHITE}; border:none; }}")
+        v = QVBoxLayout(fr)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
 
-        # Card: tabla de monomios
-        card_tbl = QFrame()
-        card_tbl.setStyleSheet(
-            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
+        cab = QFrame()
+        cab.setStyleSheet(
+            f"QFrame {{ background:{WHITE};"
+            f" border-bottom:1px solid {SILVER_300}; }}"
         )
-        apply_shadow(card_tbl, 'sm')
-        tv = QVBoxLayout(card_tbl)
-        tv.setContentsMargins(0, 0, 0, 0)
-        tv.setSpacing(0)
-
-        head2 = QFrame()
-        head2.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                             f"  border-radius:8px 8px 0 0; }}")
-        hl2 = QHBoxLayout(head2); hl2.setContentsMargins(12, 6, 8, 6); hl2.setSpacing(6)
-        ti_h2 = QLabel(); ti_h2.setPixmap(icon("rep-presupuesto").pixmap(16, 16))
-        ti_h2.setStyleSheet("background:transparent; border:none;")
-        hl2.addWidget(ti_h2)
-        ttl2 = QLabel("Monomios")
-        ttl2.setStyleSheet(
-            "color:white; font-weight:600; font-size:13px;"
-            " background:transparent; border:none;"
+        hl = QHBoxLayout(cab)
+        hl.setContentsMargins(12, 7, 10, 7)
+        hl.setSpacing(8)
+        lbl = QLabel(titulo)
+        lbl.setStyleSheet(
+            f"color:{SLATE_700}; font-size:12px; font-weight:700;"
+            f" background:transparent; border:none;"
         )
-        hl2.addWidget(ttl2)
-        hl2.addStretch(1)
+        hl.addWidget(lbl)
+        hl.addStretch(1)
+        v.addWidget(cab)
+        return fr, v, hl, lbl
 
-        self.btn_calcular = QPushButton("Auto-calcular desde ACU")
-        self.btn_calcular.setIcon(icon("rep-acus"))
-        self.btn_calcular.setIconSize(QSize(16, 16))
-        self.btn_calcular.setCursor(Qt.PointingHandCursor)
-        self.btn_calcular.setStyleSheet(
-            f"QPushButton {{ background:{ORANGE}; color:white; border:none;"
-            f"  border-radius:6px; padding:5px 12px; font-weight:600;"
-            f"  font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_DARK}; }}"
+    def _build_pie(self) -> QFrame:
+        """Pista del pie, como la del Gantt: ayuda breve y estado del cálculo."""
+        fr = QFrame()
+        fr.setStyleSheet(
+            f"QFrame {{ background:{SILVER_50};"
+            f" border-top:1px solid {SILVER_300}; }}"
         )
-        self.btn_calcular.clicked.connect(self._calcular_desde_acu)
-        hl2.addWidget(self.btn_calcular)
-        tv.addWidget(head2)
+        hl = QHBoxLayout(fr)
+        hl.setContentsMargins(12, 5, 12, 5)
+        hl.setSpacing(10)
 
-        # Tabla
+        self.lbl_pie_ayuda = QLabel(
+            "💡 La fórmula reajusta el monto de obra según los índices "
+            "unificados del INEI: <b>K = Σ k·(Ir/Io)</b>. Los coeficientes "
+            "deben sumar 1.000 y ninguno bajar del 5%."
+        )
+        self.lbl_pie_ayuda.setTextFormat(Qt.RichText)
+        self.lbl_pie_ayuda.setStyleSheet(
+            f"color:{SLATE_500}; font-size:11px;"
+            f" background:transparent; border:none;"
+        )
+        hl.addWidget(self.lbl_pie_ayuda)
+        hl.addStretch(1)
+
+        # Resumen del reparto: reemplaza a la tarjeta «Costos ACU» del lateral.
+        self.lbl_pie_info = QLabel("")
+        self.lbl_pie_info.setTextFormat(Qt.RichText)
+        self.lbl_pie_info.setStyleSheet(
+            f"color:{SLATE_500}; font-size:11px;"
+            f" background:transparent; border:none;"
+        )
+        hl.addWidget(self.lbl_pie_info)
+        return fr
+
+    def _build_panel_monomios(self) -> QFrame:
+        """La tabla de monomios, a sangre. Los botones viven en la barra."""
+        fr, v, hl, _ = self._panel("Monomios")
+
         self.tbl = QTableWidget(0, 7)
         self.tbl.setHorizontalHeaderLabels(
-            ["#", "Símbolo", "Descripción", "Índice INEI", "Coef. k", "% Partic.", ""]
+            ["#", "Símbolo", "Descripción", "Índice INEI", "Coef. k",
+             "% Partic.", ""]
         )
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setAlternatingRowColors(True)
@@ -270,6 +348,14 @@ class FormulaView(QWidget):
         )
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.setShowGrid(False)
+        self.tbl.setStyleSheet(
+            "QTableWidget { background:white; border:none; font-size:12px; }"
+            "QTableWidget::item { padding:4px 6px; }"
+            f"QHeaderView::section {{ background:{SILVER_100};"
+            f"  color:{SLATE_500}; padding:6px 8px; border:none;"
+            f"  border-bottom:1px solid {SILVER_300};"
+            f"  font-size:11px; font-weight:700; }}"
+        )
         self.tbl.itemChanged.connect(self._on_item_changed)
         self.tbl.itemSelectionChanged.connect(self._render_composicion)
 
@@ -277,97 +363,15 @@ class FormulaView(QWidget):
         h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 36)
         h.setSectionResizeMode(1, QHeaderView.Fixed); h.resizeSection(1, 76)
         h.setSectionResizeMode(2, QHeaderView.Stretch)
-        h.setSectionResizeMode(3, QHeaderView.Fixed); h.resizeSection(3, 110)
-        h.setSectionResizeMode(4, QHeaderView.Fixed); h.resizeSection(4, 100)
-        h.setSectionResizeMode(5, QHeaderView.Fixed); h.resizeSection(5, 90)
-        h.setSectionResizeMode(6, QHeaderView.Fixed); h.resizeSection(6, 36)
-        tv.addWidget(self.tbl)
+        h.setSectionResizeMode(3, QHeaderView.Fixed); h.resizeSection(3, 100)
+        h.setSectionResizeMode(4, QHeaderView.Fixed); h.resizeSection(4, 90)
+        h.setSectionResizeMode(5, QHeaderView.Fixed); h.resizeSection(5, 80)
+        h.setSectionResizeMode(6, QHeaderView.Fixed); h.resizeSection(6, 34)
+        v.addWidget(self.tbl, 1)
+        return fr
 
-        # Footer con total + botones
-        foot = QFrame()
-        foot.setStyleSheet(
-            f"QFrame {{ background:{SILVER_50};"
-            f"  border-top:1px solid {SILVER_300};"
-            f"  border-radius:0 0 8px 8px; }}"
-        )
-        fl = QHBoxLayout(foot); fl.setContentsMargins(12, 8, 12, 8); fl.setSpacing(8)
-
-        btn_add = QPushButton("Agregar monomio")
-        btn_add.setIcon(icon("add"))
-        btn_add.setIconSize(QSize(16, 16))
-        btn_add.setCursor(Qt.PointingHandCursor)
-        btn_add.setStyleSheet(
-            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-            f"  border:1px solid {SILVER_300}; border-radius:6px;"
-            f"  padding:5px 12px; font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-            f"  border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-        )
-        btn_add.clicked.connect(self._agregar_monomio)
-        fl.addWidget(btn_add)
-        fl.addStretch(1)
-
-        self.lbl_suma_foot = QLabel("Σ = 0.0000  ·  0.00%")
-        self.lbl_suma_foot.setStyleSheet(
-            f"color:{SLATE_500}; font-size:11px; font-weight:600;"
-            f"  padding:0 8px; background:transparent; border:none;"
-        )
-        fl.addWidget(self.lbl_suma_foot)
-
-        self.btn_guardar = QPushButton("Guardar")
-        self.btn_guardar.setIcon(icon("guardar"))
-        self.btn_guardar.setIconSize(QSize(16, 16))
-        self.btn_guardar.setCursor(Qt.PointingHandCursor)
-        self.btn_guardar.setStyleSheet(
-            f"QPushButton {{ background:{ORANGE}; color:white; border:none;"
-            f"  border-radius:6px; padding:5px 14px; font-weight:600;"
-            f"  font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_DARK}; }}"
-        )
-        self.btn_guardar.clicked.connect(self._guardar)
-        fl.addWidget(self.btn_guardar)
-
-        self.btn_export = QPushButton("Exportar Excel")
-        self.btn_export.setIcon(icon("exportar"))
-        self.btn_export.setIconSize(QSize(16, 16))
-        self.btn_export.setCursor(Qt.PointingHandCursor)
-        self.btn_export.setStyleSheet(
-            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-            f"  border:1px solid {SILVER_300}; border-radius:6px;"
-            f"  padding:5px 12px; font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-            f"  border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-        )
-        self.btn_export.clicked.connect(self._exportar_excel)
-        fl.addWidget(self.btn_export)
-
-        self.btn_export_pdf = QPushButton("Exportar PDF")
-        self.btn_export_pdf.setIcon(icon("exportar"))
-        self.btn_export_pdf.setIconSize(QSize(16, 16))
-        self.btn_export_pdf.setCursor(Qt.PointingHandCursor)
-        self.btn_export_pdf.setStyleSheet(
-            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-            f"  border:1px solid {SILVER_300}; border-radius:6px;"
-            f"  padding:5px 12px; font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-            f"  border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-        )
-        self.btn_export_pdf.clicked.connect(self._exportar_pdf)
-        fl.addWidget(self.btn_export_pdf)
-
-        tv.addWidget(foot)
-        col.addWidget(card_tbl, 3)
-
-        # Card 3: Composición del monomio seleccionado
-        col.addWidget(self._build_card_composicion(), 2)
-
-        # Card 4: Cálculo de Reajuste K con valores INEI
-        col.addWidget(self._build_card_reajuste(), 2)
-
-        return col
-
-    # ── card "Composición del monomio" ──────────────────────────────────────
-    def _build_card_composicion(self) -> QFrame:
+    # ── panel "Composición del monomio" ─────────────────────────────────────
+    def _build_panel_composicion(self) -> QFrame:
         """Qué índices unificados forman el monomio seleccionado.
 
         Es lo que el usuario pedía ver: hasta ahora el monomio era una fila con
@@ -375,38 +379,17 @@ class FormulaView(QWidget):
         columna «Monomio» permite mover un índice a otro, que es la otra mitad
         del pedido.
         """
-        from utils.theme import apply_shadow
-        fr = QFrame()
-        fr.setStyleSheet(
-            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(fr, 'sm')
-        v = QVBoxLayout(fr)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
+        fr, v, hl, lbl = self._panel("Composición del monomio")
+        self.lbl_comp_titulo = lbl
 
-        head = QFrame()
-        head.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                            f"  border-radius:8px 8px 0 0; }}")
-        hl = QHBoxLayout(head); hl.setContentsMargins(12, 8, 12, 8); hl.setSpacing(6)
-        ic = QLabel(); ic.setPixmap(icon("rep-insumos").pixmap(16, 16))
-        ic.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(ic)
-        self.lbl_comp_titulo = QLabel("Composición del monomio")
-        self.lbl_comp_titulo.setStyleSheet(
-            "color:white; font-weight:600; font-size:13px;"
-            " background:transparent; border:none;"
-        )
-        hl.addWidget(self.lbl_comp_titulo)
-        hl.addStretch(1)
         self.lbl_comp_badge = QLabel("")
         self.lbl_comp_badge.setStyleSheet(
-            f"background:{WHITE}; color:{SLATE_500}; padding:3px 10px;"
-            f"  border-radius:4px; font-weight:600; font-size:11px;"
+            f"background:{SILVER_100}; color:{SLATE_500}; padding:2px 8px;"
+            f" border-radius:4px; font-weight:600; font-size:11px;"
         )
+        # Vacío no se pinta: dejaba un rectángulo suelto en la cabecera.
+        self.lbl_comp_badge.setVisible(False)
         hl.addWidget(self.lbl_comp_badge)
-        v.addWidget(head)
 
         self.tbl_comp = QTableWidget(0, 5)
         self.tbl_comp.setHorizontalHeaderLabels(
@@ -415,6 +398,7 @@ class FormulaView(QWidget):
         self.tbl_comp.setAlternatingRowColors(True)
         self.tbl_comp.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_comp.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl_comp.setShowGrid(False)
         self.tbl_comp.setStyleSheet(
             "QTableWidget { background:white; border:none; font-size:12px; }"
             "QTableWidget::item { padding:4px 6px; }"
@@ -424,10 +408,9 @@ class FormulaView(QWidget):
             f"  font-size:11px; font-weight:700; }}"
         )
         h = self.tbl_comp.horizontalHeader()
-        h.setSectionResizeMode(0, QHeaderView.Fixed)
-        h.resizeSection(0, 70)
+        h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 62)
         h.setSectionResizeMode(1, QHeaderView.Stretch)
-        for c, w in ((2, 130), (3, 100), (4, 130)):
+        for c, w in ((2, 120), (3, 90), (4, 110)):
             h.setSectionResizeMode(c, QHeaderView.Fixed)
             h.resizeSection(c, w)
         v.addWidget(self.tbl_comp, 1)
@@ -435,15 +418,28 @@ class FormulaView(QWidget):
         self.lbl_comp_pie = QLabel("")
         self.lbl_comp_pie.setWordWrap(True)
         self.lbl_comp_pie.setStyleSheet(
-            f"color:{SLATE_500}; font-size:11px; padding:8px 12px;"
-            f" background:{SILVER_100}; border:none;"
+            f"color:{SLATE_300}; font-size:11px; padding:6px 12px;"
+            f" background:{SILVER_50}; border:none;"
             f" border-top:1px solid {SILVER_300};"
         )
         v.addWidget(self.lbl_comp_pie)
         return fr
 
     def _render_composicion(self):
-        """Pinta la composición del monomio seleccionado en la tabla."""
+        """Pinta la composición del monomio seleccionado en la tabla.
+
+        Si la fórmula no tiene composición —escrita a mano, o guardada antes de
+        la 3.0.4— la tarjeta se OCULTA en vez de quedarse como una caja vacía
+        ocupando el alto que necesita la tabla de monomios. El aviso de que se
+        puede derivar va en el pie de los monomios, que sí se ve siempre.
+        """
+        hay_composicion = any(m.get('componentes') for m in self._monomios)
+        self.card_composicion.setVisible(hay_composicion)
+        self.lbl_sin_composicion.setVisible(
+            bool(self._monomios) and not hay_composicion)
+        if not hay_composicion:
+            return
+
         self.tbl_comp.setRowCount(0)
         fila = self.tbl.currentRow()
         if fila < 0 or fila >= len(self._monomios):
@@ -464,6 +460,7 @@ class FormulaView(QWidget):
         self.lbl_comp_badge.setText(
             f"{len(comps)} índice" + ("s" if len(comps) != 1 else "")
         )
+        self.lbl_comp_badge.setVisible(True)
 
         if not comps:
             self.lbl_comp_pie.setText(
@@ -562,42 +559,17 @@ class FormulaView(QWidget):
         self.tbl.selectRow(destino)
         self._render_composicion()
 
-    # ── card "Cálculo de Reajuste K" ────────────────────────────────────────
-    def _build_card_reajuste(self) -> QFrame:
-        from utils.theme import apply_shadow
-        fr = QFrame()
-        fr.setStyleSheet(
-            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(fr, 'sm')
-        v = QVBoxLayout(fr)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
-
-        head = QFrame()
-        head.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                            f"  border-radius:8px 8px 0 0; }}")
-        hl = QHBoxLayout(head); hl.setContentsMargins(12, 6, 12, 6); hl.setSpacing(8)
-        ti = QLabel(); ti.setPixmap(icon("rep-resumen").pixmap(16, 16))
-        ti.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(ti)
-        ttl = QLabel("Cálculo de Reajuste K (con valores INEI)")
-        ttl.setStyleSheet(
-            "color:white; font-weight:600; font-size:13px;"
-            " background:transparent; border:none;"
-        )
-        hl.addWidget(ttl)
-        hl.addStretch(1)
+    # ── panel "Cálculo de Reajuste K" ───────────────────────────────────────
+    def _build_panel_reajuste(self) -> QFrame:
+        fr, v, hl, _ = self._panel("Cálculo de Reajuste K (con valores INEI)")
 
         self.lbl_k_badge = QLabel("K = —")
         self.lbl_k_badge.setStyleSheet(
-            f"background:{WHITE}; color:{SLATE_500}; padding:4px 12px;"
-            f"  border-radius:4px; font-weight:700; font-size:12px;"
-            f"  font-family: monospace;"
+            f"background:{SILVER_100}; color:{SLATE_500}; padding:2px 10px;"
+            f" border-radius:4px; font-weight:700; font-size:12px;"
+            f" font-family: monospace;"
         )
         hl.addWidget(self.lbl_k_badge)
-        v.addWidget(head)
 
         # Fila de períodos + área
         per_row = QFrame()
@@ -732,8 +704,7 @@ class FormulaView(QWidget):
         foot = QFrame()
         foot.setStyleSheet(
             f"QFrame {{ background:{SILVER_50};"
-            f"  border-top:1px solid {SILVER_300};"
-            f"  border-radius:0 0 8px 8px; }}"
+            f"  border-top:1px solid {SILVER_300}; }}"
         )
         fl = QHBoxLayout(foot); fl.setContentsMargins(12, 6, 12, 6); fl.setSpacing(8)
 
@@ -779,119 +750,6 @@ class FormulaView(QWidget):
         )
 
     # ── columna lateral: info / costos / ayuda ──────────────────────────────
-    def _build_col_lateral(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.setSpacing(12)
-
-        # Card info proyecto
-        self.card_proy = self._mk_card("Proyecto", "rep-presupuesto")
-        col.addWidget(self.card_proy['frame'])
-        self.lbl_proy_meta = QLabel("")
-        self.lbl_proy_meta.setWordWrap(True)
-        self.lbl_proy_meta.setTextFormat(Qt.RichText)
-        self.lbl_proy_meta.setStyleSheet(
-            f"color:{SLATE_500}; font-size:12px; line-height:1.6;"
-            f"  padding:10px 12px;"
-        )
-        self.card_proy['body'].addWidget(self.lbl_proy_meta)
-
-        # Card costos ACU (oculta hasta calcular)
-        self.card_acu = self._mk_card("Costos ACU", "rep-acus")
-        self.card_acu['frame'].setVisible(False)
-        col.addWidget(self.card_acu['frame'])
-        self.lbl_acu = QLabel("")
-        self.lbl_acu.setTextFormat(Qt.RichText)
-        self.lbl_acu.setStyleSheet(
-            f"color:{SLATE_500}; font-size:12px; padding:8px 12px;"
-        )
-        self.card_acu['body'].addWidget(self.lbl_acu)
-
-        # Card ¿Qué es?
-        card_q = self._mk_card("¿Qué es?", "acerca")
-        col.addWidget(card_q['frame'])
-        ayuda = QLabel(
-            "<p>La <b>fórmula polinómica</b> expresa el reajuste de precios "
-            "de obra según índices INEI:</p>"
-            "<p style='font-family:monospace; background:#F4F6FB;"
-            " padding:6px 8px; border-radius:4px; color:#0F172A;'>"
-            "K = J·(Jr/Jo) + M·(Mr/Mo) + E·(Er/Eo)</p>"
-            "<p>J, M, E son los coeficientes (deben sumar 1.000), y los "
-            "índices r/o son los del período de reajuste vs. el de oferta.</p>"
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setTextFormat(Qt.RichText)
-        ayuda.setStyleSheet(
-            f"color:{SLATE_500}; font-size:11px; padding:10px 12px;"
-        )
-        card_q['body'].addWidget(ayuda)
-
-        # Card INEI frecuentes
-        card_inei = self._mk_card("Índices INEI frecuentes", "rep-resumen")
-        col.addWidget(card_inei['frame'])
-        tbl_inei = QTableWidget(len(INEI_FRECUENTES), 2)
-        tbl_inei.setHorizontalHeaderLabels(["Cód.", "Descripción"])
-        tbl_inei.verticalHeader().setVisible(False)
-        tbl_inei.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        tbl_inei.setShowGrid(False)
-        tbl_inei.setStyleSheet(
-            "QTableWidget { background:white; border:none; font-size:11px; }"
-            "QTableWidget::item { padding:3px 6px; }"
-            f"QHeaderView::section {{ background:{SILVER_100};"
-            f"  color:{SLATE_500}; font-size:10px; padding:4px;"
-            f"  border:none; border-bottom:1px solid {SILVER_300}; }}"
-        )
-        h = tbl_inei.horizontalHeader()
-        h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 50)
-        h.setSectionResizeMode(1, QHeaderView.Stretch)
-        for i, (cod, desc) in enumerate(INEI_FRECUENTES):
-            it_c = QTableWidgetItem(cod)
-            it_c.setForeground(QColor(SLATE_700))
-            f = QFont("monospace"); f.setBold(True); f.setPointSize(9)
-            it_c.setFont(f)
-            it_c.setTextAlignment(Qt.AlignCenter)
-            tbl_inei.setItem(i, 0, it_c)
-            it_d = QTableWidgetItem(desc)
-            it_d.setForeground(QColor(SLATE_500))
-            tbl_inei.setItem(i, 1, it_d)
-        tbl_inei.setMaximumHeight(min(220, 24 * len(INEI_FRECUENTES) + 30))
-        card_inei['body'].addWidget(tbl_inei)
-
-        col.addStretch(1)
-        return col
-
-    def _mk_card(self, titulo: str, ico_alias: str) -> dict:
-        from utils.theme import apply_shadow
-        fr = QFrame()
-        fr.setStyleSheet(
-            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
-            f"  border-radius:8px; }}"
-        )
-        apply_shadow(fr, 'sm')
-        v = QVBoxLayout(fr)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
-        head = QFrame()
-        head.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                            f"  border-radius:8px 8px 0 0; }}")
-        hl = QHBoxLayout(head); hl.setContentsMargins(12, 6, 12, 6); hl.setSpacing(6)
-        ico_h = QLabel(); ico_h.setPixmap(icon(ico_alias).pixmap(14, 14))
-        ico_h.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(ico_h)
-        ttl = QLabel(titulo)
-        ttl.setStyleSheet(
-            "color:white; font-weight:600; font-size:12px;"
-            " background:transparent; border:none;"
-        )
-        hl.addWidget(ttl)
-        hl.addStretch(1)
-        v.addWidget(head)
-        body = QVBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        v.addLayout(body)
-        return {'frame': fr, 'body': body}
-
-    # ── Carga / persistencia ────────────────────────────────────────────────
     def cargar(self):
         """Carga proyecto + monomios persistidos. Llamar al mostrar la vista."""
         conn = get_db()
@@ -902,20 +760,8 @@ class FormulaView(QWidget):
         conn.close()
         self._proyecto_meta = dict(proy) if proy else {}
 
-        partes = []
-        if proy and proy['nombre']:
-            partes.append(f"<b>{proy['nombre']}</b>")
-        if proy and proy['cliente']:
-            partes.append(f"<span style='color:#95A3AB'>{proy['cliente']}</span>")
-        if proy and proy['ubicacion']:
-            partes.append(f"<span style='color:#95A3AB'>{proy['ubicacion']}</span>")
-        if proy and proy['moneda']:
-            partes.append(
-                f"<span style='background:#485A6C;color:white;"
-                f"padding:2px 8px;border-radius:4px;font-size:10px;"
-                f"font-weight:600;'>{proy['moneda']}</span>"
-            )
-        self.lbl_proy_meta.setText("<br>".join(partes) or "—")
+        # El nombre del proyecto ya está en las pestañas; la tarjeta lateral
+        # que lo repetía se fue con el resto de la columna.
 
         self._monomios = cargar_monomios(self.pid)
         # La composición vive en su propia tabla, enlazada por `orden`. Los
@@ -1212,45 +1058,26 @@ class FormulaView(QWidget):
             self.tbl.selectRow(0)
 
     def _actualizar_panel_acu(self):
-        """Los índices que más pesan en el presupuesto.
+        """Resumen del reparto, en una línea del pie.
 
-        Antes mostraba los tres porcentajes MO/MAT/EQ, que era todo lo que la
-        fórmula sabía. Ahora que agrupa por índice unificado, lo útil es ver
-        cuáles mandan — y cuánto costo se apoya en insumos sin índice asignado,
-        que es un supuesto y conviene que se vea.
+        Antes era una tarjeta lateral con los tres porcentajes MO/MAT/EQ, que
+        era todo lo que la fórmula sabía. Ahora que agrupa por índice unificado
+        lo que hace falta decir es cuántos índices salieron, cuál es el costo
+        directo y —sobre todo— cuánto se apoya en insumos SIN índice asignado,
+        que es un supuesto y conviene que se vea antes de presentar.
         """
         if not self._ius or not self._cd:
+            self.lbl_pie_info.setText("")
             return
         moneda = self._proyecto_meta.get('moneda', 'Soles')
-        html = "<table cellspacing='0' cellpadding='3' width='100%'>"
-        for i in self._ius[:6]:
-            html += (
-                f"<tr><td><b>{i['codigo']}</b> "
-                f"<span style='color:#95A3AB'>{i['nombre'][:24]}</span></td>"
-                f"<td align='right'><b>{i['incidencia'] * 100:.1f}%</b></td></tr>"
-            )
-        if len(self._ius) > 6:
-            resto = sum(i['incidencia'] for i in self._ius[6:])
-            html += (
-                f"<tr><td><span style='color:#95A3AB'>otros "
-                f"{len(self._ius) - 6} índices</span></td>"
-                f"<td align='right'>{resto * 100:.1f}%</td></tr>"
-            )
-        html += (
-            f"<tr style='border-top:1px solid #D4D4D4;'>"
-            f"<td><b>C.D. Total</b></td>"
-            f"<td align='right'><b>{fmt(self._cd, moneda)}</b></td></tr>"
-        )
+        txt = (f"C.D. <b>{fmt(self._cd, moneda)}</b> · "
+               f"<b>{len(self._ius)}</b> índices")
         sin = getattr(self, '_monto_sin_indice', 0.0)
         if sin:
-            html += (
-                f"<tr><td colspan='2' style='color:#C0621A; font-size:10px;'>"
-                f"{fmt(sin, moneda)} ({sin / self._cd * 100:.0f}%) en insumos "
-                f"sin índice asignado, contados en el de su tipo.</td></tr>"
-            )
-        html += "</table>"
-        self.lbl_acu.setText(html)
-        self.card_acu['frame'].setVisible(True)
+            txt += (f" · <span style='color:{ORANGE_DARK}'>"
+                    f"{fmt(sin, moneda)} ({sin / self._cd * 100:.0f}%) sin "
+                    f"índice propio</span>")
+        self.lbl_pie_info.setText(txt)
 
     def _guardar(self):
         suma = sum(float(m.get('coeficiente') or 0) for m in self._monomios)
