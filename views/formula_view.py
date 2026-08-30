@@ -1149,7 +1149,10 @@ class FormulaView(QWidget):
                     else f"{principal.get('nombre', '')} y {len(cs) - 1} más"
                 )
         recalcular_coeficientes(self._monomios, self._cd)
-        self._monomio_activo = destino
+        # El monomio activo NO se mueve al destino: uno está repartiendo los
+        # índices DEL monomio que tiene abierto, así que saltar al de destino
+        # después de cada envío rompe el trabajo. Se queda donde se está.
+        self._monomio_activo = origen
         self._render_tabla()
 
     # ── panel "Cálculo de Reajuste K" ───────────────────────────────────────

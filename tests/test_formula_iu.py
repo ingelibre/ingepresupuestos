@@ -886,6 +886,48 @@ def test_no_se_pierde_la_formula_sin_guardar():
     assert salidas, "no salió al descartar"
 
 
+def test_mover_un_indice_no_te_saca_del_monomio_que_editas():
+    """Reportado probando: al mover un índice, la vista saltaba al monomio de
+    DESTINO. Uno está repartiendo los índices del monomio que tiene abierto,
+    así que saltar tras cada envío rompe el trabajo."""
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    app = QApplication.instance() or QApplication([])
+    QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+    QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+    from views.formula_view import FormulaView
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    F.guardar_monomios(pid, F.calcular_por_iu(pid)['monomios'])
+
+    v = FormulaView(pid, "X")
+    v.resize(1100, 650)
+    v.show()
+    v.cargar()
+    app.processEvents()
+    v._fijar_monomio(0)
+    app.processEvents()
+    assert len(v._monomios[0].get('componentes') or []) >= 3, \
+        "hace falta un monomio con varios índices"
+
+    n0 = len(v._monomios[0]['componentes'])
+    for _ in range(2):
+        cod = v.tbl_comp.item(0, 0).text()
+        v._mover_componente(cod, 0, 2)
+        app.processEvents()
+        assert v._monomio_activo == 0, \
+            f"la vista saltó al monomio {v._monomio_activo}"
+        assert v.lbl_comp_titulo.text().startswith(
+            f"Composición de {v._monomios[0]['simbolo']}")
+    assert len(v._monomios[0]['componentes']) == n0 - 2
+    assert abs(sum(m['coeficiente'] for m in v._monomios) - 1.0) < 0.002
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
