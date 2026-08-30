@@ -149,16 +149,25 @@ class IndicesINEIView(QWidget):
 
     # ── construcción UI ─────────────────────────────────────────────────────
     def _build(self):
+        """Mismo armado que el Catálogo de Insumos, su vista hermana.
+
+        Antes esta barra metía el título, dos selectores y OCHO botones en una
+        sola fila: pedía 1872 px de ancho mínimo, así que en un portátil de
+        1366 el combo de la base salía cortado. Ahora las importaciones van en
+        un menú «Importar ▾» —como en Insumos— y los selectores bajan a la
+        barra de filtros, que es donde el programa pone los filtros.
+        """
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 16)
         root.setSpacing(12)
 
-        # ── Topbar ──
+        # ── Cabecera ──
         top = QHBoxLayout()
         top.setSpacing(10)
 
         ico_t = QLabel()
         ico_t.setPixmap(icon("rep-resumen").pixmap(28, 28))
+        ico_t.setFixedSize(28, 28)
         top.addWidget(ico_t)
 
         title = QLabel("Índices Unificados de Precios INEI")
@@ -172,76 +181,44 @@ class IndicesINEIView(QWidget):
         top.addWidget(self.lbl_subt)
         top.addStretch(1)
 
-        # Selector de serie (base del INEI)
-        lbl_s = QLabel("Base:")
-        lbl_s.setStyleSheet(f"color:{SLATE_500}; font-weight:600;")
-        top.addWidget(lbl_s)
-        self.cmb_serie = QComboBox()
-        self.cmb_serie.setMinimumWidth(190)
-        self.cmb_serie.setToolTip(
-            "El INEI cambió la base en diciembre de 2025 (RJ 016-2026-INEI). "
-            "Los índices de una base no se mezclan con los de la otra."
-        )
-        for clave, nombre in series_disponibles():
-            self.cmb_serie.addItem(nombre, clave)
-        self.cmb_serie.currentIndexChanged.connect(self._on_serie_change)
-        top.addWidget(self.cmb_serie)
-
-        # Selector de área
-        lbl_a = QLabel("Área:")
-        lbl_a.setStyleSheet(f"color:{SLATE_500}; font-weight:600;")
-        top.addWidget(lbl_a)
-        self.cmb_area = QComboBox()
-        self.cmb_area.setMinimumWidth(280)
-        self.cmb_area.currentIndexChanged.connect(self._on_area_change)
-        top.addWidget(self.cmb_area)
-
-        # Botones — ordenados de más automático a más manual
-        self.btn_auto = self._mk_btn("Sincronizar con INEI", icon_name="importar",
-                                      primary=True)
+        self.btn_auto = self._mk_btn("Sincronizar con INEI",
+                                      icon_name="importar", primary=True)
         self.btn_auto.setToolTip(
             "Detecta y descarga el último archivo oficial del INEI"
-            " automáticamente"
-        )
+            " automáticamente")
         self.btn_auto.clicked.connect(self._sincronizar_inei)
         top.addWidget(self.btn_auto)
 
-        self.btn_url = self._mk_btn("URL", icon_name="importar")
-        self.btn_url.setToolTip("Descargar desde URL específica")
-        self.btn_url.clicked.connect(self._descargar_url)
-        top.addWidget(self.btn_url)
-
-        self.btn_pegar = self._mk_btn("Pegar datos", icon_name="copiar")
-        self.btn_pegar.setToolTip("Pegar tabla desde portapapeles")
-        self.btn_pegar.clicked.connect(self._pegar_datos)
-        top.addWidget(self.btn_pegar)
-
-        self.btn_imp_excel = self._mk_btn("Excel local", icon_name="folder")
-        self.btn_imp_excel.clicked.connect(self._importar_excel)
-        top.addWidget(self.btn_imp_excel)
-
-        self.btn_imp_delphin = self._mk_btn("Delphin SQLite", icon_name="sqlite")
-        self.btn_imp_delphin.setToolTip(
-            "Importar histórico INEI desde una base de datos de Delphin Express"
-        )
-        self.btn_imp_delphin.clicked.connect(self._importar_delphin_sqlite)
-        top.addWidget(self.btn_imp_delphin)
-
-        self.btn_imp_json = self._mk_btn("JSON", icon_name="importar")
-        self.btn_imp_json.setToolTip("Importar JSON")
-        self.btn_imp_json.clicked.connect(self._importar_json)
-        top.addWidget(self.btn_imp_json)
+        # Todo lo que es traer datos, en un solo menú.
+        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar")
+        menu = QMenu(self.btn_import)
+        self.btn_imp_excel = menu.addAction(icon("folder"),
+                                            "Archivo del INEI (.xlsx)")
+        self.btn_imp_excel.triggered.connect(self._importar_excel)
+        self.btn_url = menu.addAction(icon("importar"), "Desde una URL…")
+        self.btn_url.triggered.connect(self._descargar_url)
+        self.btn_pegar = menu.addAction(icon("copiar"),
+                                        "Pegar datos del portapapeles")
+        self.btn_pegar.triggered.connect(self._pegar_datos)
+        menu.addSeparator()
+        self.btn_imp_delphin = menu.addAction(icon("sqlite"),
+                                              "Base de Delphin Express")
+        self.btn_imp_delphin.triggered.connect(self._importar_delphin_sqlite)
+        self.btn_imp_json = menu.addAction(icon("importar"), "Desde JSON")
+        self.btn_imp_json.triggered.connect(self._importar_json)
+        self.btn_import.setMenu(menu)
+        top.addWidget(self.btn_import)
 
         self.btn_exp_json = self._mk_btn("Exportar", icon_name="exportar")
-        self.btn_exp_json.setToolTip("Exportar a JSON")
+        self.btn_exp_json.setToolTip("Exportar el histórico a JSON")
         self.btn_exp_json.clicked.connect(self._exportar_json)
         top.addWidget(self.btn_exp_json)
 
-        self.btn_diccionario = self._mk_btn("Diccionario", icon_name="rep-insumos")
+        self.btn_diccionario = self._mk_btn("Diccionario",
+                                            icon_name="rep-insumos")
         self.btn_diccionario.setToolTip(
             "Qué índice unificado le corresponde a cada insumo — es lo que usa "
-            "la fórmula polinómica para agrupar el costo"
-        )
+            "la fórmula polinómica para agrupar el costo")
         self.btn_diccionario.clicked.connect(self._abrir_diccionario)
         top.addWidget(self.btn_diccionario)
 
@@ -260,86 +237,19 @@ class IndicesINEIView(QWidget):
             kpis.addWidget(k, 1)
         root.addLayout(kpis)
 
-        # ── Cuerpo: splitter izq (lista) + der (matriz año×mes) ──
-        split = QSplitter(Qt.Horizontal)
-        split.setChildrenCollapsible(False)
-        split.setStyleSheet(
-            "QSplitter::handle { background: #D4D4D4; }"
-            "QSplitter::handle:horizontal { width: 1px; }"
-            "QSplitter::handle:hover { background: #F37329; }"
-        )
-
-        split.addWidget(self._build_panel_izq())
-        split.addWidget(self._build_panel_der())
-        split.setStretchFactor(0, 2)
-        split.setStretchFactor(1, 5)
-        split.setSizes([280, 700])
-
-        root.addWidget(split, 1)
-
-    def _build_panel_izq(self) -> QWidget:
-        fr = QFrame()
-        fr.setStyleSheet(
+        # ── Filtros ──
+        filtros = QFrame()
+        filtros.setStyleSheet(
             f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
             f"  border-radius:6px; }}"
         )
-        v = QVBoxLayout(fr)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
+        fl = QHBoxLayout(filtros)
+        fl.setContentsMargins(10, 8, 10, 8)
+        fl.setSpacing(8)
 
-        # Header del panel
-        hd = QFrame()
-        hd.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                          f"  border-radius:6px 6px 0 0; }}")
-        hl = QHBoxLayout(hd); hl.setContentsMargins(10, 7, 10, 7); hl.setSpacing(6)
-        i_h = QLabel(); i_h.setPixmap(icon("rep-presupuesto").pixmap(14, 14))
-        i_h.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(i_h)
-        l_h = QLabel("Índices")
-        l_h.setStyleSheet(
-            "color:white; font-weight:600; font-size:12px;"
-            " background:transparent; border:none;"
-        )
-        hl.addWidget(l_h)
-        hl.addStretch(1)
-
-        # Aviso de códigos usados que el catálogo no define. Solo se muestra
-        # cuando los hay: la propia biblioteca semilla trae varios (99, 75,
-        # 63, 76, 58), invisibles hasta ahora porque la lista sale del catálogo.
-        self.btn_huerfanos = QPushButton("")
-        self.btn_huerfanos.setCursor(Qt.PointingHandCursor)
-        self.btn_huerfanos.setStyleSheet(
-            "QPushButton { background:#FFE4CC; color:#7A3800;"
-            " border:1px solid rgba(255,255,255,0.35); border-radius:4px;"
-            " padding:4px 9px; font-size:11px; font-weight:700; }"
-            "QPushButton:hover { background:#FFD3AB; }"
-        )
-        self.btn_huerfanos.clicked.connect(self._revisar_huerfanos)
-        self.btn_huerfanos.setVisible(False)
-        hl.addWidget(self.btn_huerfanos)
-
-        self.btn_nuevo = QPushButton("Nuevo")
-        self.btn_nuevo.setIcon(icon("add"))
-        self.btn_nuevo.setIconSize(QSize(13, 13))
-        self.btn_nuevo.setCursor(Qt.PointingHandCursor)
-        self.btn_nuevo.setToolTip("Dar de alta un índice unificado")
-        self.btn_nuevo.setStyleSheet(
-            "QPushButton { background:rgba(255,255,255,0.15); color:white;"
-            " border:1px solid rgba(255,255,255,0.25); border-radius:4px;"
-            " padding:4px 10px; font-size:11px; }"
-            "QPushButton:hover { background:rgba(255,255,255,0.25); }"
-        )
-        self.btn_nuevo.clicked.connect(self._nuevo_indice)
-        hl.addWidget(self.btn_nuevo)
-        v.addWidget(hd)
-
-        # Búsqueda
-        srh = QHBoxLayout()
-        srh.setContentsMargins(8, 8, 8, 6)
-        srh.setSpacing(6)
-        ico_s = QLabel(); ico_s.setPixmap(icon("buscar").pixmap(14, 14))
+        ico_s = QLabel(); ico_s.setPixmap(icon("buscar").pixmap(16, 16))
         ico_s.setStyleSheet("background:transparent; border:none;")
-        srh.addWidget(ico_s)
+        fl.addWidget(ico_s)
         self.inp_q = QLineEdit()
         self.inp_q.setPlaceholderText("Buscar por código o nombre…")
         self.inp_q.setClearButtonEnabled(True)
@@ -347,29 +257,65 @@ class IndicesINEIView(QWidget):
         self._timer_q.setSingleShot(True)
         self._timer_q.timeout.connect(self._refrescar_lista)
         self.inp_q.textChanged.connect(lambda _: self._timer_q.start(220))
-        srh.addWidget(self.inp_q, 1)
-        v.addLayout(srh)
+        fl.addWidget(self.inp_q, 2)
 
-        # Lista
-        self.lst = QListWidget()
-        self.lst.setStyleSheet(
-            "QListWidget { border:none; background:white; }"
-            "QListWidget::item { padding:6px 10px;"
-            " border-bottom:1px solid #F0F1F2; }"
-            "QListWidget::item:hover { background:#FEF5EB; }"
-            "QListWidget::item:selected { background:#FFE4CC; color:#7A3800; }"
+        lbl_s = QLabel("Base:")
+        lbl_s.setStyleSheet(f"color:{SLATE_500}; font-weight:600;"
+                            f" background:transparent; border:none;")
+        fl.addWidget(lbl_s)
+        self.cmb_serie = QComboBox()
+        self.cmb_serie.setMinimumWidth(210)
+        self.cmb_serie.setToolTip(
+            "El INEI cambió la base en diciembre de 2025 (RJ 016-2026-INEI). "
+            "Los índices de una base no se mezclan con los de la otra."
         )
-        self.lst.itemSelectionChanged.connect(self._on_lst_change)
-        self.lst.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.lst.customContextMenuRequested.connect(self._menu_indices)
-        self.lst.itemDoubleClicked.connect(
-            lambda it: self._editar_indice(it.data(Qt.UserRole))
+        for clave, nombre in series_disponibles():
+            self.cmb_serie.addItem(nombre, clave)
+        self.cmb_serie.currentIndexChanged.connect(self._on_serie_change)
+        fl.addWidget(self.cmb_serie)
+
+        lbl_a = QLabel("Área:")
+        lbl_a.setStyleSheet(f"color:{SLATE_500}; font-weight:600;"
+                            f" background:transparent; border:none;")
+        fl.addWidget(lbl_a)
+        self.cmb_area = QComboBox()
+        self.cmb_area.setMinimumWidth(230)
+        self.cmb_area.currentIndexChanged.connect(self._on_area_change)
+        fl.addWidget(self.cmb_area, 1)
+
+        # Aviso de códigos usados que el catálogo no define. Solo aparece
+        # cuando los hay: la biblioteca semilla trae varios.
+        self.btn_huerfanos = QPushButton("")
+        self.btn_huerfanos.setCursor(Qt.PointingHandCursor)
+        self.btn_huerfanos.setStyleSheet(
+            "QPushButton { background:#FDE8D0; color:#7A3800;"
+            " border:1px solid #F9A65C; border-radius:4px;"
+            " padding:5px 10px; font-size:11px; font-weight:700; }"
+            "QPushButton:hover { background:#F9A65C; color:white; }"
         )
-        v.addWidget(self.lst, 1)
+        self.btn_huerfanos.clicked.connect(self._revisar_huerfanos)
+        self.btn_huerfanos.setVisible(False)
+        fl.addWidget(self.btn_huerfanos)
 
-        return fr
+        self.btn_nuevo = self._mk_btn("Nuevo índice", icon_name="add")
+        self.btn_nuevo.setToolTip("Dar de alta un índice unificado")
+        self.btn_nuevo.clicked.connect(self._nuevo_indice)
+        fl.addWidget(self.btn_nuevo)
 
-    def _build_panel_der(self) -> QWidget:
+        root.addWidget(filtros)
+
+        # ── Cuerpo: lista de índices ↔ matriz año × mes ──
+        split = QSplitter(Qt.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.addWidget(self._build_panel_izq())
+        split.addWidget(self._build_panel_der())
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 5)
+        split.setSizes([300, 760])
+        root.addWidget(split, 1)
+
+    def _panel(self, titulo: str):
+        """Panel a sangre con título fino, el mismo de las demás vistas."""
         fr = QFrame()
         fr.setStyleSheet(
             f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
@@ -378,39 +324,67 @@ class IndicesINEIView(QWidget):
         v = QVBoxLayout(fr)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-
-        # Header con título dinámico
-        hd = QFrame()
-        hd.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
-                          f"  border-radius:6px 6px 0 0; }}")
-        hl = QHBoxLayout(hd); hl.setContentsMargins(10, 7, 10, 7); hl.setSpacing(8)
-        i_h = QLabel(); i_h.setPixmap(icon("rep-curva-s").pixmap(14, 14))
-        i_h.setStyleSheet("background:transparent; border:none;")
-        hl.addWidget(i_h)
-        self.lbl_titulo_matriz = QLabel("Selecciona un índice")
-        self.lbl_titulo_matriz.setStyleSheet(
-            "color:white; font-weight:600; font-size:12px;"
-            " background:transparent; border:none;"
+        cab = QFrame()
+        cab.setStyleSheet(
+            f"QFrame {{ background:{WHITE};"
+            f" border:none; border-bottom:1px solid {SILVER_300};"
+            f" border-radius:6px 6px 0 0; }}"
         )
-        hl.addWidget(self.lbl_titulo_matriz)
+        hl = QHBoxLayout(cab)
+        hl.setContentsMargins(12, 7, 10, 7)
+        hl.setSpacing(8)
+        lbl = QLabel(titulo)
+        lbl.setStyleSheet(
+            f"color:{SLATE_700}; font-size:12px; font-weight:700;"
+            f" background:transparent; border:none;"
+        )
+        hl.addWidget(lbl)
         hl.addStretch(1)
+        v.addWidget(cab)
+        return fr, v, hl, lbl
 
-        # Botones para agregar/quitar año
+    def _build_panel_izq(self) -> QWidget:
+        fr, v, hl, _ = self._panel("Índices")
+
+        self.lst = QListWidget()
+        self.lst.setStyleSheet(
+            "QListWidget { border:none; background:white; }"
+            "QListWidget::item { padding:6px 10px;"
+            " border-bottom:1px solid #F0F1F2; }"
+        )
+        # Los nombres largos no deben sacar una barra horizontal: se recortan
+        # con puntos suspensivos, como en el resto de las listas del programa.
+        self.lst.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lst.setTextElideMode(Qt.ElideRight)
+        self.lst.setWordWrap(False)
+        self.lst.itemSelectionChanged.connect(self._on_lst_change)
+        self.lst.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lst.customContextMenuRequested.connect(self._menu_indices)
+        self.lst.itemDoubleClicked.connect(
+            lambda it: self._editar_indice(it.data(Qt.UserRole))
+        )
+        v.addWidget(self.lst, 1)
+        return fr
+
+    def _build_panel_der(self) -> QWidget:
+        fr, v, hl, lbl = self._panel("Selecciona un índice")
+        self.lbl_titulo_matriz = lbl
+
         btn_add_anio = QPushButton("Agregar año")
         btn_add_anio.setIcon(icon("add"))
         btn_add_anio.setIconSize(QSize(13, 13))
         btn_add_anio.setCursor(Qt.PointingHandCursor)
         btn_add_anio.setStyleSheet(
-            "QPushButton { background:rgba(255,255,255,0.15); color:white;"
-            " border:1px solid rgba(255,255,255,0.25); border-radius:4px;"
-            " padding:4px 10px; font-size:11px; }"
-            "QPushButton:hover { background:rgba(255,255,255,0.25); }"
+            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
+            f" border:1px solid {SILVER_300}; border-radius:4px;"
+            f" padding:4px 10px; font-size:11px; }}"
+            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
+            f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
         )
         btn_add_anio.clicked.connect(self._agregar_anio)
         hl.addWidget(btn_add_anio)
-        v.addWidget(hd)
 
-        # Tabla pivot: filas = años, cols = Ene..Dic + Anual (promedio)
+        # Tabla pivot: filas = años, cols = Ene..Dic + Promedio
         self.tbl = QTableWidget(0, 13)
         self.tbl.setHorizontalHeaderLabels(MESES_LARGOS + ["Promedio"])
         self.tbl.verticalHeader().setVisible(True)
@@ -426,7 +400,6 @@ class IndicesINEIView(QWidget):
             "QTableWidget { background:white; border:none;"
             " gridline-color: #ECECEC; font-size:12px; }"
             "QTableWidget::item { padding:4px 6px; }"
-            "QTableWidget::item:selected { background:#FFE4CC; color:#7A3800; }"
             f"QHeaderView::section {{ background:{SILVER_100};"
             f"  color:{SLATE_500}; padding:6px 8px; border:none;"
             f"  border-right:1px solid {SILVER_300};"
@@ -440,11 +413,9 @@ class IndicesINEIView(QWidget):
         h.resizeSection(12, 90)
         self.tbl.itemChanged.connect(self._on_celda_cambiada)
 
-        # Atajos
         QShortcut(QKeySequence("Delete"), self.tbl,
                   activated=self._eliminar_valor_seleccionado)
         v.addWidget(self.tbl, 1)
-
         return fr
 
     def _mk_btn(self, text: str, icon_name: str | None = None,

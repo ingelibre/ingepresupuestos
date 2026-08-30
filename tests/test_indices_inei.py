@@ -297,6 +297,80 @@ def test_eliminar_puede_llevarse_el_historico_si_se_pide():
                   "WHERE codigo='96'")[0][0] == 0
 
 
+# ── La vista, consistente con el resto del programa ──────────────────────────
+def test_la_vista_cabe_en_una_pantalla_de_portatil():
+    """La barra metía título, dos selectores y OCHO botones en una sola fila:
+    pedía 1872 px y en 1366 el combo de la base salía cortado. Ahora las
+    importaciones van en un menú, como en el Catálogo de Insumos."""
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+    app = QApplication.instance() or QApplication([])
+    _preparar()
+    from views.indices_inei_view import IndicesINEIView
+
+    v = IndicesINEIView()
+    v.resize(1366, 768)
+    v.show()
+    app.processEvents()
+    # Sin el QSS global los paddings por defecto son mayores, así que el
+    # umbral es holgado: lo que se fija es que quepa en un portátil de 1366,
+    # no el píxel exacto. Con el tema aplicado son ~900.
+    ancho = v.minimumSizeHint().width()
+    assert ancho <= 1200, f"la vista pide {ancho} px de ancho mínimo"
+
+    # Las cinco importaciones, en un solo menú.
+    acciones = [a.text() for a in v.btn_import.menu().actions() if a.text()]
+    assert len(acciones) == 5, acciones
+
+    # Y la lista no saca barra horizontal por los nombres largos.
+    assert v.lst.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+
+def test_la_vista_sigue_funcionando_tras_el_rediseno():
+    """Buscar, cambiar de base y seleccionar un índice."""
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+    app = QApplication.instance() or QApplication([])
+    I = _preparar()
+    from views.indices_inei_view import IndicesINEIView
+
+    v = IndicesINEIView()
+    v.resize(1200, 700)
+    v.show()
+    app.processEvents()
+    n_2025 = v.lst.count()
+    assert n_2025 > 0
+
+    v.inp_q.setText("cemento")
+    v._refrescar_lista()
+    app.processEvents()
+    assert 0 < v.lst.count() < n_2025, v.lst.count()
+    v.inp_q.setText("")
+    v._refrescar_lista()
+    app.processEvents()
+
+    # Cambiar de base recarga catálogo y áreas.
+    v.cmb_serie.setCurrentIndex(1)
+    app.processEvents()
+    assert v._serie_actual == I.SERIE_1992
+    assert v.cmb_area.count() == 6
+    v.cmb_serie.setCurrentIndex(0)
+    app.processEvents()
+    assert v.cmb_area.count() == 13
+
+    # Seleccionar un índice carga su matriz.
+    for i in range(v.lst.count()):
+        if v.lst.item(i).data(Qt.UserRole) == '21':
+            v.lst.setCurrentRow(i)
+            break
+    app.processEvents()
+    assert '21' in v.lbl_titulo_matriz.text()
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
