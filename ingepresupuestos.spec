@@ -52,6 +52,9 @@ datas = [
     # dos bases, sus áreas geográficas y el Diccionario de Elementos de la
     # Construcción para fórmulas polinómicas.
     ('resources/indices_inei_oficial.json',  'resources'),
+    # El decreto que rige la fórmula polinómica, para poder consultarlo
+    # sin internet desde la propia vista.
+    ('resources/DS-011-79-VC.pdf',           'resources'),
     # Mapa QML (QtLocation/OSM) para marcar la ubicación del proyecto.
     ('resources/map.qml',                    'resources'),
     # Repositorio de proveedores de tiles propio (calle OSM + satélite Esri,

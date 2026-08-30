@@ -928,6 +928,41 @@ def test_mover_un_indice_no_te_saca_del_monomio_que_editas():
     assert abs(sum(m['coeficiente'] for m in v._monomios) - 1.0) < 0.002
 
 
+def test_el_decreto_viaja_con_la_app_y_se_abre_desde_la_validacion():
+    """El texto «D.S. 011-79-VC» de debajo de la fórmula abre el decreto.
+
+    Va empaquetado en `resources/` para poder consultarlo sin internet, como
+    el resto del programa.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from views.formula_view import FormulaView, DecretoDialog
+
+    ruta = DecretoDialog.ruta_pdf()
+    assert ruta.exists(), f"el decreto no está empaquetado: {ruta}"
+    assert ruta.stat().st_size > 100_000, "el PDF del decreto parece vacío"
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    F.guardar_monomios(pid, F.calcular_por_iu(pid)['monomios'])
+
+    v = FormulaView(pid, "X")
+    v.resize(1100, 650)
+    v.show()
+    v.cargar()
+    app.processEvents()
+    assert "href='ds'" in v.lbl_validacion.text(), \
+        "el texto de validación no lleva el enlace al decreto"
+
+    dlg = DecretoDialog()
+    assert dlg._doc.pageCount() >= 5, dlg._doc.pageCount()
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

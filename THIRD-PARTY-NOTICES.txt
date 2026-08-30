@@ -145,6 +145,23 @@ otorgan al Usuario sobre estos componentes.
   reproducirse en resources/models/LICENSE junto al modelo descargado.
 
 
+9. Normas y datos oficiales del Estado peruano
+------------------------------------------------
+
+  Decreto Supremo 011-79-VC — Reglamento del régimen de fórmulas polinómicas
+  para el reajuste de obras públicas. Se distribuye con la aplicación en
+  resources/DS-011-79-VC.pdf para poder consultarlo sin conexión desde la
+  vista de Fórmula Polinómica.
+
+  Índices Unificados de Precios de la Construcción y Diccionario de Elementos
+  de la Construcción — Resolución Jefatural 016-2026-INEI (Anexos 1 y 2),
+  Instituto Nacional de Estadística e Informática. Se distribuyen en
+  resources/indices_inei_oficial.json.
+
+  Ambos son normas y datos públicos del Estado peruano, reproducidos sin
+  modificación de su contenido.
+
+
 ---------------------------------------------------------------------------
 Consultas sobre estos avisos: ing.sumari@gmail.com
 Última revisión: agosto de 2026 — revisar en cada cambio de dependencias.

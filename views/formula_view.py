@@ -73,6 +73,68 @@ BLUE_700     = C.info
 PAGE_BG      = "#EEF2F7"   # se ve en los tiradores de los splitters
 
 
+class DecretoDialog(QDialog):
+    """El D.S. 011-79-VC, que es la norma que rige toda esta pantalla.
+
+    Va empaquetado con la app (`resources/DS-011-79-VC.pdf`) para poder
+    consultarlo sin internet, como el resto del programa. Se muestra con el
+    visor de Qt, el mismo del Centro de Reportes; si no estuviera disponible,
+    se delega en el visor del sistema.
+    """
+
+    RUTA = "resources/DS-011-79-VC.pdf"
+
+    @classmethod
+    def ruta_pdf(cls):
+        from core.config import BASE_DIR
+        from pathlib import Path
+        return Path(BASE_DIR) / cls.RUTA
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(
+            "D.S. 011-79-VC — Reglamento de fórmulas polinómicas")
+        self.resize(940, 760)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(12, 12, 12, 10)
+        v.setSpacing(8)
+
+        from PySide6.QtPdf import QPdfDocument
+        from PySide6.QtPdfWidgets import QPdfView
+        self._doc = QPdfDocument(self)
+        self._doc.load(str(self.ruta_pdf()))
+        vista = QPdfView(self)
+        vista.setPageMode(QPdfView.PageMode.MultiPage)
+        vista.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        vista.setDocument(self._doc)
+        v.addWidget(vista, 1)
+
+        pie = QHBoxLayout()
+        lbl = QLabel(
+            "Decreto Supremo 011-79-VC — reglamenta el régimen de fórmulas "
+            "polinómicas para el reajuste de obras públicas."
+        )
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"color:{SLATE_500}; font-size:11px;")
+        pie.addWidget(lbl, 1)
+        btn_ext = QPushButton("Abrir fuera")
+        btn_ext.setCursor(Qt.PointingHandCursor)
+        btn_ext.setToolTip("Abrirlo con el visor de PDF del sistema")
+        btn_ext.clicked.connect(self._abrir_fuera)
+        pie.addWidget(btn_ext)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.button(QDialogButtonBox.Close).setText("Cerrar")
+        bb.rejected.connect(self.accept)
+        bb.accepted.connect(self.accept)
+        pie.addWidget(bb)
+        v.addLayout(pie)
+
+    def _abrir_fuera(self):
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.ruta_pdf())))
+
+
 class IndicesDelProyectoDialog(QDialog):
     """Todos los índices unificados del proyecto, con su incidencia y monomio.
 
@@ -561,6 +623,22 @@ class FormulaView(QWidget):
         hl.addWidget(self.lbl_suma_badge)
         return hdr
 
+    def _abrir_decreto(self, *_):
+        """Abre el D.S. 011-79-VC empaquetado con la app."""
+        ruta = DecretoDialog.ruta_pdf()
+        if not ruta.exists():
+            QMessageBox.warning(
+                self, "D.S. 011-79-VC",
+                f"No encuentro el decreto en:\n{ruta}")
+            return
+        try:
+            DecretoDialog(self).exec()
+        except Exception:
+            # Sin QtPdf, al visor del sistema.
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(ruta)))
+
     def _volver(self):
         """Vuelve al presupuesto, sin llevarse por delante lo no guardado."""
         if not self._confirmar_descartar(
@@ -698,6 +776,9 @@ class FormulaView(QWidget):
         self.lbl_validacion.setStyleSheet(
             "font-size:11px; background:transparent; border:none;")
         self.lbl_validacion.setVisible(False)
+        # «D.S. 011-79-VC» es un enlace: abre el decreto, que viaja con la app.
+        self.lbl_validacion.setOpenExternalLinks(False)
+        self.lbl_validacion.linkActivated.connect(self._abrir_decreto)
         v.addWidget(self.lbl_validacion)
         return fr
 
@@ -1710,21 +1791,29 @@ class FormulaView(QWidget):
         # ── Validación normativa (D.S. 011-79-VC) ──────────────────────────
         from html import escape as _esc
         issues = self._validar_formula()
+        # El decreto es un enlace: abre el PDF que viaja con la app.
+        norma = (f"<a href='ds' style='color:inherit;'>"
+                 f"D.S.&nbsp;011-79-VC</a>")
         if not self._monomios:
             self.lbl_validacion.setVisible(False)
         elif issues:
             self.lbl_validacion.setText(
-                "⚠ " + "<br>⚠ ".join(_esc(i) for i in issues))
+                "⚠ " + "<br>⚠ ".join(_esc(i) for i in issues)
+                + f"<br><span style='font-weight:400'>Ver el {norma}</span>")
             self.lbl_validacion.setStyleSheet(
                 f"padding:0 16px 12px 16px; font-size:11px; color:{RED_DARK};"
                 f" background:transparent; border:none; font-weight:600;")
             self.lbl_validacion.setVisible(True)
         else:
-            self.lbl_validacion.setText("✓ Fórmula válida (D.S. 011-79-VC)")
+            self.lbl_validacion.setText(f"✓ Fórmula válida ({norma})")
             self.lbl_validacion.setStyleSheet(
                 f"padding:0 16px 12px 16px; font-size:11px; color:{GREEN_DARK};"
                 f" background:transparent; border:none; font-weight:600;")
             self.lbl_validacion.setVisible(True)
+        self.lbl_validacion.setToolTip(
+            "Abrir el Decreto Supremo 011-79-VC, que reglamenta las fórmulas "
+            "polinómicas")
+        self.lbl_validacion.setCursor(Qt.PointingHandCursor)
 
     def _render_expr(self):
         partes = []
