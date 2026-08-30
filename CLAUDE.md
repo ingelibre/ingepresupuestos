@@ -202,6 +202,21 @@ en `resources/indices_inei_oficial.json` (empaquetado en el `.spec`).
   sobre una BD sin sembrar se deshacía en la siguiente lectura. Ojo también con
   llamarla en todo camino que lea nombres del catálogo (`incidencias_por_iu`,
   `sugerencias`), o salen como «Índice 49».
+- **Sincronizar son DOS fuentes, no una.** El Excel acumulado del INEI
+  (`07_indices_unificados_…_1.xlsx`) se actualiza cuando ellos quieren: en
+  agosto de 2026 su `Last-Modified` era del 22 de abril y traía datos **hasta
+  marzo**, y no existe un `_2.xlsx` más nuevo (probado). Las **resoluciones
+  jefaturales mensuales** sí salen puntuales —la de julio se publicó el 19 de
+  agosto— y **gob.pe las sirve en HTML** con el PDF enlazado; `pdfplumber` lee
+  su tabla limpia (`buscar_resoluciones_gobpe` → `descargar_resolucion_gobpe`).
+  **El buscador de El Peruano NO sirve**: `busquedas.elperuano.pe` y
+  `/cuadernillo/NL/` son aplicaciones de cliente y devuelven 0 coincidencias sin
+  navegador (solo `dispositivo/NL/<id>` viene servido, y el id no se adivina).
+  **gob.pe publica únicamente el mes vigente** —lo reemplaza cada mes—, así que
+  los meses intermedios que el Excel no alcanzó (abril–junio de 2026) **no se
+  pueden automatizar**: se cargan con «Importar ▾ → Pegar datos». Por eso
+  `_meses_faltantes` los enumera en el diálogo de confirmación: si falta el mes
+  de la valorización, no hay K que calcular.
 - **NO volver a hardcodear la lista de índices.** Estuvo duplicada en
   `core/indices_inei.py` y `views/recursos_view.py`; la verdad es la tabla y se
   lee con `catalogo(serie=…)`. La constante queda solo como respaldo.

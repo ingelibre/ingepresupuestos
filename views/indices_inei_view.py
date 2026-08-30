@@ -28,9 +28,11 @@ from PySide6.QtWidgets import (
     QSizePolicy, QApplication, QDialog, QDialogButtonBox, QFormLayout, QMenu,
 )
 
+from core.database import get_db
 from core.indices_inei import (
     asegurar_seed, listar_indices, listar_areas,
-    SERIE_ACTUAL, series_disponibles, serie_nombre,
+    SERIE_ACTUAL, series_disponibles, serie_nombre, serie_de,
+    buscar_resoluciones_gobpe, descargar_resolucion_gobpe,
     crear_indice, actualizar_indice, eliminar_indice, contar_usos,
     asegurar_codigos, codigos_huerfanos,
     obtener_matriz, guardar_valor, guardar_valores, eliminar_valor,
@@ -921,52 +923,128 @@ class IndicesINEIView(QWidget):
 
     # ── Sincronizar automáticamente con INEI ────────────────────────────────
     def _sincronizar_inei(self):
-        """Busca + descarga + importa el Excel oficial del INEI de ESTA base.
+        """Trae del INEI todo lo publicado para la base que se está viendo.
 
-        Son dos archivos distintos —uno por cada base— y antes se pedía siempre
-        el de la base 1992. Con la vista en la base vigente parecía que
-        sincronizaba y luego no aparecía ningún valor: habían entrado en la
-        otra serie.
+        Son DOS fuentes oficiales y hacen falta las dos:
+
+        * el **Excel** de la base — un archivo acumulativo, pero el INEI lo
+          actualiza cuando quiere: a agosto de 2026 seguía con datos hasta
+          marzo;
+        * las **resoluciones jefaturales mensuales**, que sí salen puntuales
+          (la de julio se publicó el 19 de agosto) y gob.pe enlaza en PDF.
+
+        Antes solo se pedía el Excel y por eso la app se quedaba clavada en el
+        último mes que al INEI se le hubiera ocurrido subir.
         """
         self.btn_auto.setEnabled(False)
-        self.btn_auto.setText("Buscando el archivo del INEI…")
         QApplication.processEvents()
+        filas: list[dict] = []
+        fuentes: list[str] = []
+        problemas: list[str] = []
 
         try:
+            # ── 1) el Excel de la base ──
+            self.btn_auto.setText("Buscando el archivo del INEI…")
+            QApplication.processEvents()
             busq = buscar_ultimo_excel_inei(self._serie_actual)
-            if not busq['ok']:
+            url_excel = busq.get('url')
+            if busq['ok']:
+                self.btn_auto.setText("Descargando el archivo…")
+                QApplication.processEvents()
+                res = descargar_desde_url(
+                    busq['url'], area=self._area_actual,
+                    anio_override=busq['anio_detectado'],
+                    serie=busq.get('serie', self._serie_actual))
+                if res.get('ok') and res.get('rows'):
+                    filas += res['rows']
+                    fuentes.append(
+                        f"Archivo del INEI ({res.get('tamano_kb', 0)} KB) — "
+                        f"{self._rango_de(res['rows'])}")
+                else:
+                    problemas.append(res.get('msg') or "El archivo no trajo datos.")
+            else:
+                problemas.append(busq.get('msg') or "No se encontró el archivo.")
+
+            # ── 2) las resoluciones mensuales ──
+            self.btn_auto.setText("Buscando resoluciones del mes…")
+            QApplication.processEvents()
+            try:
+                resoluciones = buscar_resoluciones_gobpe()
+            except Exception as e:
+                resoluciones = []
+                problemas.append(f"No se pudo consultar gob.pe: {e}")
+            for r in resoluciones:
+                if serie_de(r['anio'], r['mes']) != self._serie_actual:
+                    continue
+                self.btn_auto.setText(
+                    f"Descargando R.J. {r['resolucion']}…")
+                QApplication.processEvents()
+                dr = descargar_resolucion_gobpe(r['url'],
+                                                serie=self._serie_actual)
+                if dr.get('ok') and dr.get('rows'):
+                    filas += dr['rows']
+                    fuentes.append(
+                        f"R.J. {r['resolucion']} — {r['titulo'].title()} "
+                        f"({dr.get('tamano_kb', 0)} KB)")
+                else:
+                    problemas.append(
+                        f"R.J. {r['resolucion']}: {dr.get('msg', '')}")
+
+            if not filas:
                 QMessageBox.warning(
                     self, "Sincronizar con INEI",
-                    busq.get('msg') or "No se encontró archivo."
-                )
+                    "\n".join(problemas) or "No se encontró nada que importar.")
                 return
 
-            self.btn_auto.setText("Descargando…")
-            QApplication.processEvents()
-
-            res = descargar_desde_url(
-                busq['url'],
-                area=self._area_actual,
-                anio_override=busq['anio_detectado'],
-                serie=busq.get('serie', self._serie_actual),
-            )
-            res['mes_detectado'] = busq['mes_detectado']
-            res['anio_detectado_url'] = busq['anio_detectado']
-
-            if not res.get('ok'):
-                QMessageBox.critical(
-                    self, "Sincronizar con INEI",
-                    f"Encontré el archivo pero falló la descarga:\n"
-                    f"{busq['url']}\n\n{res.get('msg')}"
-                )
-                return
-
-            fuente = (f"INEI oficial — {serie_nombre(busq.get('serie', ''))}"
-                      f"  ({res.get('tamano_kb', 0)} KB)")
-            self._procesar_resultado_import(res, fuente=fuente)
+            res_total = {
+                'ok': True, 'rows': filas, 'ignorados': 0,
+                'serie': self._serie_actual,
+                'codigos_encontrados': {r['codigo'] for r in filas},
+                'url': url_excel,
+            }
+            fuente = "<br>".join("• " + f for f in fuentes)
+            if problemas:
+                fuente += "<br><i>" + "<br>".join(problemas[:2]) + "</i>"
+            self._procesar_resultado_import(res_total, fuente=fuente)
         finally:
             self.btn_auto.setEnabled(True)
             self.btn_auto.setText("Sincronizar con INEI")
+
+    def _meses_faltantes(self, filas: list[dict]) -> list[tuple[int, int]]:
+        """Meses sin ningún índice entre el primero y el último que se tendría.
+
+        Importa saberlo antes de calcular un reajuste: si falta el mes de la
+        valorización no hay K que valga. Y pasa de verdad — el INEI publica el
+        Excel acumulado cuando quiere (a agosto de 2026 iba por marzo) y en
+        gob.pe solo deja el PDF del mes vigente, así que en medio quedan huecos
+        que hay que cargar a mano desde El Peruano.
+        """
+        per = {(r['anio'], r['mes']) for r in filas
+               if r.get('anio') and r.get('mes')}
+        try:
+            with get_db() as conn:
+                per |= {(a, m) for a, m in conn.execute(
+                    "SELECT DISTINCT anio, mes FROM indices_inei_valores "
+                    "WHERE serie=?", (self._serie_actual,))}
+        except Exception:
+            pass
+        if len(per) < 2:
+            return []
+        ords = sorted(a * 12 + (m - 1) for a, m in per)
+        return [(o // 12, o % 12 + 1)
+                for o in range(ords[0], ords[-1]) if o not in set(ords)]
+
+    @staticmethod
+    def _rango_de(filas: list[dict]) -> str:
+        """«2026-01 a 2026-03 (3 meses)» a partir de las filas importadas."""
+        per = sorted({(f.get('anio'), f.get('mes')) for f in filas
+                      if f.get('anio') and f.get('mes')})
+        if not per:
+            return "sin períodos"
+        if len(per) == 1:
+            return f"{per[0][0]}-{per[0][1]:02d}"
+        return (f"{per[0][0]}-{per[0][1]:02d} a {per[-1][0]}-{per[-1][1]:02d} "
+                f"({len(per)} meses)")
 
     # ── Descargar desde URL ─────────────────────────────────────────────────
     def _descargar_url(self):
@@ -1183,6 +1261,16 @@ class IndicesINEIView(QWidget):
         if res.get('url'):
             msg += (f"<b>Archivo:</b> <a href='{res['url']}'>"
                     f"{res['url'].rsplit('/', 1)[-1]}</a><br>")
+        faltan = self._meses_faltantes(res['rows'])
+        if faltan:
+            lista = ", ".join(f"{a}-{m:02d}" for a, m in faltan[:8])
+            if len(faltan) > 8:
+                lista += f"… (+{len(faltan) - 8} más)"
+            msg += (f"<b>Quedarían sin datos:</b> {lista}<br>"
+                    f"<span style='color:#6B7280'>El INEI deja en gob.pe solo "
+                    f"el PDF del mes vigente; esos meses se cargan con "
+                    f"«Importar ▾ → Pegar datos del portapapeles» desde El "
+                    f"Peruano.</span><br>")
         msg += "<br>¿Importar? (los valores existentes se reemplazarán.)"
 
         caja = QMessageBox(self)

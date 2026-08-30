@@ -439,6 +439,88 @@ def test_el_editor_de_celda_ocupa_la_celda_entera():
     assert e.contentsRect().width() >= fm.horizontalAdvance('99999.99')
 
 
+# ── Sincronización con las dos fuentes del INEI ──────────────────────────────
+# El Excel acumulado del INEI se actualiza cuando ellos quieren (en agosto de
+# 2026 seguía con datos hasta marzo), mientras que las resoluciones jefaturales
+# mensuales sí salen puntuales y gob.pe las publica en PDF. Sincronizar solo
+# con el Excel dejaba la app clavada cuatro meses atrás.
+
+def test_gobpe_reconoce_el_mes_de_la_resolucion():
+    """El título de la resolución es lo único que dice de qué mes es."""
+    from core.indices_inei import _mes_del_titulo
+    casos = [
+        ("ÍNDICES MES DE JULIO 2026", (2026, 7)),
+        ("Índices Unificados - Mes de Enero 2026", (2026, 1)),
+        ("ÍNDICES MES DE DICIEMBRE 2025", (2025, 12)),
+        ("Índices mes de setiembre 2026", (2026, 9)),
+        ("Factor de liquidación F", None),
+        ("Mano de obra 2026", None),
+    ]
+    for titulo, esperado in casos:
+        assert _mes_del_titulo(titulo) == esperado, titulo
+
+
+def test_sin_internet_la_sincronizacion_avisa_en_vez_de_reventar():
+    """Las dos fuentes son de red: caídas, el usuario debe ver un aviso."""
+    _preparar()
+    import urllib.request
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from views.indices_inei_view import IndicesINEIView
+    import core.indices_inei as ii
+
+    QApplication.instance() or QApplication([])
+    real_open, real_warn = urllib.request.urlopen, QMessageBox.warning
+    avisos = []
+
+    def caido(*a, **k):
+        raise OSError("sin red")
+
+    urllib.request.urlopen = caido
+    QMessageBox.warning = staticmethod(
+        lambda p, t, m, *a, **k: avisos.append(m) or QMessageBox.Ok)
+    try:
+        # La descarga de una resolución nunca lanza: informa el motivo.
+        res = ii.descargar_resolucion_gobpe("https://x/y.pdf")
+        assert res['ok'] is False and 'sin red' in res['msg'], res
+
+        v = IndicesINEIView()
+        v._sincronizar_inei()          # no debe propagar la excepción
+        assert avisos, "no avisó al usuario"
+        assert v.btn_auto.isEnabled(), "el botón quedó bloqueado"
+        assert v.btn_auto.text() == "Sincronizar con INEI"
+    finally:
+        urllib.request.urlopen = real_open
+        QMessageBox.warning = real_warn
+
+
+def test_los_huecos_de_meses_se_detectan():
+    """Si falta el mes de la valorización no hay K que calcular: hay que avisar."""
+    _preparar()
+    from PySide6.QtWidgets import QApplication
+    from views.indices_inei_view import IndicesINEIView
+    QApplication.instance() or QApplication([])
+    v = IndicesINEIView()
+    v._serie_actual = '__vacia__'          # serie sin nada en la BD
+    filas = [{'anio': 2026, 'mes': m, 'area': '01', 'codigo': '01',
+              'valor': 100.0} for m in (1, 2, 3, 7)]
+    assert v._meses_faltantes(filas) == [(2026, 4), (2026, 5), (2026, 6)]
+    # Sin huecos, nada que avisar.
+    seguidos = [dict(f, mes=m) for m, f in zip((1, 2, 3), filas)]
+    assert v._meses_faltantes(seguidos) == []
+    # Un solo mes tampoco tiene huecos posibles.
+    assert v._meses_faltantes(filas[:1]) == []
+
+
+def test_el_rango_resume_los_periodos_importados():
+    """El diálogo dice qué trae cada fuente, para poder contrastarlo."""
+    from views.indices_inei_view import IndicesINEIView
+    r = IndicesINEIView._rango_de
+    assert r([{'anio': 2026, 'mes': 7}]) == "2026-07"
+    assert r([{'anio': 2026, 'mes': 1}, {'anio': 2026, 'mes': 3}]) == \
+        "2026-01 a 2026-03 (2 meses)"
+    assert r([]) == "sin períodos"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

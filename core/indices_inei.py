@@ -1045,6 +1045,208 @@ def _importar_libre(wb, area: str, anio_override: int | None,
     }
 
 
+# ─── Resoluciones mensuales del INEI (gob.pe) ────────────────────────────────
+# El Excel de la base nueva es UN archivo que el INEI actualiza cuando quiere
+# —a agosto de 2026 seguía con datos hasta marzo—, pero la resolución jefatural
+# de cada mes SÍ sale puntual y se publica en gob.pe como PDF. De ahí salen los
+# meses que al Excel le faltan.
+GOBPE_IUPC = ("https://www.gob.pe/institucion/inei/informes-publicaciones/"
+              "4025211-indices-unificados-de-precios-de-la-construccion-"
+              "para-las-trece-areas-geograficas")
+
+_MESES_NOMBRE = {
+    'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+    'julio': 7, 'agosto': 8, 'septiembre': 9, 'setiembre': 9, 'octubre': 10,
+    'noviembre': 11, 'diciembre': 12,
+}
+
+
+def _mes_del_titulo(titulo: str) -> tuple[int, int] | None:
+    """(año, mes) del título de una resolución, o None si no lo dice.
+
+    El título es lo único que identifica el período: «R.J. N°187-2026-INEI
+    (ÍNDICES MES DE JULIO 2026)». El número de la resolución no sirve —el 016
+    de 2026 es el cambio de base, no un mes.
+    """
+    import re
+    t = (titulo or '').lower()
+    mes = next((n for nombre, n in _MESES_NOMBRE.items() if nombre in t), None)
+    anio = re.search(r'\b(20\d{2})\b', t)
+    return (int(anio.group(1)), mes) if mes and anio else None
+
+
+def buscar_resoluciones_gobpe(timeout: int = 20) -> list[dict]:
+    """Resoluciones mensuales de índices publicadas en gob.pe.
+
+    La página es HTML servido —no como el buscador de El Peruano, que es una
+    aplicación de cliente y no se puede leer sin navegador— y enlaza los PDF
+    con su mes en el título: «R.J. N°187-2026-INEI (ÍNDICES MES DE JULIO
+    2026)». Publica el mes vigente y lo va reemplazando.
+
+    Devuelve [{'url', 'resolucion', 'mes', 'anio', 'titulo'}].
+    """
+    import re
+    import urllib.request
+
+    req = urllib.request.Request(GOBPE_IUPC, headers={
+        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64; rv:128.0) '
+                       'Gecko/20100101 Firefox/128.0'),
+        'Accept-Language': 'es-PE,es;q=0.9',
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        html = resp.read().decode('utf-8', errors='ignore')
+
+    out: list[dict] = []
+    vistos: set[str] = set()
+    patron = re.compile(
+        r'href="(https://cdn\.www\.gob\.pe/uploads/document/file/[^"]+?\.pdf)'
+        r'[^"]*"[^>]*>.{0,400}?R\.J\.\s*N°?\s*([\d]+-\d{4}-INEI)\s*'
+        r'\(([^)]{0,80})\)',
+        re.S | re.I)
+    for m in patron.finditer(html):
+        url, resolucion, titulo = m.group(1), m.group(2), m.group(3)
+        if url in vistos:
+            continue
+        t = titulo.lower()
+        if 'indice' not in t and 'índice' not in t:
+            continue          # mano de obra, factores de liquidación…
+        periodo = _mes_del_titulo(titulo)
+        if not periodo:
+            continue
+        vistos.add(url)
+        out.append({'url': url, 'resolucion': resolucion, 'mes': periodo[1],
+                    'anio': periodo[0],
+                    'titulo': ' '.join(titulo.split())})
+    out.sort(key=lambda r: (r['anio'], r['mes']), reverse=True)
+    return out
+
+
+def importar_pdf_resolucion(filepath: str, serie: str | None = None) -> dict:
+    """Lee la tabla de índices de una resolución jefatural en PDF.
+
+    El formato es fijo: una fila por código y una columna por área geográfica
+    —13 en la base 2025, 6 en la de 1992—, con «(*)» donde el índice no existe
+    en esa área y coma decimal.
+
+    Del propio texto salen el mes y la base, así que no hace falta que el
+    usuario los indique.
+    """
+    import re
+    try:
+        import pdfplumber
+    except ImportError:
+        return {'ok': False, 'msg': "pdfplumber no instalado.",
+                'rows': [], 'ignorados': 0}
+    try:
+        with pdfplumber.open(filepath) as pdf:
+            txt = "\n".join((p.extract_text() or '') for p in pdf.pages)
+    except Exception as e:
+        return {'ok': False, 'msg': f"No se pudo leer el PDF: {e}",
+                'rows': [], 'ignorados': 0}
+
+    bajo = txt.lower()
+    if serie is None:
+        serie = SERIE_2025 if 'diciembre 2025' in bajo else (
+            SERIE_1992 if 'julio 1992' in bajo else SERIE_ACTUAL)
+
+    mes = anio = None
+    m = re.search(r'mes de\s+([a-záéíóú]+)\s+(?:de\s+)?(20\d{2})', bajo)
+    if not m:
+        m = re.search(r'\b(' + '|'.join(_MESES_NOMBRE) + r')\s+(?:de\s+)?(20\d{2})',
+                      bajo)
+    if m:
+        mes = _MESES_NOMBRE.get(m.group(1))
+        anio = int(m.group(2))
+    if not mes or not anio:
+        return {'ok': False, 'rows': [], 'ignorados': 0,
+                'msg': "No pude identificar el mes de la resolución en el PDF."}
+
+    rows: list[dict] = []
+    ignorados = 0
+    codigos: set[str] = set()
+    fila_re = re.compile(r'^\s*(\d{1,2})\s+((?:(?:[\d.]+,\d+|\(\*\))\s*)+)$')
+    for linea in txt.splitlines():
+        f = fila_re.match(linea)
+        if not f:
+            continue
+        codigo = f.group(1).zfill(2)
+        celdas = f.group(2).split()
+        if len(celdas) < 4:      # una fila de índices trae 6 o 13 columnas
+            continue
+        for i, celda in enumerate(celdas, start=1):
+            if celda == '(*)':
+                continue         # el índice no existe en esa área: no es cero
+            try:
+                valor = float(celda.replace('.', '').replace(',', '.'))
+            except ValueError:
+                ignorados += 1
+                continue
+            if valor <= 0:
+                ignorados += 1
+                continue
+            rows.append({'codigo': codigo, 'serie': serie, 'anio': anio,
+                         'mes': mes, 'area': f"{i:02d}", 'valor': valor})
+            codigos.add(codigo)
+
+    if not rows:
+        return {'ok': False, 'rows': [], 'ignorados': ignorados,
+                'msg': "El PDF no trae una tabla de índices reconocible."}
+
+    areas = sorted({r['area'] for r in rows})
+    return {
+        'ok': True,
+        'formato': 'resolucion_pdf',
+        'serie': serie,
+        'msg': (f"Resolución del INEI: {len(rows)} valores · "
+                f"{len(codigos)} índices · {len(areas)} áreas · "
+                f"{anio}-{mes:02d}."),
+        'rows': rows,
+        'ignorados': ignorados,
+        'anio_detectado': anio,
+        'mes_detectado': mes,
+        'codigos_encontrados': codigos,
+        'nombres_encontrados': {},
+        'areas': areas,
+        'periodos': 1,
+    }
+
+
+def descargar_resolucion_gobpe(url: str, serie: str | None = None,
+                               timeout: int = 60) -> dict:
+    """Descarga una resolución en PDF desde gob.pe y lee su tabla."""
+    import tempfile
+    import urllib.request
+
+    if not url.lower().startswith(('http://', 'https://')):
+        return {'ok': False, 'msg': "URL no válida.", 'rows': [],
+                'ignorados': 0}
+    req = urllib.request.Request(url, headers={
+        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64; rv:128.0) '
+                       'Gecko/20100101 Firefox/128.0'),
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read(25 * 1024 * 1024)
+    except Exception as e:
+        return {'ok': False, 'msg': f"No se pudo descargar: {e}",
+                'rows': [], 'ignorados': 0, 'url': url}
+
+    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+        tmp.write(data)
+        ruta = tmp.name
+    try:
+        res = importar_pdf_resolucion(ruta, serie=serie)
+    finally:
+        import os as _os
+        try:
+            _os.unlink(ruta)
+        except OSError:
+            pass
+    res['url'] = url
+    res['tamano_kb'] = round(len(data) / 1024, 1)
+    return res
+
+
 def exportar_json(filepath: str, area: str | None = None) -> int:
     """Exporta toda la serie a JSON. Si ``area`` no es None, filtra por ella.
     Retorna el número de valores exportados."""
