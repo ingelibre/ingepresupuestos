@@ -963,6 +963,30 @@ def test_el_decreto_viaja_con_la_app_y_se_abre_desde_la_validacion():
     assert dlg._doc.pageCount() >= 5, dlg._doc.pageCount()
 
 
+def test_el_decreto_empaquetado_es_el_texto_concordado():
+    """No el original de 1979: lleva anotadas sus modificatorias.
+
+    Importa porque la app se distribuye durante años y una norma de 1979 puede
+    cambiar. Si algún día se reemplaza el PDF, esto avisa de que perdió las
+    concordancias.
+    """
+    import re
+    import pdfplumber
+    from views.formula_view import DecretoDialog
+    with pdfplumber.open(str(DecretoDialog.ruta_pdf())) as pdf:
+        txt = " ".join(" ".join((p.extract_text() or '').split())
+                       for p in pdf.pages)
+    # la forma general del art. 2, que es lo que implementa la vista
+    assert 'a(Jr/Jo)' in txt.replace(' ', '') or 'a(Jr/Jo)' in txt, \
+        "no encuentro la fórmula general del artículo 2"
+    assert 'tres (3) elementos' in txt, "falta el tope de tres índices"
+    assert 'cuatro (4) fórmulas' in txt, "falta el máximo de fórmulas por obra"
+    assert 'milésimo' in txt, "falta la aproximación al milésimo"
+    # y las concordancias
+    anotaciones = re.findall(r'\((?:Modificado|Derogado) por[^)]{0,90}\)', txt)
+    assert len(anotaciones) >= 3, f"solo {len(anotaciones)} concordancias"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

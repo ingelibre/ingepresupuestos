@@ -80,6 +80,12 @@ class DecretoDialog(QDialog):
     consultarlo sin internet, como el resto del programa. Se muestra con el
     visor de Qt, el mismo del Centro de Reportes; si no estuviera disponible,
     se delega en el visor del sistema.
+
+    El PDF es el **texto concordado**, no el original de 1979: lleva anotadas
+    sus modificatorias (D.S. 022-80-VC, 006-86-VC, 004-88-VC, 011-89-VC y
+    012-91-VC). Como una norma de 1979 puede cambiar y la app se distribuye
+    durante años, la ventana lo dice y ofrece el SPIJ para contrastar — no se
+    puede prometer que un archivo empaquetado esté siempre vigente.
     """
 
     RUTA = "resources/DS-011-79-VC.pdf"
@@ -109,14 +115,34 @@ class DecretoDialog(QDialog):
         vista.setDocument(self._doc)
         v.addWidget(vista, 1)
 
-        pie = QHBoxLayout()
-        lbl = QLabel(
-            "Decreto Supremo 011-79-VC — reglamenta el régimen de fórmulas "
-            "polinómicas para el reajuste de obras públicas."
+        aviso = QLabel(
+            "<b>Texto concordado</b> con sus modificatorias: D.S. 022-80-VC, "
+            "006-86-VC, 004-88-VC, 011-89-VC y 012-91-VC — las anotaciones "
+            "«Modificado por…» y «Derogado por…» están en el propio texto.<br>"
+            "El marco de contrataciones vigente es la <b>Ley 32069</b> y su "
+            "Reglamento <b>D.S. 009-2025-EF</b> (en vigor desde el 22/04/2025); "
+            "el régimen de fórmulas polinómicas sigue apoyado en este decreto. "
+            "Conviene contrastar con la versión oficial antes de un "
+            "procedimiento."
         )
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet(f"color:{SLATE_500}; font-size:11px;")
-        pie.addWidget(lbl, 1)
+        aviso.setWordWrap(True)
+        aviso.setTextFormat(Qt.RichText)
+        aviso.setStyleSheet(
+            f"color:{SLATE_500}; font-size:11px; padding:8px 10px;"
+            f" background:{SILVER_50}; border:1px solid {SILVER_300};"
+            f" border-radius:6px;"
+        )
+        v.addWidget(aviso)
+
+        pie = QHBoxLayout()
+        btn_spij = QPushButton("Ver versión oficial (SPIJ)")
+        btn_spij.setCursor(Qt.PointingHandCursor)
+        btn_spij.setToolTip(
+            "Sistema Peruano de Información Jurídica del Ministerio de "
+            "Justicia — para comprobar si hay modificatorias posteriores")
+        btn_spij.clicked.connect(self._abrir_spij)
+        pie.addWidget(btn_spij)
+        pie.addStretch(1)
         btn_ext = QPushButton("Abrir fuera")
         btn_ext.setCursor(Qt.PointingHandCursor)
         btn_ext.setToolTip("Abrirlo con el visor de PDF del sistema")
@@ -133,6 +159,16 @@ class DecretoDialog(QDialog):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.ruta_pdf())))
+
+    def _abrir_spij(self):
+        """Al SPIJ, que es donde vive la versión oficial y sus modificatorias.
+
+        El PDF que viaja con la app está concordado hasta 1991; si el decreto
+        cambia, esto es lo que lo dirá.
+        """
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl("https://spij.minjus.gob.pe/"))
 
 
 class IndicesDelProyectoDialog(QDialog):
