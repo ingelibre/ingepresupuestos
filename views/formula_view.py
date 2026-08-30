@@ -480,6 +480,7 @@ class FormulaView(QWidget):
         self._formula_id: int | None = None   # art. 4: hasta 4 por obra
         self._cat_iu: dict | None = None      # códigos → nombre, cacheado
         self._monomio_activo: int = -1        # el que muestra la Composición
+        self._sucio: bool = False             # hay cambios sin guardar
         self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
@@ -539,8 +540,7 @@ class FormulaView(QWidget):
             f" font-size:11px; padding:3px 10px; }}"
             f"QPushButton:hover {{ background:rgba(255,255,255,0.22); }}"
         )
-        btn_back.clicked.connect(
-            lambda: self._on_back() if self._on_back else None)
+        btn_back.clicked.connect(self._volver)
         hl.addWidget(btn_back)
         hl.addSpacing(8)
 
@@ -560,6 +560,14 @@ class FormulaView(QWidget):
         )
         hl.addWidget(self.lbl_suma_badge)
         return hdr
+
+    def _volver(self):
+        """Vuelve al presupuesto, sin llevarse por delante lo no guardado."""
+        if not self._confirmar_descartar(
+                "Si sales ahora sin guardar, se pierden."):
+            return
+        if self._on_back:
+            self._on_back()
 
     def _build_barra_acciones(self) -> QFrame:
         """Barra fina de controles, el patrón de Cronograma y Metrados."""
@@ -942,8 +950,41 @@ class FormulaView(QWidget):
         self.cmb_formula.setVisible(len(formulas) > 1)
 
     def _on_formula_change(self):
-        self._formula_id = self.cmb_formula.currentData()
+        nueva = self.cmb_formula.currentData()
+        if not self._confirmar_descartar(
+                "Al cambiar de fórmula se recargan los monomios guardados."):
+            # Volver a la anterior sin disparar el cambio otra vez.
+            self.cmb_formula.blockSignals(True)
+            ix = self.cmb_formula.findData(self._formula_id)
+            self.cmb_formula.setCurrentIndex(max(ix, 0))
+            self.cmb_formula.blockSignals(False)
+            return
+        self._formula_id = nueva
         self.cargar()
+
+    def _confirmar_descartar(self, motivo: str) -> bool:
+        """Pregunta qué hacer con los cambios sin guardar. False = cancelar.
+
+        Sin esto, auto-calcular una fórmula y abrir «Fórmulas…» —o cambiar de
+        fórmula en el selector, o volver al presupuesto— la borraba en
+        silencio: esas acciones releen los monomios de la BASE DE DATOS, y lo
+        auto-calculado todavía no estaba guardado.
+        """
+        if not self._sucio or not self._monomios:
+            return True
+        r = QMessageBox.question(
+            self, "Cambios sin guardar",
+            f"La fórmula tiene cambios sin guardar ({len(self._monomios)} "
+            f"monomios).\n\n{motivo}\n\n¿Guardarlos antes de continuar?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save
+        )
+        if r == QMessageBox.Cancel:
+            return False
+        if r == QMessageBox.Save:
+            guardar_monomios(self.pid, self._monomios, self._formula_id)
+            self._sucio = False
+        return True
 
     def _ver_indices_proyecto(self):
         """Todos los índices de la obra con su incidencia, para tener el mapa."""
@@ -955,6 +996,9 @@ class FormulaView(QWidget):
 
     def _gestionar_formulas(self):
         """Alta, renombrado, baja y subpresupuestos de cada fórmula."""
+        if not self._confirmar_descartar(
+                "Al salir de aquí se recargan los monomios guardados."):
+            return
         dlg = FormulasDialog(self.pid, self)
         dlg.exec()
         self._formula_id = dlg.formula_activa or self._formula_id
@@ -1092,6 +1136,7 @@ class FormulaView(QWidget):
             return
 
         comps.remove(mov)
+        self._sucio = True
         self._monomios[destino].setdefault('componentes', []).append(mov)
         for m in self._monomios:
             cs = m.get('componentes') or []
@@ -1353,6 +1398,7 @@ class FormulaView(QWidget):
         self._cd = sum(float(c.get('monto') or 0)
                        for m in self._monomios
                        for c in (m.get('componentes') or []))
+        self._sucio = False
         self._render_tabla()
         self._cargar_periodos_ui()
         self._calcular_k()
@@ -1558,6 +1604,7 @@ class FormulaView(QWidget):
         muerto = self._monomios[row]
         huerfanos = muerto.get('componentes') or []
         del self._monomios[row]
+        self._sucio = True
 
         if huerfanos and self._monomios:
             destino = max(
@@ -1596,6 +1643,7 @@ class FormulaView(QWidget):
             'simbolo': simbolo, 'descripcion': '',
             'indice_inei': '', 'coeficiente': 0.0,
         })
+        self._sucio = True
         self._render_tabla()
         # Foco en la celda de descripción del último
         last = self.tbl.rowCount() - 1
@@ -1719,6 +1767,7 @@ class FormulaView(QWidget):
                 return
 
         self._monomios = [dict(m) for m in r['monomios']]
+        self._sucio = True
         self._cd = r['cd']
         self._ius = r['ius']
         self._monto_sin_indice = r.get('monto_sin_indice', 0.0)
@@ -1767,6 +1816,7 @@ class FormulaView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{e}")
             return
+        self._sucio = False
         self._calcular_k()
         QMessageBox.information(
             self, "Guardado",

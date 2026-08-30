@@ -813,6 +813,79 @@ def test_la_vista_de_indices_del_proyecto_los_lista_con_su_monomio():
         assert a != b, f"los dos índices 39 quedaron con el mismo monomio: {a}"
 
 
+def test_no_se_pierde_la_formula_sin_guardar():
+    """Reportado probando: «auto-calculo, me voy a Fórmulas… y se borra».
+
+    Esas acciones releen los monomios de la BASE DE DATOS, y lo auto-calculado
+    todavía no estaba guardado. Ahora se pregunta antes: guardar, descartar o
+    cancelar.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    app = QApplication.instance() or QApplication([])
+    import views.formula_view as FV
+    FV.FormulasDialog.exec = lambda self: 0     # que no bloquee el modal
+
+    F, pid = _preparar()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad='Contrata' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+
+    respuesta = {'v': QMessageBox.Save}
+    QMessageBox.question = staticmethod(lambda *a, **k: respuesta['v'])
+    QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
+
+    def recien_calculada():
+        F.guardar_monomios(pid, [], F.formula_por_defecto(pid))
+        v = FV.FormulaView(pid, "X")
+        v.resize(1100, 650)
+        v.show()
+        v.cargar()
+        app.processEvents()
+        v._calcular_desde_acu()
+        app.processEvents()
+        assert v._monomios and v._sucio
+        return v
+
+    # Guardar: queda en la BD y en pantalla.
+    v = recien_calculada()
+    n = len(v._monomios)
+    respuesta['v'] = QMessageBox.Save
+    v._gestionar_formulas()
+    app.processEvents()
+    assert len(F.cargar_monomios(pid, v._formula_id)) == n
+    assert len(v._monomios) == n
+    assert not v._sucio
+
+    # Cancelar: no se abre nada y no se pierde nada.
+    v = recien_calculada()
+    n = len(v._monomios)
+    respuesta['v'] = QMessageBox.Cancel
+    v._gestionar_formulas()
+    app.processEvents()
+    assert len(v._monomios) == n, "canceló y aun así perdió los monomios"
+
+    # Descartar: eso sí los tira, porque se pidió.
+    v = recien_calculada()
+    respuesta['v'] = QMessageBox.Discard
+    v._gestionar_formulas()
+    app.processEvents()
+    assert v._monomios == [] or not v._sucio
+
+    # Volver al presupuesto: cancelar NO sale; descartar sí.
+    salidas = []
+    v = recien_calculada()
+    v._on_back = lambda: salidas.append(True)
+    respuesta['v'] = QMessageBox.Cancel
+    v._volver()
+    assert not salidas, "salió de la vista pese a cancelar"
+    respuesta['v'] = QMessageBox.Discard
+    v._volver()
+    assert salidas, "no salió al descartar"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
