@@ -33,10 +33,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Solo lo que el generador necesita: leer el Excel del INEI y el PDF de
-      # la resolución. Instalar requirements.txt entero traería PySide6.
+      # Solo lo que hace falta: openpyxl lee el Excel del INEI, pdfplumber el
+      # PDF de la resolución, y werkzeug entra por la cadena de imports
+      # (indices_inei -> core.database). Instalar requirements.txt entero
+      # traería PySide6 para un trabajo que no abre ninguna ventana.
+      # Si algún día se agrega un import a core/database.py esto falla, y
+      # falla ruidosamente: un workflow programado que revienta avisa por
+      # correo.
       - name: Dependencias
-        run: pip install openpyxl pdfplumber
+        run: pip install --no-cache-dir openpyxl pdfplumber werkzeug
 
       - name: Regenerar el histórico
         run: python3 scripts/generar_indices_valores.py
