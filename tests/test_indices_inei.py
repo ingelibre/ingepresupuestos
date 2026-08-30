@@ -395,6 +395,50 @@ def test_la_vista_sigue_funcionando_tras_el_rediseno():
     assert '21' in v.lbl_titulo_matriz.text()
 
 
+def test_el_editor_de_celda_ocupa_la_celda_entera():
+    """Reportado probando: «al editar o agregar un índice a mano, el texto se
+    entrecorta y solo se ve cuando termino».
+
+    El `padding: 4px 6px` de la celda recorta también el rectángulo del EDITOR:
+    en una celda de 57×27 salía uno de 45×19, y «1234.56» —47 px— no cabía.
+    """
+    import os as _os
+    _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QLineEdit
+    from PySide6.QtCore import Qt
+    app = QApplication.instance() or QApplication([])
+    _preparar()
+    from views.indices_inei_view import IndicesINEIView
+
+    v = IndicesINEIView()
+    v.resize(1200, 700)
+    v.show()
+    app.processEvents()
+    for i in range(v.lst.count()):
+        if v.lst.item(i).data(Qt.UserRole) == '21':
+            v.lst.setCurrentRow(i)
+            break
+    app.processEvents()
+    if v.tbl.rowCount() == 0:
+        v._agregar_anio()
+        app.processEvents()
+    assert v.tbl.rowCount() > 0, "no hay fila de año para editar"
+
+    it = v.tbl.item(0, 0)
+    celda = v.tbl.visualItemRect(it)
+    v.tbl.editItem(it)
+    app.processEvents()
+    editores = v.tbl.viewport().findChildren(QLineEdit)
+    assert editores, "no se creó editor"
+    e = editores[0]
+    assert e.width() >= celda.width() - 1, (e.width(), celda.width())
+    assert e.height() >= celda.height() - 1, (e.height(), celda.height())
+
+    # Y un valor típico cabe.
+    fm = e.fontMetrics()
+    assert e.contentsRect().width() >= fm.horizontalAdvance('99999.99')
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

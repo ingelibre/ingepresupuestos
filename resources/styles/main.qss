@@ -88,6 +88,22 @@ QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
 }
 QLineEdit:disabled { background: #F0F1F2; color: #95A3AB; }
 
+/* Editor de celda de una tabla o un árbol. Sin esto hereda el relleno y el
+   radio del QLineEdit normal (4px 10px + 6px de radio), y dentro de una fila
+   de 27 px el editor quedaba en 45x19: el texto se entrecortaba mientras se
+   escribía y solo se veía entero al terminar la edición. Acá el editor ocupa
+   la celda completa y el naranja marca que está en edición. */
+QAbstractItemView QLineEdit,
+QAbstractItemView QSpinBox,
+QAbstractItemView QDoubleSpinBox,
+QAbstractItemView QComboBox {
+    border: 1.5px solid #F37329;
+    border-radius: 2px;
+    padding: 0px 3px;
+    margin: 0px;
+    min-height: 0px;
+}
+
 QLineEdit[echoMode="2"] { /* password */
     letter-spacing: 2px;
 }

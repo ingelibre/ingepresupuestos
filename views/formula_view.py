@@ -44,6 +44,7 @@ from core.formula_polinomica import (
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
+from views._catalogo_base import EditorPlenoDelegate
 from utils.icons import icon
 
 
@@ -977,6 +978,7 @@ class FormulaView(QWidget):
             f"  border-bottom:1px solid {SILVER_300};"
             f"  font-size:11px; font-weight:700; }}"
         )
+        self.tbl.setItemDelegate(EditorPlenoDelegate(self.tbl))
         self.tbl.itemChanged.connect(self._on_item_changed)
         # SOLO el clic y el teclado cambian de monomio. Nada de
         # `itemSelectionChanged` ni `currentCellChanged` a secas: esas señales

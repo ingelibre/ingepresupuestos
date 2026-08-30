@@ -38,6 +38,7 @@ from core.indices_inei import (
     descargar_desde_url, importar_desde_texto,
     buscar_ultimo_excel_inei, descargar_ultimo_inei,
 )
+from views._catalogo_base import EditorPlenoDelegate
 from utils.icons import icon
 from utils.formatting import parse_num, parse_num_opt
 
@@ -416,6 +417,7 @@ class IndicesINEIView(QWidget):
             h.setSectionResizeMode(c, QHeaderView.Stretch)
         h.setSectionResizeMode(12, QHeaderView.Fixed)
         h.resizeSection(12, 90)
+        self.tbl.setItemDelegate(EditorPlenoDelegate(self.tbl))
         self.tbl.itemChanged.connect(self._on_celda_cambiada)
 
         QShortcut(QKeySequence("Delete"), self.tbl,

@@ -27,10 +27,28 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFrame, QMenu, QPushButton
+from PySide6.QtWidgets import (QFrame, QMenu, QPushButton,
+                               QStyledItemDelegate)
 
 from utils.icons import icon
 from utils.theme import BTN_PRIMARY_SS, crear_kpi_card
+
+
+class EditorPlenoDelegate(QStyledItemDelegate):
+    """Hace que el editor de celda ocupe la celda ENTERA.
+
+    `QTableWidget::item { padding: 4px 6px }` no solo separa el texto al
+    pintar: recorta también el rectángulo que recibe el EDITOR. Medido en la
+    matriz de índices, una celda de 57×27 px daba un editor de 45×19, y un
+    valor como «1234.56» —47 px de ancho— no cabía: el texto se entrecortaba
+    mientras se escribía y solo se veía entero al confirmar.
+
+    Vive acá porque le pasa a cualquier tabla editable con relleno de celda,
+    no a una sola.
+    """
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
 
 
 class CatalogoTablaMixin:
