@@ -258,4 +258,35 @@ def get_valorizacion_detalle(val_id: int) -> tuple[list[dict], dict]:
         'sal_val': _r2(base_tot - acu_tot),
         'pct_fisico': (acu_tot / base_tot * 100) if base_tot else 0.0,
     }
+    resumen['reajuste'] = _reajuste_del_periodo(
+        pid, val['periodo_hasta'], resumen['act_val'])
     return filas, resumen
+
+
+def _reajuste_del_periodo(proyecto_id: int, periodo_hasta: str,
+                          monto: float) -> dict:
+    """Reajuste por fórmula polinómica de lo valorizado en el período.
+
+    El coeficiente K se toma del mes en que se paga la valorización, que es lo
+    que dice la norma. En obras por ADMINISTRACIÓN DIRECTA no aplica —la
+    fórmula polinómica es de las obras por contrata— y `aplica_formula` lo
+    resuelve por la modalidad del proyecto.
+    """
+    from core.formula_polinomica import reajuste_de_valorizacion
+    anio = mes = None
+    try:
+        partes = str(periodo_hasta or '').replace('/', '-').split('-')
+        if len(partes) >= 2 and len(partes[0]) == 4:
+            anio, mes = int(partes[0]), int(partes[1])
+        elif len(partes) >= 3:
+            anio, mes = int(partes[2]), int(partes[1])
+    except (TypeError, ValueError):
+        pass
+    if not anio or not mes:
+        return {'aplica': False, 'k': None, 'monto': monto, 'reajuste': 0.0,
+                'motivo': "La valorización no tiene definido el período."}
+    try:
+        return reajuste_de_valorizacion(proyecto_id, anio, mes, monto)
+    except Exception as e:
+        return {'aplica': False, 'k': None, 'monto': monto, 'reajuste': 0.0,
+                'motivo': f"No se pudo calcular el reajuste: {e}"}

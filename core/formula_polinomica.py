@@ -156,6 +156,74 @@ def calcular_desde_acu(proyecto_id: int) -> dict:
     }
 
 
+def aplica_formula(proyecto_id: int) -> tuple[bool, str]:
+    """¿Corresponde fórmula polinómica en este proyecto?
+
+    NO en obras por **administración directa**: el reajuste por fórmula
+    polinómica es propio de las obras por CONTRATA, donde hay un contratista al
+    que se le reajusta lo valorizado. En administración directa la entidad
+    ejecuta con sus propios recursos y no hay contrato que reajustar.
+
+    Devuelve (aplica, motivo). El motivo se muestra al usuario cuando no.
+    """
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT modalidad FROM proyectos WHERE id=?", (proyecto_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    modalidad = ((row['modalidad'] if row else '') or '').strip()
+    if 'directa' in modalidad.lower():
+        return False, (
+            f"La fórmula polinómica no aplica en obras por {modalidad}: es "
+            f"propia de las obras por contrata, donde se reajusta lo "
+            f"valorizado al contratista."
+        )
+    return True, ''
+
+
+def reajuste_de_valorizacion(proyecto_id: int, anio: int, mes: int,
+                             monto: float) -> dict:
+    """Reajuste de una valorización: R = V·(K−1).
+
+    Es para lo que existe la fórmula polinómica, y hasta ahora la app calculaba
+    K y ahí moría: las valorizaciones no lo aplicaban nunca.
+
+    `anio`/`mes` son los del período de pago de la valorización; el presupuesto
+    base sale de `formula_periodos`. Devuelve siempre un dict con `aplica` y,
+    cuando no, el `motivo` — que puede ser la modalidad de la obra, que no haya
+    fórmula guardada, que falten índices o que el período cruce el cambio de
+    base del INEI.
+    """
+    vacio = {'aplica': False, 'motivo': '', 'k': None,
+             'monto': monto, 'reajuste': 0.0}
+
+    ok, motivo = aplica_formula(proyecto_id)
+    if not ok:
+        return {**vacio, 'motivo': motivo}
+
+    if not cargar_monomios(proyecto_id):
+        return {**vacio, 'motivo': "El proyecto todavía no tiene fórmula "
+                                   "polinómica guardada."}
+
+    per = cargar_periodos(proyecto_id)
+    r = calcular_reajuste_k(proyecto_id, per['oferta_anio'], per['oferta_mes'],
+                            anio, mes, per['area_inei'])
+    if not r.get('ok'):
+        return {**vacio, 'motivo': r.get('msg', '')}
+    if r['monomios_sin_datos']:
+        return {**vacio, 'k': r['k_total'],
+                'motivo': (f"Faltan índices INEI de {mes:02d}/{anio} para "
+                           f"{r['monomios_sin_datos']} monomio(s): el reajuste "
+                           f"sería parcial.")}
+
+    k = r['k_total']
+    return {'aplica': True, 'motivo': '', 'k': k, 'monto': monto,
+            'reajuste': round(monto * (k - 1), 2),
+            'oferta': r['oferta'], 'reajuste_periodo': r['reajuste']}
+
+
 def incidencias_por_iu(proyecto_id: int,
                        serie: str | None = None) -> dict:
     """Reparte el costo directo del proyecto entre los índices unificados.

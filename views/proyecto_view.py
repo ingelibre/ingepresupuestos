@@ -10528,6 +10528,13 @@ class ProyectoView(QWidget):
         lanzar_check(self, silencioso=False)
 
     def _ir_formula(self):
+        # La fórmula polinómica es de las obras por CONTRATA: en administración
+        # directa no hay contrato que reajustar y la norma no la contempla.
+        from core.formula_polinomica import aplica_formula
+        ok, motivo = aplica_formula(self.pid)
+        if not ok:
+            QMessageBox.information(self, "Fórmula polinómica", motivo)
+            return
         if not hasattr(self, '_formula_view') or self._formula_view is None:
             from views.formula_view import FormulaView
             self._formula_view = FormulaView(

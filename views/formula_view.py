@@ -36,6 +36,7 @@ from core.formula_polinomica import (
     cargar_monomios, guardar_monomios,
     cargar_periodos, guardar_periodos, calcular_reajuste_k,
     calcular_por_iu, cargar_componentes, recalcular_coeficientes,
+    aplica_formula,
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
@@ -81,6 +82,7 @@ class FormulaView(QWidget):
         self._proyecto_meta: dict = {}
         self._totales_acu: dict | None = None
         self._cd: float = 0.0          # costo directo con que se armó la fórmula
+        self._aplica: bool = True      # falso en administración directa
         self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
@@ -762,6 +764,20 @@ class FormulaView(QWidget):
 
         # El nombre del proyecto ya está en las pestañas; la tarjeta lateral
         # que lo repetía se fue con el resto de la columna.
+
+        # Si la obra es por administración directa la fórmula no corresponde;
+        # se dice y no se calcula nada.
+        ok, motivo = aplica_formula(self.pid)
+        self._aplica = ok
+        for w in (self.btn_calcular, self.btn_guardar, self.btn_recalcular_k):
+            w.setEnabled(ok)
+        if not ok:
+            self.lbl_pie_ayuda.setText(f"⚠ {motivo}")
+            self.lbl_expr.setText("K = —")
+            self.lbl_validacion.setVisible(False)
+            self._monomios = []
+            self._render_tabla()
+            return
 
         self._monomios = cargar_monomios(self.pid)
         # La composición vive en su propia tabla, enlazada por `orden`. Los

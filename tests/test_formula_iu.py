@@ -329,6 +329,71 @@ def test_k_dentro_de_la_misma_base_sigue_calculando():
     assert abs(r['k_total'] - 1.10) < 1e-4, r['k_total']
 
 
+# ── Administración directa: la fórmula no corresponde ────────────────────────
+def _set_modalidad(pid, modalidad):
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET modalidad=? WHERE id=?", (modalidad, pid))
+    conn.commit()
+    conn.close()
+
+
+def test_no_aplica_en_administracion_directa():
+    """El reajuste por fórmula polinómica es de las obras por contrata."""
+    F, pid = _preparar()
+    _set_modalidad(pid, 'Administración directa')
+    try:
+        ok, motivo = F.aplica_formula(pid)
+        assert not ok
+        assert 'contrata' in motivo.lower(), motivo
+    finally:
+        _set_modalidad(pid, 'Contrata')
+
+
+def test_si_aplica_por_contrata():
+    F, pid = _preparar()
+    _set_modalidad(pid, 'Contrata')
+    ok, motivo = F.aplica_formula(pid)
+    assert ok and motivo == ''
+
+
+def test_la_valorizacion_no_se_reajusta_en_administracion_directa():
+    """La regla tiene que llegar hasta la valorización, no solo a la vista."""
+    F, pid = _preparar()
+    _set_modalidad(pid, 'Administración directa')
+    try:
+        r = F.reajuste_de_valorizacion(pid, 2026, 3, 100000.0)
+        assert not r['aplica'], r
+        assert r['reajuste'] == 0.0
+        assert 'contrata' in r['motivo'].lower(), r['motivo']
+    finally:
+        _set_modalidad(pid, 'Contrata')
+
+
+def test_la_valorizacion_se_reajusta_por_contrata():
+    """R = V·(K−1): es para lo que existe la fórmula polinómica."""
+    F, pid = _preparar()
+    import core.indices_inei as I
+    _set_modalidad(pid, 'Contrata')
+    I.guardar_valor('21', 2026, 1, 100.0)
+    I.guardar_valor('21', 2026, 3, 120.0)
+    F.guardar_monomios(pid, [{'simbolo': 'C', 'descripcion': 'Cemento',
+                              'indice_inei': '21', 'coeficiente': 1.0}])
+    F.guardar_periodos(pid, 2026, 1, 2026, 3, '01')
+    r = F.reajuste_de_valorizacion(pid, 2026, 3, 100000.0)
+    assert r['aplica'], r['motivo']
+    assert abs(r['k'] - 1.2) < 1e-6, r['k']
+    assert abs(r['reajuste'] - 20000.0) < 0.01, r['reajuste']
+
+
+def test_sin_formula_guardada_no_hay_reajuste():
+    F, pid = _preparar()
+    _set_modalidad(pid, 'Contrata')
+    F.guardar_monomios(pid, [])
+    r = F.reajuste_de_valorizacion(pid, 2026, 3, 50000.0)
+    assert not r['aplica']
+    assert 'fórmula' in r['motivo'].lower(), r['motivo']
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
