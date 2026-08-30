@@ -27,6 +27,14 @@ Las tres fuentes, todas oficiales:
   (18 de 18 coincidencias con la columna «ANTERIOR») y se aplican.
 * **base Diciembre 2025** — el `07_..._1.xlsx` más las resoluciones mensuales
   que gob.pe publique en ese momento.
+* **El Peruano** — el relleno de los meses que a las otras dos se les escapan.
+  El Excel se congeló en marzo de 2026 y gob.pe solo deja el mes vigente, así
+  que abril, mayo y junio de 2026 no salían por ningún lado automático. Sus
+  resoluciones sí están publicadas y la página de cada dispositivo viene
+  servida en HTML. Los identificadores se buscaron A MANO —el buscador de El
+  Peruano es una aplicación de cliente y no se puede consultar sin navegador—
+  y por eso quedan escritos aquí abajo: es un rellenado histórico, no un
+  mecanismo. De aquí en adelante cada mes se captura de gob.pe cuando sale.
 """
 import gzip
 import json
@@ -38,9 +46,10 @@ from datetime import date
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.indices_inei import (            # noqa: E402
-    SERIE_1992, SERIE_2025, serie_de,
+    SERIE_1992, SERIE_2025, serie_de, ELPERUANO_DISPOSITIVO,
     buscar_ultimo_excel_inei, descargar_desde_url,
     buscar_resoluciones_gobpe, descargar_resolucion_gobpe,
+    importar_html_elperuano,
 )
 
 DESTINO = os.path.join(os.path.dirname(__file__), '..', 'resources',
@@ -69,6 +78,29 @@ def _aplicar_correccion_2018(filas: list[dict]) -> int:
                 f['valor'] = nuevo
                 n += 1
     return n
+
+
+# Meses que ni el Excel del INEI ni gob.pe entregan, con el identificador de su
+# resolución en El Peruano. (2026, 4) -> R.J. 125-2026-INEI, y así.
+RESOLUCIONES_ELPERUANO = {
+    (2026, 4): 2516442,      # R.J. 125-2026-INEI
+    (2026, 5): 2526641,      # R.J. 149-2026-INEI
+    (2026, 6): 2535771,      # R.J. 171-2026-INEI
+}
+
+
+def _traer_elperuano(ya_tengo: set[tuple[int, int]]) -> list[dict]:
+    filas: list[dict] = []
+    for (anio, mes), ident in sorted(RESOLUCIONES_ELPERUANO.items()):
+        if (anio, mes) in ya_tengo:
+            continue
+        r = importar_html_elperuano(ELPERUANO_DISPOSITIVO.format(id=ident))
+        if r.get('ok'):
+            filas += r['rows']
+            print(f"  El Peruano {anio}-{mes:02d}: {len(r['rows'])} valores")
+        else:
+            print(f"  ! El Peruano {anio}-{mes:02d}: {r.get('msg')}")
+    return filas
 
 
 def _traer_1992() -> list[dict]:
@@ -155,6 +187,7 @@ def _empaquetar(filas: list[dict]) -> dict:
 def main() -> int:
     print("Generando el histórico de índices unificados…")
     filas = _traer_1992() + _traer_2025()
+    filas += _traer_elperuano({(f['anio'], f['mes']) for f in filas})
     if not filas:
         print("No se obtuvo ningún valor. No se toca el archivo.")
         return 1

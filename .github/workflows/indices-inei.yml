@@ -1,0 +1,56 @@
+# Mantiene al día el histórico de Índices Unificados del INEI.
+#
+# Por qué existe: los índices cambian todos los meses y un release sale cada
+# tanto. Si el archivo solo se regenerara al empaquetar, una instalación nueva
+# arrancaría con huecos y no habría reajuste que calcular. Aquí se actualiza
+# solo, y la app lo lee de este mismo repositorio sin esperar a una versión.
+#
+# Corre dos veces al mes porque el INEI publica la resolución del mes anterior
+# alrededor del día 15 al 20 (la de julio de 2026 salió el 19 de agosto), y a
+# veces se le pasa la fecha.
+name: Índices INEI
+
+on:
+  schedule:
+    - cron: '0 13 20 * *'
+    - cron: '0 13 26 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: indices-inei
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Solo lo que el generador necesita: leer el Excel del INEI y el PDF de
+      # la resolución. Instalar requirements.txt entero traería PySide6.
+      - name: Dependencias
+        run: pip install openpyxl pdfplumber
+
+      - name: Regenerar el histórico
+        working-directory: app
+        run: python3 scripts/generar_indices_valores.py
+
+      - name: Publicar si cambió
+        working-directory: app
+        run: |
+          if git diff --quiet -- resources/indices_inei_valores.json.gz; then
+            echo "Sin cambios: el INEI no ha publicado nada nuevo."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add resources/indices_inei_valores.json.gz
+          git commit -m "datos(indices): histórico del INEI al $(date +%Y-%m-%d)"
+          git push

@@ -33,6 +33,7 @@ from core.indices_inei import (
     asegurar_seed, listar_indices, listar_areas,
     SERIE_ACTUAL, series_disponibles, serie_nombre, serie_de,
     buscar_resoluciones_gobpe, descargar_resolucion_gobpe,
+    descargar_indices_publicados,
     crear_indice, actualizar_indice, eliminar_indice, contar_usos,
     asegurar_codigos, codigos_huerfanos,
     obtener_matriz, guardar_valor, guardar_valores, eliminar_valor,
@@ -943,6 +944,26 @@ class IndicesINEIView(QWidget):
         problemas: list[str] = []
 
         try:
+            # ── 0) el histórico publicado ──
+            # Es el más completo y el más barato: un solo archivo con las dos
+            # bases, ya reconciliado, que una Action mantiene al día dos veces
+            # al mes. Las otras fuentes siguen detrás por si no responde o por
+            # si el INEI publicó antes de que la Action corriera.
+            self.btn_auto.setText("Buscando el histórico publicado…")
+            QApplication.processEvents()
+            pub = descargar_indices_publicados()
+            if pub.get('ok') and pub.get('rows'):
+                propias = [r for r in pub['rows']
+                           if r.get('serie') == self._serie_actual]
+                if propias:
+                    filas += propias
+                    fuentes.append(
+                        f"Histórico publicado del {pub.get('generado', '?')} "
+                        f"({pub.get('tamano_kb', 0)} KB) — "
+                        f"{self._rango_de(propias)}")
+            else:
+                problemas.append(pub.get('msg') or "No se pudo leer el histórico.")
+
             # ── 1) el Excel de la base ──
             self.btn_auto.setText("Buscando el archivo del INEI…")
             QApplication.processEvents()
@@ -1000,7 +1021,7 @@ class IndicesINEIView(QWidget):
                 'ok': True, 'rows': filas, 'ignorados': 0,
                 'serie': self._serie_actual,
                 'codigos_encontrados': {r['codigo'] for r in filas},
-                'url': url_excel,
+                'url': pub.get('url') if pub.get('ok') else url_excel,
             }
             fuente = "<br>".join("• " + f for f in fuentes)
             if problemas:

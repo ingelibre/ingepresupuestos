@@ -216,7 +216,7 @@ AREAS_INEI: list[tuple[str, str]] = [
 SEED_VERSION = 2
 # Sube al regenerar `indices_inei_valores.json.gz` con más meses: es lo
 # que hace que una instalación ya existente reciba lo nuevo.
-VALORES_VERSION = 1
+VALORES_VERSION = 2
 
 
 def _seed_de(serie: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -279,6 +279,8 @@ def asegurar_seed(conn=None, serie: str | None = None) -> None:
         for s_ in series:
             _sembrar_valores(conn, s_)
         conn.commit()
+        if not serie:                 # solo en el arranque, no en cada alta
+            refrescar_valores_oficiales(conn)
     finally:
         if own:
             conn.close()
@@ -300,28 +302,84 @@ def _sembrar_valores(conn, serie: str) -> int:
     if int((row['valor'] if row else 0) or 0) >= VALORES_VERSION:
         return 0
     bloque = (_valores_oficiales().get('series') or {}).get(serie) or {}
-    areas = bloque.get('areas') or []
     n = 0
-    for periodo, codigos in (bloque.get('datos') or {}).items():
-        try:
-            anio, mes = (int(x) for x in periodo.split('-'))
-        except ValueError:
-            continue
-        for codigo, valores in codigos.items():
-            for i, valor in enumerate(valores):
-                if valor is None or i >= len(areas):
-                    continue
-                conn.execute(
-                    "INSERT OR IGNORE INTO indices_inei_valores "
-                    "(codigo, serie, anio, mes, area, valor) VALUES (?,?,?,?,?,?)",
-                    (codigo, serie, anio, mes, areas[i], float(valor))
-                )
-                n += 1
+    for f in _filas_de_bloque(serie, bloque):
+        conn.execute(
+            "INSERT OR IGNORE INTO indices_inei_valores "
+            "(codigo, serie, anio, mes, area, valor) VALUES (?,?,?,?,?,?)",
+            (f['codigo'], serie, f['anio'], f['mes'], f['area'], f['valor'])
+        )
+        n += 1
     conn.execute(
         "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,?)",
         (clave, str(VALORES_VERSION))
     )
     return n
+
+
+def refrescar_valores_oficiales(conn=None) -> int:
+    """Corrige de una sola vez los índices que el seed viejo dejó mal.
+
+    Distinto de `_sembrar_valores`, que rellena sin pisar. Esto **pisa**, y
+    corre UNA vez en la vida de cada base: hasta la 3.0.4 el seed traía 2 212
+    valores que contradecían al INEI —entre ellos marcadores como 100.00,
+    500.00 y 1000.00 en 2024— y como la siembra ignora lo que ya existe, esa
+    basura se quedaba para siempre en toda instalación que ya venía
+    funcionando. Un reajuste calculado con esos números sale mal y nadie se
+    entera.
+
+    Solo toca valores que el archivo oficial del INEI publica y que difieren
+    de lo guardado. Después de esta pasada vuelve a mandar el usuario: la
+    siembra normal nunca pisa nada, y una corrección a mano queda.
+    """
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        clave = "indices_refresco_oficial"
+        row = conn.execute("SELECT valor FROM configuracion WHERE clave=?",
+                           (clave,)).fetchone()
+        if row and str(row['valor'] or '') == '1':
+            return 0
+        n = 0
+        for serie, bloque in (_valores_oficiales().get('series') or {}).items():
+            areas = bloque.get('areas') or []
+            for periodo, codigos in (bloque.get('datos') or {}).items():
+                try:
+                    anio, mes = (int(x) for x in periodo.split('-'))
+                except ValueError:
+                    continue
+                for codigo, valores in codigos.items():
+                    for i, valor in enumerate(valores):
+                        if valor is None or i >= len(areas):
+                            continue
+                        cur = conn.execute(
+                            "SELECT valor FROM indices_inei_valores WHERE "
+                            "codigo=? AND serie=? AND anio=? AND mes=? AND area=?",
+                            (codigo, serie, anio, mes, areas[i])).fetchone()
+                        if cur is None or abs(cur['valor'] - float(valor)) < 0.005:
+                            continue
+                        conn.execute(
+                            "UPDATE indices_inei_valores SET valor=? WHERE "
+                            "codigo=? AND serie=? AND anio=? AND mes=? AND area=?",
+                            (float(valor), codigo, serie, anio, mes, areas[i]))
+                        n += 1
+        # La base Julio 1992 dejó de existir en diciembre de 2025: cualquier
+        # valor suyo posterior es residuo de un import viejo y confunde al
+        # mirar el histórico.
+        n += conn.execute(
+            "DELETE FROM indices_inei_valores WHERE serie=? AND "
+            "(anio*12+mes) > ?", (SERIE_1992,
+                                  INICIO_SERIE_2025[0] * 12 + INICIO_SERIE_2025[1])
+        ).rowcount or 0
+        conn.execute(
+            "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,'1')",
+            (clave,))
+        conn.commit()
+        return n
+    finally:
+        if own:
+            conn.close()
 
 
 # ── Catálogo: alta, edición y baja ───────────────────────────────────────────
@@ -1291,6 +1349,179 @@ def importar_pdf_resolucion(filepath: str, serie: str | None = None) -> dict:
     }
 
 
+ELPERUANO_DISPOSITIVO = "https://busquedas.elperuano.pe/dispositivo/NL/{id}-1"
+
+
+URL_INDICES_PUBLICADOS = (
+    "https://raw.githubusercontent.com/ingelibre/ingepresupuestos/main/"
+    "app/resources/indices_inei_valores.json.gz")
+
+
+def _filas_de_bloque(serie: str, bloque: dict) -> list[dict]:
+    """Del formato compacto (un arreglo por área) a filas sueltas."""
+    areas = bloque.get('areas') or []
+    filas: list[dict] = []
+    for periodo, codigos in (bloque.get('datos') or {}).items():
+        try:
+            anio, mes = (int(x) for x in periodo.split('-'))
+        except ValueError:
+            continue
+        for codigo, valores in codigos.items():
+            for i, valor in enumerate(valores):
+                if valor is None or i >= len(areas):
+                    continue
+                filas.append({'codigo': codigo, 'serie': serie, 'anio': anio,
+                              'mes': mes, 'area': areas[i],
+                              'valor': float(valor)})
+    return filas
+
+
+def descargar_indices_publicados(timeout: int = 30) -> dict:
+    """Trae el histórico que la Action del repositorio mantiene al día.
+
+    Es la fuente preferida y la más completa: un solo archivo con las dos
+    bases, ya reconciliado desde el Excel del INEI, los PDF de gob.pe y las
+    resoluciones de El Peruano. Se actualiza dos veces al mes por su cuenta, así
+    que la app no depende de que salga una versión nueva para tener el mes
+    pasado.
+
+    Las otras fuentes siguen ahí a propósito: si el repositorio no responde,
+    o si el INEI publica antes de que la Action corra, sincronizar igual trae
+    lo que haya.
+    """
+    import gzip
+    import io
+    import json as _json
+    import urllib.request
+
+    req = urllib.request.Request(URL_INDICES_PUBLICADOS, headers={
+        'User-Agent': 'IngePresupuestos/indices',
+        'Accept-Encoding': 'identity',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            crudo = resp.read(20 * 1024 * 1024)
+    except Exception as e:
+        return {'ok': False, 'rows': [], 'ignorados': 0,
+                'url': URL_INDICES_PUBLICADOS,
+                'msg': f"No se pudo leer el histórico publicado: {e}"}
+    try:
+        with gzip.open(io.BytesIO(crudo), 'rt', encoding='utf-8') as fh:
+            doc = _json.load(fh)
+    except Exception as e:
+        return {'ok': False, 'rows': [], 'ignorados': 0,
+                'url': URL_INDICES_PUBLICADOS,
+                'msg': f"El histórico publicado no se pudo leer: {e}"}
+
+    filas: list[dict] = []
+    for serie, bloque in (doc.get('series') or {}).items():
+        filas += _filas_de_bloque(serie, bloque)
+    if not filas:
+        return {'ok': False, 'rows': [], 'ignorados': 0,
+                'url': URL_INDICES_PUBLICADOS,
+                'msg': "El histórico publicado vino vacío."}
+    return {
+        'ok': True, 'rows': filas, 'ignorados': 0,
+        'url': URL_INDICES_PUBLICADOS,
+        'generado': doc.get('generado', ''),
+        'tamano_kb': round(len(crudo) / 1024, 1),
+        'codigos_encontrados': {f['codigo'] for f in filas},
+        'msg': (f"Histórico publicado ({doc.get('generado', 'sin fecha')}): "
+                f"{len(filas)} valores."),
+    }
+
+
+def importar_html_elperuano(url: str, serie: str | None = None,
+                            timeout: int = 45) -> dict:
+    """Lee la tabla de índices de una resolución publicada en El Peruano.
+
+    Es la tercera fuente, y la que cubre lo que a las otras dos se les escapa:
+    el INEI congela su Excel durante meses y gob.pe solo deja el PDF del mes
+    vigente, pero **El Peruano conserva todas las resoluciones publicadas**.
+
+    Su BUSCADOR no sirve —`busquedas.elperuano.pe` y `/cuadernillo/NL/` son
+    aplicaciones de cliente y sin navegador devuelven cero—, pero la página de
+    cada dispositivo (`/dispositivo/NL/<id>-1`) viene servida con el texto
+    íntegro y la tabla en HTML, códigos por fila y las áreas por columna, con
+    «(*)» donde el índice no existe.
+
+    Sirve además como verificación: ante una duda sobre un valor, esta es la
+    publicación oficial, no una copia.
+    """
+    import re
+    import urllib.request
+
+    if not str(url).lower().startswith(('http://', 'https://')):
+        return {'ok': False, 'msg': "URL no válida.", 'rows': [], 'ignorados': 0}
+    req = urllib.request.Request(url, headers={
+        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64; rv:128.0) '
+                       'Gecko/20100101 Firefox/128.0'),
+        'Accept-Language': 'es-PE,es;q=0.9',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            html = resp.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        return {'ok': False, 'msg': f"No se pudo abrir El Peruano: {e}",
+                'rows': [], 'ignorados': 0, 'url': url}
+
+    texto = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html))
+    m = re.search(r'mes de\s+([a-zA-ZáéíóúÁÉÍÓÚ]+)\s+de\s+(20\d{2})', texto)
+    periodo = _mes_del_titulo(m.group(0)) if m else None
+    if not periodo:
+        return {'ok': False, 'rows': [], 'ignorados': 0, 'url': url,
+                'msg': "No pude identificar el mes de la resolución."}
+    anio, mes = periodo
+    if serie is None:
+        bajo = texto.lower()
+        serie = (SERIE_2025 if 'diciembre 2025' in bajo else
+                 SERIE_1992 if 'julio 1992' in bajo else serie_de(anio, mes))
+
+    tablas = re.findall(r'<table.*?</table>', html, re.S | re.I)
+    if not tablas:
+        return {'ok': False, 'rows': [], 'ignorados': 0, 'url': url,
+                'msg': "La página no trae la tabla de índices."}
+
+    def celdas(fila):
+        return [re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', c)).strip()
+                for c in re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', fila, re.S | re.I)]
+
+    rows: list[dict] = []
+    ignorados = 0
+    codigos: set[str] = set()
+    for fila in re.findall(r'<tr.*?</tr>', max(tablas, key=len), re.S | re.I):
+        cs = celdas(fila)
+        if len(cs) < 2 or not cs[0].strip().isdigit():
+            continue                      # cabecera «Cód. 1 2 3…» y ruido
+        codigo = cs[0].strip().zfill(2)
+        for i, bruto in enumerate(cs[1:], start=1):
+            v = bruto.strip()
+            if not v or '(*)' in v:
+                continue                  # el índice no existe en esa área
+            try:
+                valor = float(v.replace('.', '').replace(',', '.'))
+            except ValueError:
+                ignorados += 1
+                continue
+            if valor <= 0:
+                ignorados += 1
+                continue
+            rows.append({'codigo': codigo, 'serie': serie, 'anio': anio,
+                         'mes': mes, 'area': f"{i:02d}", 'valor': valor})
+            codigos.add(codigo)
+
+    if not rows:
+        return {'ok': False, 'rows': [], 'ignorados': ignorados, 'url': url,
+                'msg': "No se reconoció ningún valor en la tabla."}
+    areas = {r['area'] for r in rows}
+    return {
+        'ok': True, 'rows': rows, 'ignorados': ignorados, 'url': url,
+        'serie': serie, 'codigos_encontrados': codigos,
+        'msg': (f"El Peruano: {len(rows)} valores · {len(codigos)} índices · "
+                f"{len(areas)} áreas · {anio}-{mes:02d}."),
+    }
+
+
 def descargar_resolucion_gobpe(url: str, serie: str | None = None,
                                timeout: int = 60) -> dict:
     """Descarga una resolución en PDF desde gob.pe y lee su tabla."""
@@ -1373,8 +1604,12 @@ def importar_json(filepath: str) -> dict:
 def descargar_desde_url(url: str, area: str = '01',
                         anio_override: int | None = None,
                         serie: str | None = None) -> dict:
-    """Descarga un Excel desde una URL pública y lo parsea con
-    ``importar_excel_inei``. Útil cuando el usuario tiene el link del INEI.
+    """Descarga desde una URL pública y la parsea según lo que sea.
+
+    Tres formas, porque el usuario puede llegar con cualquiera de las tres
+    fuentes oficiales: el **Excel** del INEI, el **PDF** de una resolución en
+    gob.pe, o la página de la resolución en **El Peruano** —que es la que
+    conserva los meses viejos y sirve para salir de dudas sobre un valor—.
 
     Acepta solo http/https. Timeout de 30s. Tamaño máximo: 20 MB.
     Retorna el mismo dict que ``importar_excel_inei`` más:
@@ -1382,6 +1617,12 @@ def descargar_desde_url(url: str, area: str = '01',
         - 'tamano_kb': tamaño del archivo descargado
     """
     import tempfile
+
+    bajo = str(url).lower()
+    if 'elperuano.pe' in bajo:
+        return importar_html_elperuano(url, serie=serie)
+    if bajo.split('?')[0].endswith('.pdf'):
+        return descargar_resolucion_gobpe(url, serie=serie)
     import urllib.request
     import urllib.error
 

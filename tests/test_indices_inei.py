@@ -618,6 +618,89 @@ def test_el_historico_empaquetado_esta_donde_lo_busca_el_spec():
     assert len(doc['series']['2025']['areas']) == 13
 
 
+# ── Las cuatro fuentes y el refresco de lo que el seed viejo dejó mal ────────
+
+def test_el_paquete_cubre_2026_sin_huecos():
+    """Abril, mayo y junio no salen del INEI ni de gob.pe: van de El Peruano."""
+    _preparar()
+    import core.database as d
+    conn = d.get_db()
+    try:
+        faltan = [m for m in range(1, 8) if not conn.execute(
+            "SELECT 1 FROM indices_inei_valores WHERE serie='2025' AND anio=2026 "
+            "AND mes=? LIMIT 1", (m,)).fetchone()]
+        assert not faltan, f"meses de 2026 sin datos: {faltan}"
+        n = conn.execute("SELECT COUNT(DISTINCT area) FROM indices_inei_valores "
+                         "WHERE serie='2025' AND anio=2026 AND mes=6").fetchone()[0]
+        assert n == 13, f"junio trae {n} áreas, se esperaban 13"
+    finally:
+        conn.close()
+
+
+def test_el_refresco_corrige_la_basura_del_seed_viejo():
+    """Hasta la 3.0.4 el seed traía marcadores (100, 500, 1000) que la siembra,
+    al ser INSERT OR IGNORE, no podía corregir nunca."""
+    _preparar()
+    import core.database as d
+    import core.indices_inei as I
+    conn = d.get_db()
+    try:
+        conn.execute("UPDATE indices_inei_valores SET valor=1000.0 WHERE serie='1992' "
+                     "AND anio=2024 AND mes=1 AND codigo='47' AND area='01'")
+        conn.execute("INSERT OR REPLACE INTO indices_inei_valores "
+                     "(codigo, serie, anio, mes, area, valor) VALUES "
+                     "('01','1992',2026,3,'01',999.0)")
+        conn.execute("DELETE FROM configuracion WHERE clave='indices_refresco_oficial'")
+        conn.commit()
+        I.refrescar_valores_oficiales(conn)
+        v = conn.execute("SELECT valor FROM indices_inei_valores WHERE serie='1992' "
+                         "AND anio=2024 AND mes=1 AND codigo='47' AND area='01'").fetchone()
+        assert abs(v['valor'] - 742.39) < 0.005, v['valor']
+        # La base 1992 no existe después de dic-2025: eso se borra.
+        assert not conn.execute(
+            "SELECT 1 FROM indices_inei_valores WHERE serie='1992' AND anio=2026"
+        ).fetchone(), "quedaron valores de 1992 en 2026"
+        # Y corre UNA sola vez: después vuelve a mandar el usuario.
+        conn.execute("UPDATE indices_inei_valores SET valor=1.5 WHERE serie='1992' "
+                     "AND anio=2024 AND mes=1 AND codigo='47' AND area='01'")
+        conn.commit()
+        I.refrescar_valores_oficiales(conn)
+        v = conn.execute("SELECT valor FROM indices_inei_valores WHERE serie='1992' "
+                         "AND anio=2024 AND mes=1 AND codigo='47' AND area='01'").fetchone()
+        assert v['valor'] == 1.5, f"volvió a pisar al usuario: {v['valor']}"
+    finally:
+        conn.close()
+
+
+def test_una_url_de_el_peruano_no_se_trata_como_excel():
+    """«Desde una URL» tiene que reconocer las tres formas oficiales."""
+    import core.indices_inei as ii
+    llamadas = []
+    reales = (ii.importar_html_elperuano, ii.descargar_resolucion_gobpe)
+    ii.importar_html_elperuano = lambda u, **k: llamadas.append('peruano') or {'ok': True, 'rows': []}
+    ii.descargar_resolucion_gobpe = lambda u, **k: llamadas.append('pdf') or {'ok': True, 'rows': []}
+    try:
+        ii.descargar_desde_url("https://busquedas.elperuano.pe/dispositivo/NL/2516442-1")
+        ii.descargar_desde_url("https://cdn.www.gob.pe/uploads/document/file/1/x.pdf")
+        assert llamadas == ['peruano', 'pdf'], llamadas
+    finally:
+        ii.importar_html_elperuano, ii.descargar_resolucion_gobpe = reales
+
+
+def test_el_historico_publicado_degrada_si_no_responde():
+    """La app no puede depender de que GitHub conteste."""
+    import urllib.request
+    import core.indices_inei as ii
+    real = urllib.request.urlopen
+    urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(OSError("sin red"))
+    try:
+        r = ii.descargar_indices_publicados()
+        assert r['ok'] is False and 'sin red' in r['msg']
+        assert r['rows'] == []
+    finally:
+        urllib.request.urlopen = real
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

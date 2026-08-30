@@ -202,38 +202,54 @@ en `resources/indices_inei_oficial.json` (empaquetado en el `.spec`).
   sobre una BD sin sembrar se deshacía en la siguiente lectura. Ojo también con
   llamarla en todo camino que lea nombres del catálogo (`incidencias_por_iu`,
   `sugerencias`), o salen como «Índice 49».
-- **Sincronizar son DOS fuentes, no una.** El Excel acumulado del INEI
-  (`07_indices_unificados_…_1.xlsx`) se actualiza cuando ellos quieren: en
-  agosto de 2026 su `Last-Modified` era del 22 de abril y traía datos **hasta
-  marzo**, y no existe un `_2.xlsx` más nuevo (probado). Las **resoluciones
-  jefaturales mensuales** sí salen puntuales —la de julio se publicó el 19 de
-  agosto— y **gob.pe las sirve en HTML** con el PDF enlazado; `pdfplumber` lee
-  su tabla limpia (`buscar_resoluciones_gobpe` → `descargar_resolucion_gobpe`).
-  **El buscador de El Peruano NO sirve**: `busquedas.elperuano.pe` y
-  `/cuadernillo/NL/` son aplicaciones de cliente y devuelven 0 coincidencias sin
-  navegador (solo `dispositivo/NL/<id>` viene servido, y el id no se adivina).
-  **gob.pe publica únicamente el mes vigente** —lo reemplaza cada mes—, así que
-  los meses intermedios que el Excel no alcanzó (abril–junio de 2026) **no se
-  pueden automatizar**: se cargan con «Importar ▾ → Pegar datos». Por eso
-  `_meses_faltantes` los enumera en el diálogo de confirmación: si falta el mes
-  de la valorización, no hay K que calcular.
-- **El histórico de índices VIAJA con el programa** (`resources/
-  indices_inei_valores.json.gz`, 72 KB para 66 000 valores). Sin él una
-  instalación nueva arrancaba sin la base vigente —el Excel del INEI lleva
-  meses congelado y gob.pe solo deja el PDF del mes en curso—, así que quien
-  instalara en noviembre tendría enero-marzo y nada más: sin índices no hay K
-  que calcular. Lo regenera **`scripts/generar_indices_valores.py`**, que hay
-  que correr A MANO antes de cortar un release; `_sembrar_valores` lo vuelca en
-  la primera arrancada con **`INSERT OR IGNORE`, nunca REPLACE** (lo que el
-  usuario corrigió a mano manda) bajo su propio flag
+- **Sincronizar son CUATRO fuentes, y cada una tapa lo que a la otra se le
+  escapa.** En orden de preferencia:
+  1. **el histórico publicado** — `indices_inei_valores.json.gz` leído del
+     propio repositorio por `raw.githubusercontent.com`
+     (`descargar_indices_publicados`). Es el más completo y el más barato: un
+     archivo con las dos bases ya reconciliadas, que la Action
+     `.github/workflows/indices-inei.yml` regenera los días 20 y 26 de cada
+     mes. Así la app no espera a que salga una versión para tener el mes
+     pasado. **Si el repo no responde, se sigue con las otras tres.**
+  2. **el Excel acumulado del INEI** — `07_..._1.xlsx` para la base 2025 y
+     `06_..._{mes}{año}.xlsx` para la de 1992, que es **el histórico entero**
+     (2013-01 a 2025-12; le faltan oct-2014 y abr-2015). Ojo: el de la base
+     2025 se actualiza cuando ellos quieren — en agosto de 2026 su
+     `Last-Modified` era del 22 de abril y traía datos hasta marzo, y no hay
+     un `_2.xlsx` más nuevo (probado).
+  3. **gob.pe** — sirve en HTML el PDF de la resolución del mes, que
+     `pdfplumber` lee limpio. Publica **solo el mes vigente** y lo reemplaza.
+  4. **El Peruano** — `busquedas.elperuano.pe/dispositivo/NL/<id>-1` viene
+     servido con el texto íntegro y la tabla en HTML
+     (`importar_html_elperuano`). Es la única fuente que **conserva los meses
+     viejos**, y la que sirve para salir de dudas sobre un valor. Su
+     **BUSCADOR no sirve**: `busquedas.elperuano.pe` y `/cuadernillo/NL/` son
+     aplicaciones de cliente y sin navegador devuelven cero, así que los `id`
+     hay que averiguarlos a mano; los de abril, mayo y junio de 2026 (R.J.
+     125, 149 y 171-2026-INEI) quedaron escritos en
+     `RESOLUCIONES_ELPERUANO`, dentro del generador. **«Importar ▾ → Desde
+     una URL» reconoce las tres formas** por la propia URL: Excel, `.pdf` de
+     gob.pe y página de El Peruano.
+- **El histórico VIAJA con el programa** (`resources/indices_inei_valores.json.gz`,
+  75 KB para 67 000 valores). Sin él una instalación nueva arrancaba sin la
+  base vigente y no había K que calcular. Lo regenera
+  **`scripts/generar_indices_valores.py`** —que corre solo en la Action, y a
+  mano antes de un release—; `_sembrar_valores` lo vuelca en la primera
+  arrancada con **`INSERT OR IGNORE`, nunca REPLACE**, bajo su propio flag
   `seed_inei_valores_<serie>` = `VALORES_VERSION`. El flag es aparte del
   catálogo a propósito: una instalación que ya venía funcionando tiene
   `seed_inei_<serie>` al día y aun así debe recibir los valores. **Al
-  regenerar el archivo con más meses, subir `VALORES_VERSION`** o las
+  regenerar el archivo con más meses hay que subir `VALORES_VERSION`**, o las
   instalaciones existentes no reciben lo nuevo.
-- **El acumulativo de la base 1992 (`06_..._dic25.xlsx`) es el histórico
-  entero**: 2013-01 a 2025-12, 68 índices, 6 áreas. Le faltan **oct-2014 y
-  abr-2015**, que no están en el archivo del INEI y sí en el seed.
+- **`refrescar_valores_oficiales` corre UNA vez por base y sí pisa.** Es la
+  excepción a la regla anterior y existe porque hasta la 3.0.4 el seed traía
+  **2 212 valores que contradecían al INEI** —incluidos marcadores como
+  100.00, 500.00 y 1000.00 en 2024—; como la siembra ignora lo que ya existe,
+  esa basura se habría quedado para siempre en toda instalación en marcha, y
+  un reajuste calculado con esos números sale mal sin que nadie se entere.
+  Corrige solo lo que el archivo oficial publica y difiere, borra los valores
+  de la base 1992 posteriores a dic-2025 (esa base dejó de existir) y marca
+  `indices_refresco_oficial`. **Después vuelve a mandar el usuario.**
 - **`'set'` es septiembre.** El INEI rotula sus hojas «Set-2013» —la grafía
   peruana— y `MESES_MAP` tenía `sep`/`sept`/`setiembre` pero no `set`, así que
   **se perdía septiembre de todos los años**: 5 242 valores. `_MESES_CORTOS_INEI`
@@ -244,17 +260,12 @@ en `resources/indices_inei_oficial.json` (empaquetado en el `.spec`).
   nunca la incorporaron**: siguen con los valores superados. Corresponde al
   **área 02** (18 de 18 coincidencias con su columna «ANTERIOR») y el generador
   la aplica. Si aparece otra hoja de correcciones, mirar si pasa lo mismo.
-- **El seed ya NO duplica lo que publica el INEI.** Traía 29 019 valores de
-  procedencia incierta: 25 051 coincidían, **2 212 contradecían al INEI**
-  —incluidos marcadores como 100.00, 500.00 y 1000.00 en 2024— y como la
-  siembra es INSERT OR IGNORE, los del seed ganaban y la basura viajaba en cada
-  instalación. Ahora la propiedad está repartida sin solapamiento: el archivo
-  oficial manda de 2013-01 en adelante y **el seed conserva solo lo que el INEI
-  no publica** — el año 2012 y los dos meses que le faltan (1 612 valores). Se
-  quitaron también los pares (05, área 05) y (38, área 05), que el INEI marca
-  «(*) sin índice» en los 154 meses. **Las instalaciones ya existentes
-  conservan su basura**: la siembra no pisa nada; se corrige sincronizando, que
-  sí hace REPLACE.
+- **El seed ya NO duplica lo que publica el INEI.** La propiedad quedó
+  repartida sin solapamiento: el archivo oficial manda de 2013-01 en adelante y
+  **el seed conserva solo lo que el INEI no publica** — el año 2012 y los dos
+  meses que le faltan a su acumulativo (1 612 valores). Se quitaron también los
+  pares (05, área 05) y (38, área 05), que el INEI marca «(*) sin índice» en
+  los 154 meses.
 - **NO volver a hardcodear la lista de índices.** Estuvo duplicada en
   `core/indices_inei.py` y `views/recursos_view.py`; la verdad es la tabla y se
   lee con `catalogo(serie=…)`. La constante queda solo como respaldo.
