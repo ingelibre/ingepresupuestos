@@ -452,13 +452,14 @@ class _EditarRecursoDialog(QDialog):
         self._cmb_inei.setStyleSheet("QComboBox { combobox-popup: 0; }")
         self._cmb_inei.addItem("— Sin índice INEI —", "")
         try:
-            from views.recursos_view import INEI_CATALOG
+            from core.indices_inei import catalogo as _catalogo_inei
+            cat_inei = _catalogo_inei()
         except Exception:
-            INEI_CATALOG = []
+            cat_inei = []
         cod_inei = (recurso.get('indice_inei') or '').strip()
-        if cod_inei and cod_inei not in {c for c, _ in INEI_CATALOG}:
+        if cod_inei and cod_inei not in {c for c, _ in cat_inei}:
             self._cmb_inei.addItem(f"{cod_inei} — (personalizado)", cod_inei)
-        for cod, desc in INEI_CATALOG:
+        for cod, desc in cat_inei:
             self._cmb_inei.addItem(f"{cod} — {desc}", cod)
         ix = self._cmb_inei.findData(cod_inei)
         self._cmb_inei.setCurrentIndex(ix if ix >= 0 else 0)

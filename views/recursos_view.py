@@ -52,48 +52,20 @@ TIPO_LARGO = {
 }
 
 
-# ── Catálogo de Índices Unificados INEI (80 entradas) ────────────────────────
-INEI_CATALOG = [
-    ("01", "Aceite"), ("02", "Acero de construcción liso"),
-    ("03", "Acero de construcción corrugado"), ("04", "Agregado fino"),
-    ("05", "Agregado grueso"), ("06", "Alambre y cable de cobre desnudo"),
-    ("07", "Alambre y cable tipo TW y THW"), ("08", "Alambre y cable tipo WP"),
-    ("09", "Alcantarilla metálica"), ("10", "Aparato sanitario con grifería"),
-    ("11", "Artefacto de alumbrado exterior"), ("12", "Artefacto de alumbrado interior"),
-    ("13", "Asfalto"), ("14", "Baldosa acústica"), ("15", "Baldosa asfáltica"),
-    ("16", "Baldosa vinílica"), ("17", "Bloque y ladrillo"), ("18", "Cable telefónico"),
-    ("19", "Cable NYY-N2XY"), ("20", "Cemento asfáltico"),
-    ("21", "Cemento Portland tipo I"), ("22", "Cemento Portland tipo II"),
-    ("23", "Cemento Portland tipo V"), ("24", "Cerámica esmaltada y sin esmaltar"),
-    ("26", "Cerrajería nacional"), ("27", "Detonante"), ("28", "Dinamita"),
-    ("29", "Dólar"), ("30", "Dólar más inflación USA / General ponderado"),
-    ("31", "Ducto de concreto"), ("32", "Flete terrestre"), ("33", "Flete aéreo"),
-    ("34", "Gasolina"), ("37", "Herramienta manual"), ("38", "Hormigón"),
-    ("39", "Índice general de precios al consumidor (IPC)"), ("40", "Loseta"),
-    ("41", "Madera en tiras para piso"),
-    ("42", "Madera importada para encofrado y carpintería"),
-    ("43", "Madera nacional para encofrado y carpintería"),
-    ("44", "Madera terciada para encofrado y carpintería"),
-    ("45", "Madera terciada para encofrado"), ("46", "Malla de acero"),
-    ("47", "Mano de obra (incluido leyes sociales)"),
-    ("48", "Maquinaria y equipo nacional"), ("49", "Maquinaria y equipo importado"),
-    ("50", "Marco y tapa de hierro fundido"), ("51", "Perfil de acero liviano"),
-    ("52", "Perfil de aluminio"), ("53", "Petróleo diesel"),
-    ("54", "Pintura látex"), ("55", "Pintura temple"),
-    ("56", "Plancha de Aero LAC"), ("57", "Plancha de Aero LAF"),
-    ("59", "Plancha de fibro-cemento"), ("60", "Plancha de poliuretano"),
-    ("61", "Plancha galvanizada"), ("62", "Poste de concreto"),
-    ("64", "Terrazo"), ("65", "Tubería de acero negro y/o galvanizado"),
-    ("66", "Tubería de PVC para agua potable y alcantarillado"),
-    ("68", "Tubería de cobre"), ("69", "Tubería de concreto simple"),
-    ("70", "Tubería de concreto reforzado"), ("71", "Tubería de fierro fundido"),
-    ("72", "Tubería de PVC para agua"), ("73", "Ducto telefónico de PVC"),
-    ("74", "Tubería de PVC para electricidad (SAP)"),
-    ("77", "Válvula de bronce nacional"),
-    ("78", "Válvula de fierro fundido nacional"),
-    ("79", "Vidrio incoloro nacional"), ("80", "Concreto premezclado"),
-]
-INEI_NOMBRE = dict(INEI_CATALOG)
+# ── Catálogo de Índices Unificados INEI ──────────────────────────────────────
+# Estaba escrito a mano aquí Y otra vez en core/indices_inei.py: dos copias de
+# la misma lista, la forma exacta que ya nos costó la regla de la cuadrilla.
+# Ahora las dos vistas leen la tabla `indices_inei`, que es la única verdad y
+# la única que refleja los índices que el usuario da de alta.
+def catalogo_inei() -> list[tuple[str, str]]:
+    """El catálogo vigente de índices unificados, como (código, nombre)."""
+    from core.indices_inei import catalogo
+    return catalogo()
+
+
+def nombre_inei(codigo: str) -> str:
+    """Nombre de un índice, o cadena vacía si no está en el catálogo."""
+    return dict(catalogo_inei()).get(str(codigo or '').strip(), '')
 
 
 # ── Delegate: badge de tipo (píldora coloreada) ──────────────────────────────
@@ -184,7 +156,7 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         self.cmb_inei = QComboBox()
         self.cmb_inei.setEditable(True)
         self.cmb_inei.addItem("— Seleccione índice INEI —", "")
-        for cod, desc in INEI_CATALOG:
+        for cod, desc in catalogo_inei():
             self.cmb_inei.addItem(f"{cod} — {desc}", cod)
         self.cmb_inei.addItem("Otro (ingresar manualmente)", "OTRO")
         self.cmb_inei.currentIndexChanged.connect(self._on_inei_change)
@@ -492,7 +464,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
 
         self.cmb_inei = QComboBox()
         self.cmb_inei.addItem("Todos los índices INEI", "")
-        for cod, desc in INEI_CATALOG:
+        for cod, desc in catalogo_inei():
             self.cmb_inei.addItem(f"{cod} — {desc}", cod)
         self.cmb_inei.currentIndexChanged.connect(self.cargar)
         fl.addWidget(self.cmb_inei)

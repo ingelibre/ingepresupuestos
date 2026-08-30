@@ -20,16 +20,18 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSize, QTimer, Signal
-from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
+from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence, QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QLineEdit, QComboBox,
     QPushButton, QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QSplitter, QFileDialog, QMessageBox,
-    QSizePolicy, QApplication,
+    QSizePolicy, QApplication, QDialog, QDialogButtonBox, QFormLayout, QMenu,
 )
 
 from core.indices_inei import (
     asegurar_seed, listar_indices, listar_areas,
+    crear_indice, actualizar_indice, eliminar_indice, contar_usos,
+    asegurar_codigos, codigos_huerfanos,
     obtener_matriz, guardar_valor, guardar_valores, eliminar_valor,
     importar_excel_inei, exportar_json, importar_json,
     descargar_desde_url, importar_desde_texto,
@@ -59,6 +61,71 @@ MESES_LARGOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 
+class DialogoIndice(QDialog):
+    """Alta y edición de un índice unificado.
+
+    En edición el código queda fijo: es la clave con la que lo referencian los
+    insumos y los monomios ya guardados, y cambiarlo los dejaría colgando.
+    """
+
+    def __init__(self, parent=None, codigo: str = "", nombre: str = ""):
+        super().__init__(parent)
+        self._edicion = bool(codigo)
+        self.setWindowTitle("Editar índice unificado" if self._edicion
+                            else "Nuevo índice unificado")
+        self.setMinimumWidth(420)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 16, 18, 14)
+        v.setSpacing(10)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.inp_codigo = QLineEdit(codigo)
+        self.inp_codigo.setPlaceholderText("Dos dígitos, ej. 85")
+        self.inp_codigo.setMaxLength(2)
+        self.inp_codigo.setEnabled(not self._edicion)
+        form.addRow("Código *:", self.inp_codigo)
+
+        self.inp_nombre = QLineEdit(nombre)
+        self.inp_nombre.setPlaceholderText("Descripción del índice unificado")
+        form.addRow("Nombre *:", self.inp_nombre)
+        v.addLayout(form)
+
+        ayuda = QLabel(
+            "El código es el que publica el INEI. Los insumos y los monomios "
+            "de la fórmula polinómica lo referencian por ese número."
+        )
+        ayuda.setWordWrap(True)
+        ayuda.setStyleSheet(f"color:{SLATE_300}; font-size:11px;")
+        v.addWidget(ayuda)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Save).setText("Guardar")
+        bb.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        bb.accepted.connect(self._guardar)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+
+        (self.inp_nombre if self._edicion else self.inp_codigo).setFocus()
+
+    def datos(self) -> tuple[str, str]:
+        return self.inp_codigo.text().strip(), self.inp_nombre.text().strip()
+
+    def _guardar(self):
+        codigo, nombre = self.datos()
+        if not codigo.isdigit():
+            QMessageBox.warning(self, "Código inválido",
+                                "El código debe ser numérico (01 a 99).")
+            return
+        if not nombre:
+            QMessageBox.warning(self, "Falta el nombre",
+                                "Escribe la descripción del índice.")
+            return
+        self.accept()
+
+
 class IndicesINEIView(QWidget):
     """Histórico de Índices Unificados de Precios INEI."""
 
@@ -70,6 +137,8 @@ class IndicesINEIView(QWidget):
         asegurar_seed()
         self._codigo_actual: str | None = None
         self._area_actual: str = '01'
+        self._indices_cache: list[tuple[str, str]] = []
+        self._huerfanos: list[dict] = []
         self._build()
         self._cargar_todo()
 
@@ -205,6 +274,35 @@ class IndicesINEIView(QWidget):
         )
         hl.addWidget(l_h)
         hl.addStretch(1)
+
+        # Aviso de códigos usados que el catálogo no define. Solo se muestra
+        # cuando los hay: la propia biblioteca semilla trae varios (99, 75,
+        # 63, 76, 58), invisibles hasta ahora porque la lista sale del catálogo.
+        self.btn_huerfanos = QPushButton("")
+        self.btn_huerfanos.setCursor(Qt.PointingHandCursor)
+        self.btn_huerfanos.setStyleSheet(
+            "QPushButton { background:#FFE4CC; color:#7A3800;"
+            " border:1px solid rgba(255,255,255,0.35); border-radius:4px;"
+            " padding:4px 9px; font-size:11px; font-weight:700; }"
+            "QPushButton:hover { background:#FFD3AB; }"
+        )
+        self.btn_huerfanos.clicked.connect(self._revisar_huerfanos)
+        self.btn_huerfanos.setVisible(False)
+        hl.addWidget(self.btn_huerfanos)
+
+        self.btn_nuevo = QPushButton("Nuevo")
+        self.btn_nuevo.setIcon(icon("add"))
+        self.btn_nuevo.setIconSize(QSize(13, 13))
+        self.btn_nuevo.setCursor(Qt.PointingHandCursor)
+        self.btn_nuevo.setToolTip("Dar de alta un índice unificado")
+        self.btn_nuevo.setStyleSheet(
+            "QPushButton { background:rgba(255,255,255,0.15); color:white;"
+            " border:1px solid rgba(255,255,255,0.25); border-radius:4px;"
+            " padding:4px 10px; font-size:11px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.25); }"
+        )
+        self.btn_nuevo.clicked.connect(self._nuevo_indice)
+        hl.addWidget(self.btn_nuevo)
         v.addWidget(hd)
 
         # Búsqueda
@@ -234,6 +332,11 @@ class IndicesINEIView(QWidget):
             "QListWidget::item:selected { background:#FFE4CC; color:#7A3800; }"
         )
         self.lst.itemSelectionChanged.connect(self._on_lst_change)
+        self.lst.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lst.customContextMenuRequested.connect(self._menu_indices)
+        self.lst.itemDoubleClicked.connect(
+            lambda it: self._editar_indice(it.data(Qt.UserRole))
+        )
         v.addWidget(self.lst, 1)
 
         return fr
@@ -360,6 +463,7 @@ class IndicesINEIView(QWidget):
     def _refrescar_lista(self):
         q = self.inp_q.text().strip().lower() if hasattr(self, 'inp_q') else ''
         indices = listar_indices()
+        self._indices_cache = [(i['codigo'], i['nombre']) for i in indices]
         anterior = self._codigo_actual
 
         self.lst.blockSignals(True)
@@ -391,6 +495,7 @@ class IndicesINEIView(QWidget):
         if self.lst.count() and self.lst.currentRow() < 0:
             self.lst.setCurrentRow(0)
         self.lbl_subt.setText(f"  ·  {cnt} índices")
+        self._actualizar_huerfanos()
 
     def _actualizar_kpis(self):
         from core.database import get_db
@@ -415,6 +520,147 @@ class IndicesINEIView(QWidget):
         self.kpi_valores.lbl_valor.setText(str(n_valores))
         self.kpi_ultimo.lbl_valor.setText(
             f"{ult['anio']}-{ult['mes']:02d}" if ult else "—"
+        )
+
+    # ── Catálogo: alta, edición y baja ──────────────────────────────────────
+    def _menu_indices(self, pos):
+        """Editar · Eliminar sobre el índice bajo el cursor."""
+        it = self.lst.itemAt(pos)
+        if it is None:
+            return
+        codigo = it.data(Qt.UserRole)
+        m = QMenu(self)
+        a_edit = QAction(icon("editar"), "Editar", self)
+        a_edit.triggered.connect(lambda: self._editar_indice(codigo))
+        m.addAction(a_edit)
+        a_new = QAction(icon("add"), "Nuevo índice", self)
+        a_new.triggered.connect(self._nuevo_indice)
+        m.addAction(a_new)
+        m.addSeparator()
+        a_del = QAction(icon("eliminar"), "Eliminar", self)
+        a_del.triggered.connect(lambda: self._eliminar_indice_ui(codigo))
+        m.addAction(a_del)
+        m.exec(self.lst.viewport().mapToGlobal(pos))
+
+    def _nuevo_indice(self):
+        dlg = DialogoIndice(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        codigo, nombre = dlg.datos()
+        try:
+            codigo = crear_indice(codigo, nombre)
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo crear", str(e))
+            return
+        self._codigo_actual = codigo
+        self._refrescar_lista()
+        self._actualizar_kpis()
+
+    def _editar_indice(self, codigo: str):
+        if not codigo:
+            return
+        nombre = dict(self._indices_cache).get(codigo, "")
+        dlg = DialogoIndice(self, codigo=codigo, nombre=nombre)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        _, nombre_nuevo = dlg.datos()
+        actualizar_indice(codigo, nombre=nombre_nuevo)
+        self._refrescar_lista()
+
+    def _eliminar_indice_ui(self, codigo: str):
+        """Baja del catálogo, avisando qué queda apuntando al código.
+
+        No hay clave foránea: borrar no rompe el SQL, pero deja insumos con un
+        índice que ya no existe. Por eso se enumera antes y los insumos NO se
+        tocan — reasignarlos es decisión del usuario.
+        """
+        if not codigo:
+            return
+        nombre = dict(self._indices_cache).get(codigo, "")
+        usos = contar_usos(codigo)
+        detalle = []
+        if usos['recursos']:
+            detalle.append(f"{usos['recursos']} insumo(s) lo tienen asignado")
+        if usos['valores']:
+            detalle.append(f"{usos['valores']} valor(es) del histórico")
+        if usos['monomios']:
+            detalle.append(f"{usos['monomios']} monomio(s) de fórmulas guardadas")
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Eliminar índice unificado")
+        msg.setText(f"¿Eliminar el índice {codigo} — {nombre}?")
+        if detalle:
+            msg.setInformativeText(
+                "Quedarán apuntando a un código que ya no existe:\n· "
+                + "\n· ".join(detalle)
+                + "\n\nLos insumos no se modifican."
+            )
+        else:
+            msg.setInformativeText("No lo usa nadie.")
+        btn_si = msg.addButton("Eliminar", QMessageBox.DestructiveRole)
+        msg.addButton("Cancelar", QMessageBox.RejectRole)
+        msg.exec()
+        if msg.clickedButton() is not btn_si:
+            return
+
+        borrar_valores = False
+        if usos['valores']:
+            r = QMessageBox.question(
+                self, "Histórico del índice",
+                f"¿Borrar también sus {usos['valores']} valores del histórico?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            borrar_valores = (r == QMessageBox.Yes)
+
+        eliminar_indice(codigo, borrar_valores=borrar_valores)
+        if self._codigo_actual == codigo:
+            self._codigo_actual = None
+            self._limpiar_matriz()
+        self._refrescar_lista()
+        self._actualizar_kpis()
+
+    def _actualizar_huerfanos(self):
+        """Refresca el aviso de códigos usados que el catálogo no define."""
+        try:
+            self._huerfanos = codigos_huerfanos()
+        except Exception:
+            self._huerfanos = []
+        n = len(self._huerfanos)
+        self.btn_huerfanos.setVisible(bool(n))
+        if n:
+            self.btn_huerfanos.setText(f"{n} sin definir")
+            self.btn_huerfanos.setToolTip(
+                "Hay códigos usados por insumos o con histórico cargado que "
+                "no están en el catálogo. Clic para darlos de alta."
+            )
+
+    def _revisar_huerfanos(self):
+        """Da de alta los códigos huérfanos para que dejen de ser invisibles."""
+        if not getattr(self, '_huerfanos', None):
+            return
+        filas = "\n".join(
+            f"· {h['codigo']} — {h['n_recursos']} insumo(s),"
+            f" {h['n_valores']} valor(es)"
+            for h in self._huerfanos
+        )
+        r = QMessageBox.question(
+            self, "Códigos sin definir",
+            f"{len(self._huerfanos)} código(s) están en uso pero no figuran "
+            f"en el catálogo:\n\n{filas}\n\n"
+            "¿Darlos de alta? Entrarán con un nombre provisional que puedes "
+            "editar (doble clic en la lista).",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if r != QMessageBox.Yes:
+            return
+        n = asegurar_codigos([h['codigo'] for h in self._huerfanos])
+        self._refrescar_lista()
+        self._actualizar_kpis()
+        QMessageBox.information(
+            self, "Listo",
+            f"{n} índice(s) dados de alta. Edítalos para ponerles su nombre "
+            "oficial del INEI."
         )
 
     # ── Eventos ─────────────────────────────────────────────────────────────

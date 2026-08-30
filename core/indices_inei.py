@@ -24,7 +24,12 @@ from pathlib import Path
 from core.database import get_db
 
 
-# ── Catálogo de 80 índices unificados de precios INEI ────────────────────────
+# ── Semilla del catálogo de índices unificados ───────────────────────────────
+# Son 72 entradas con códigos del 01 al 80: la numeración oficial tiene huecos
+# (25, 35, 36, 58, 63, 67, 75, 76). NO es la lista completa —el INEI publica
+# más— y sobre todo NO es la verdad: la verdad es la tabla `indices_inei`, que
+# el usuario edita a mano y que la importación del archivo oficial amplía sola.
+# Para leer el catálogo usar `catalogo()`, NUNCA esta constante.
 CATALOGO_INEI: list[tuple[str, str]] = [
     ("01", "Aceite"),
     ("02", "Acero de construcción liso"),
@@ -112,24 +117,45 @@ AREAS_INEI: list[tuple[str, str]] = [
 ]
 
 
-# ── Seed (idempotente) ───────────────────────────────────────────────────────
+# ── Semilla del catálogo ─────────────────────────────────────────────────────
+# La semilla corre UNA vez por versión. Subir este número al agregar entradas
+# nuevas a CATALOGO_INEI: solo entonces se vuelven a sembrar las que falten.
+SEED_VERSION = 1
+
+
 def asegurar_seed(conn=None) -> None:
-    """Asegura que el catálogo y las áreas estén poblados. Idempotente."""
+    """Siembra el catálogo y las áreas. Corre una sola vez por SEED_VERSION.
+
+    Antes re-insertaba las 72 entradas en CADA arranque con INSERT OR IGNORE,
+    así que un índice borrado por el usuario resucitaba al reiniciar. Ahora la
+    siembra se salta si `seed_inei_ver` ya alcanzó SEED_VERSION, y los borrados
+    y renombres del usuario mandan.
+    """
     own = conn is None
     if own:
         conn = get_db()
     try:
-        for codigo, nombre in CATALOGO_INEI:
-            conn.execute(
-                "INSERT OR IGNORE INTO indices_inei (codigo, nombre, activo) "
-                "VALUES (?, ?, 1)",
-                (codigo, nombre)
-            )
+        # Las áreas son las 6 geográficas del INEI, no se editan: siempre.
         for i, (codigo, nombre) in enumerate(AREAS_INEI):
             conn.execute(
                 "INSERT OR IGNORE INTO indices_inei_areas "
                 "(codigo, nombre, orden) VALUES (?, ?, ?)",
                 (codigo, nombre, i)
+            )
+        row = conn.execute(
+            "SELECT valor FROM configuracion WHERE clave='seed_inei_ver'"
+        ).fetchone()
+        ya = int((row['valor'] if row else 0) or 0)
+        if ya < SEED_VERSION:
+            for codigo, nombre in CATALOGO_INEI:
+                conn.execute(
+                    "INSERT OR IGNORE INTO indices_inei (codigo, nombre, activo) "
+                    "VALUES (?, ?, 1)",
+                    (codigo, nombre)
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO configuracion (clave, valor) "
+                "VALUES ('seed_inei_ver', ?)", (str(SEED_VERSION),)
             )
         conn.commit()
     finally:
@@ -137,9 +163,217 @@ def asegurar_seed(conn=None) -> None:
             conn.close()
 
 
+# ── Catálogo: alta, edición y baja ───────────────────────────────────────────
+def _norm_codigo(codigo) -> str:
+    """Normaliza a la forma canónica del INEI: dos dígitos, '7' → '07'."""
+    s = str(codigo or '').strip()
+    if not s.isdigit():
+        raise ValueError("El código debe ser numérico (01 a 99).")
+    n = int(s)
+    if not (0 <= n <= 99):
+        raise ValueError("El código debe estar entre 00 y 99.")
+    return f"{n:02d}"
+
+
+def catalogo(incluir_inactivos: bool = False, conn=None) -> list[tuple[str, str]]:
+    """El catálogo vigente, leído de la tabla. Fuente única para toda la app.
+
+    Las vistas lo usan para poblar sus combos: si el usuario da de alta un
+    índice, aparece en todas sin tocar código.
+    """
+    own = conn is None
+    if own:
+        conn = get_db()
+    asegurar_seed(conn)
+    sql = "SELECT codigo, nombre FROM indices_inei"
+    if not incluir_inactivos:
+        sql += " WHERE activo=1"
+    sql += " ORDER BY codigo"
+    rows = conn.execute(sql).fetchall()
+    if own:
+        conn.close()
+    return [(r['codigo'], r['nombre']) for r in rows]
+
+
+def crear_indice(codigo: str, nombre: str, conn=None) -> str:
+    """Da de alta un índice unificado. Devuelve el código normalizado."""
+    codigo = _norm_codigo(codigo)
+    nombre = str(nombre or '').strip()
+    if not nombre:
+        raise ValueError("El nombre no puede estar vacío.")
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        ya = conn.execute(
+            "SELECT nombre FROM indices_inei WHERE codigo=?", (codigo,)
+        ).fetchone()
+        if ya:
+            raise ValueError(f"El índice {codigo} ya existe ({ya['nombre']}).")
+        conn.execute(
+            "INSERT INTO indices_inei (codigo, nombre, activo) VALUES (?,?,1)",
+            (codigo, nombre)
+        )
+        conn.commit()
+    finally:
+        if own:
+            conn.close()
+    return codigo
+
+
+def actualizar_indice(codigo: str, nombre: str | None = None,
+                      activo: bool | None = None, conn=None) -> None:
+    """Renombra o activa/desactiva un índice ya existente."""
+    codigo = _norm_codigo(codigo)
+    sets, params = [], []
+    if nombre is not None:
+        nombre = str(nombre).strip()
+        if not nombre:
+            raise ValueError("El nombre no puede estar vacío.")
+        sets.append("nombre=?")
+        params.append(nombre)
+    if activo is not None:
+        sets.append("activo=?")
+        params.append(1 if activo else 0)
+    if not sets:
+        return
+    params.append(codigo)
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        conn.execute(
+            f"UPDATE indices_inei SET {', '.join(sets)} WHERE codigo=?", params
+        )
+        conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+
+def contar_usos(codigo: str, conn=None) -> dict:
+    """Qué quedaría colgando si se borra este índice.
+
+    No hay clave foránea desde `recursos` ni desde `formula_monomios`, así que
+    borrar no rompe nada a nivel SQL — pero deja insumos apuntando a un código
+    que ya no existe. La vista usa esto para avisar antes.
+    """
+    codigo = _norm_codigo(codigo)
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        recursos = conn.execute(
+            "SELECT COUNT(*) FROM recursos WHERE indice_inei=?", (codigo,)
+        ).fetchone()[0]
+        valores = conn.execute(
+            "SELECT COUNT(*) FROM indices_inei_valores WHERE codigo=?", (codigo,)
+        ).fetchone()[0]
+        monomios = conn.execute(
+            "SELECT COUNT(*) FROM formula_monomios WHERE indice_inei=?", (codigo,)
+        ).fetchone()[0]
+    finally:
+        if own:
+            conn.close()
+    return {'recursos': recursos, 'valores': valores, 'monomios': monomios}
+
+
+def eliminar_indice(codigo: str, borrar_valores: bool = False, conn=None) -> None:
+    """Baja del catálogo. Con `borrar_valores`, se lleva también su histórico.
+
+    Los insumos que lo usaban NO se tocan: conservan el código para que el
+    usuario decida a dónde reasignarlos.
+    """
+    codigo = _norm_codigo(codigo)
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        conn.execute("DELETE FROM indices_inei WHERE codigo=?", (codigo,))
+        if borrar_valores:
+            conn.execute(
+                "DELETE FROM indices_inei_valores WHERE codigo=?", (codigo,)
+            )
+        conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+
+def asegurar_codigos(codigos, nombres: dict | None = None, conn=None) -> int:
+    """Da de alta los códigos que aún no estén en el catálogo. Devuelve cuántos.
+
+    Es lo que hace utilizable la importación del archivo oficial: hasta ahora
+    los valores de un código ausente del catálogo SÍ se guardaban en
+    `indices_inei_valores` —esa tabla no tiene clave foránea— pero la lista se
+    arma desde `indices_inei`, así que quedaban invisibles e inservibles.
+    """
+    nombres = nombres or {}
+    own = conn is None
+    if own:
+        conn = get_db()
+    nuevos = 0
+    try:
+        for c in codigos:
+            try:
+                cod = _norm_codigo(c)
+            except ValueError:
+                continue
+            ya = conn.execute(
+                "SELECT 1 FROM indices_inei WHERE codigo=?", (cod,)
+            ).fetchone()
+            if ya:
+                continue
+            nombre = str(nombres.get(cod) or '').strip() or f"Índice {cod}"
+            conn.execute(
+                "INSERT INTO indices_inei (codigo, nombre, activo) VALUES (?,?,1)",
+                (cod, nombre)
+            )
+            nuevos += 1
+        conn.commit()
+    finally:
+        if own:
+            conn.close()
+    return nuevos
+
+
+def codigos_huerfanos(conn=None) -> list[dict]:
+    """Códigos que la app usa pero el catálogo no define.
+
+    Los hay desde la propia biblioteca semilla (99, 75, 63, 76, 58…). El '00'
+    se excluye: no es un índice del INEI sino el centinela que usa
+    `core.parte_diario` para los insumos sin clasificar.
+    """
+    own = conn is None
+    if own:
+        conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT codigo, SUM(n_recursos) AS n_recursos, SUM(n_valores) AS n_valores
+                 FROM (
+                   SELECT indice_inei AS codigo, COUNT(*) AS n_recursos, 0 AS n_valores
+                     FROM recursos
+                    WHERE COALESCE(indice_inei,'') NOT IN ('', '00')
+                      AND indice_inei NOT IN (SELECT codigo FROM indices_inei)
+                    GROUP BY indice_inei
+                   UNION ALL
+                   SELECT codigo, 0, COUNT(*)
+                     FROM indices_inei_valores
+                    WHERE codigo NOT IN ('00')
+                      AND codigo NOT IN (SELECT codigo FROM indices_inei)
+                    GROUP BY codigo
+                 )
+                GROUP BY codigo ORDER BY codigo"""
+        ).fetchall()
+    finally:
+        if own:
+            conn.close()
+    return [dict(r) for r in rows]
+
+
 # ── Listados ─────────────────────────────────────────────────────────────────
 def listar_indices(conn=None) -> list[dict]:
-    """Devuelve los 80 códigos con el último valor cargado (de cualquier área)."""
+    """Devuelve el catálogo con el último valor cargado (de cualquier área)."""
     own = conn is None
     if own:
         conn = get_db()
@@ -233,6 +467,16 @@ def guardar_valores(rows: list[dict]) -> tuple[int, int]:
     ok = 0
     err = 0
     try:
+        # Alta automática de los códigos que el catálogo aún no tenga: esta
+        # tabla no tiene clave foránea, así que sin esto los valores entraban
+        # pero el índice quedaba invisible en la lista (que sale de
+        # `indices_inei`). Es el caso de los códigos > 80 del archivo oficial.
+        asegurar_codigos(
+            {str(r.get('codigo') or '').strip() for r in rows},
+            {str(r.get('codigo') or '').strip().zfill(2): r.get('nombre')
+             for r in rows if r.get('nombre')},
+            conn,
+        )
         for r in rows:
             try:
                 codigo = str(r.get('codigo') or '').strip().zfill(2)[:2]
@@ -309,6 +553,25 @@ def _parse_mes(texto) -> int | None:
     except Exception:
         pass
     return None
+
+
+def _nombre_en_fila(row, cod_str: str, codigo_col: int, mes_cols: dict) -> str:
+    """Saca la descripción del índice de una fila del archivo del INEI.
+
+    Dos formas, en orden: pegada al código en la misma celda ('85 - CABLE…')
+    o en alguna columna de texto que no sea de meses.
+    """
+    import re
+    resto = re.sub(r'^\d{1,2}\s*[-–.:)]*\s*', '', cod_str).strip()
+    if len(resto) >= 3 and not resto.replace('.', '').replace(',', '').isdigit():
+        return resto[:120]
+    for j, val in enumerate(row):
+        if j == codigo_col or j in mes_cols or val is None:
+            continue
+        s = str(val).strip()
+        if len(s) >= 3 and not s.replace('.', '').replace(',', '').isdigit():
+            return s[:120]
+    return ''
 
 
 def importar_excel_inei(filepath: str, area: str = '01',
@@ -391,6 +654,7 @@ def importar_excel_inei(filepath: str, area: str = '01',
     rows_out: list[dict] = []
     ignorados = 0
     codigos_encontrados: set[str] = set()
+    nombres_encontrados: dict[str, str] = {}
     for row in data[header_row_idx + 1:]:
         if not row:
             continue
@@ -407,6 +671,12 @@ def importar_excel_inei(filepath: str, area: str = '01',
         codigo = m.group(1).zfill(2)
         if not (1 <= int(codigo) <= 99):
             continue
+
+        # Nombre del índice, para poder dar de alta los que el catálogo no
+        # tenga con su descripción real y no con un «Índice 85» pelado.
+        nombre = _nombre_en_fila(row, cod_str, codigo_col, mes_cols)
+        if nombre:
+            nombres_encontrados[codigo] = nombre
 
         for col_idx, mes in mes_cols.items():
             if col_idx >= len(row):
@@ -428,6 +698,7 @@ def importar_excel_inei(filepath: str, area: str = '01',
             rows_out.append({
                 'codigo': codigo, 'anio': anio_detectado,
                 'mes': mes, 'area': area, 'valor': f,
+                'nombre': nombres_encontrados.get(codigo, ''),
             })
             codigos_encontrados.add(codigo)
 
@@ -438,6 +709,7 @@ def importar_excel_inei(filepath: str, area: str = '01',
         'ignorados': ignorados,
         'anio_detectado': anio_detectado,
         'codigos_encontrados': codigos_encontrados,
+        'nombres_encontrados': nombres_encontrados,
     }
 
 
