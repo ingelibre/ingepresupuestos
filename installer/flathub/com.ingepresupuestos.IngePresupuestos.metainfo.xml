@@ -85,6 +85,11 @@
   </branding>
 
   <releases>
+    <release version="3.0.4" date="2026-08-29">
+      <description>
+        <p>Los índices unificados del INEI ahora se editan: alta, renombrado y baja, con alta automática de los que traiga el archivo oficial. La fórmula polinómica se arma agrupando los insumos por su índice unificado en vez de por tres monomios fijos, y la composición de cada monomio se ve, se edita y sale en los reportes. Ventana nueva de diccionario insumo-índice con propuestas revisables. Además: los insumos por porcentaje %MT y %EQ se calculan sobre materiales y equipos (antes caían sobre la mano de obra), y la importación de Delphin ya no duplica los insumos de las sub-partidas.</p>
+      </description>
+    </release>
     <release version="3.0.2" date="2026-08-17">
       <description>
         <p>Fichas técnicas PDF adjuntas en requerimientos y especificaciones (la IA las incorpora y el reporte las anexa), nuevos proveedores de IA DeepSeek y Qwen con auto-reparación de modelos retirados, impresión de partidas seleccionadas corregida y 14 errores resueltos.</p>
