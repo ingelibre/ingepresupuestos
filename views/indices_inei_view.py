@@ -1151,25 +1151,52 @@ class IndicesINEIView(QWidget):
             )
             return
 
-        anio = res.get('anio_detectado')
         codigos = sorted(res.get('codigos_encontrados') or set())
         cod_preview = ", ".join(codigos[:8])
         if len(codigos) > 8:
             cod_preview += f"… (+{len(codigos) - 8} más)"
 
+        # Qué períodos trae el archivo, para poder contrastarlo con el INEI sin
+        # tener que abrirlo: es la pregunta que uno se hace al sincronizar.
+        periodos = sorted({(r.get('anio'), r.get('mes')) for r in res['rows']
+                           if r.get('anio') and r.get('mes')})
+        if periodos:
+            rango = (f"{periodos[0][0]}-{periodos[0][1]:02d}"
+                     if len(periodos) == 1 else
+                     f"{periodos[0][0]}-{periodos[0][1]:02d} a "
+                     f"{periodos[-1][0]}-{periodos[-1][1]:02d}"
+                     f"  ({len(periodos)} meses)")
+        else:
+            rango = "(no detectados)"
+
+        areas = sorted({r.get('area') for r in res['rows'] if r.get('area')})
+        destino = (f"{len(areas)} áreas del archivo" if len(areas) > 1
+                   else f"área {self._area_actual}")
+
         msg = (f"<b>Fuente:</b> {fuente}<br>"
-               f"<b>Año detectado:</b> {anio or '(no detectado)'}<br>"
-               f"<b>Área destino:</b> {self._area_actual}<br>"
+               f"<b>Períodos en el archivo:</b> {rango}<br>"
+               f"<b>Base:</b> {serie_nombre(res.get('serie', ''))}<br>"
+               f"<b>Destino:</b> {destino}<br>"
                f"<b>Índices encontrados:</b> {len(codigos)} ({cod_preview})<br>"
                f"<b>Valores a importar:</b> {len(res['rows'])}<br>"
-               f"<b>Ignorados:</b> {res.get('ignorados', 0)}<br><br>"
-               f"¿Importar? (los valores existentes se reemplazarán.)")
+               f"<b>Ignorados:</b> {res.get('ignorados', 0)}<br>")
+        if res.get('url'):
+            msg += (f"<b>Archivo:</b> <a href='{res['url']}'>"
+                    f"{res['url'].rsplit('/', 1)[-1]}</a><br>")
+        msg += "<br>¿Importar? (los valores existentes se reemplazarán.)"
 
-        ok = QMessageBox.question(
-            self, "Confirmar importación", msg,
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if ok != QMessageBox.Yes:
+        caja = QMessageBox(self)
+        caja.setIcon(QMessageBox.Question)
+        caja.setWindowTitle("Confirmar importación")
+        caja.setTextFormat(Qt.RichText)
+        caja.setText(msg)
+        # El enlace abre el archivo en el navegador, para verificar la fuente.
+        lbl = caja.findChild(QLabel, "qt_msgbox_label")
+        if lbl is not None:
+            lbl.setOpenExternalLinks(True)
+        caja.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        caja.setDefaultButton(QMessageBox.Yes)
+        if caja.exec() != QMessageBox.Yes:
             return
 
         ok_n, err_n = guardar_valores(res['rows'])
