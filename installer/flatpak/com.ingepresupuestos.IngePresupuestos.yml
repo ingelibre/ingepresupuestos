@@ -48,10 +48,21 @@ modules:
         url: https://kerberos.org/dist/krb5/1.21/krb5-1.21.3.tar.gz
         sha256: b7a4cd5ead67fb08b980b21abd150ff7217e85ea320c9ed0c6dadd304840ad35
         # kerberos.org NO responde desde los runners de GitHub (timeout a los
-        # 60 s, 2026-08-04) aunque sí desde una conexión normal. El espejo de
-        # MIT sirve el MISMO archivo (sha256 verificado) y es el sitio oficial
-        # de krb5. Sin esto, la publicación del Flatpak falla en CI.
+        # 60 s; visto el 2026-08-04 y otra vez el 2026-08-30) aunque sí desde
+        # una conexión normal.
+        #
+        # El espejo de MIT tampoco basta: el 2026-08-30 sirvió al runner un
+        # archivo DISTINTO —8922k con sha256 6e26ce74…, cuando desde una
+        # conexión doméstica el mismo URL da los 8.8M correctos— y el build
+        # murió por checksum. Sea un CDN que responde distinto por región o un
+        # re-empaquetado, no se puede depender de él solo.
+        #
+        # El pool de fuentes de Debian guarda el tarball PRISTINO de upstream
+        # (`.orig.tar.gz`) y su sha256 se verificó idéntico al esperado. Va
+        # primero por eso: es un CDN global y estable, y el checksum sigue
+        # siendo el canónico de krb5 — no se relajó nada para que pasara.
         mirror-urls:
+          - https://deb.debian.org/debian/pool/main/k/krb5/krb5_1.21.3.orig.tar.gz
           - https://web.mit.edu/kerberos/dist/krb5/1.21/krb5-1.21.3.tar.gz
 
   - name: ingepresupuestos
