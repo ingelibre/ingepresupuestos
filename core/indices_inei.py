@@ -63,6 +63,38 @@ def _oficial() -> dict:
     return _OFICIAL
 
 
+_VALORES_OFICIALES = None
+
+
+def _valores_oficiales() -> dict:
+    """El histórico de valores empaquetado, `indices_inei_valores.json.gz`.
+
+    Lo genera `scripts/generar_indices_valores.py` antes de cada release desde
+    las fuentes del INEI. Existe porque los índices cambian todos los meses y
+    un release sale cada tanto: sin él, **una instalación nueva arranca sin la
+    base vigente** —el Excel del INEI lleva meses congelado y gob.pe solo deja
+    el PDF del mes en curso— y no hay reajuste que calcular.
+
+    Formato compacto: por serie, `areas` y `datos[período][código] = [v, …]`
+    con una posición por área (`null` donde el índice no existe). Guardar un
+    dict por valor multiplicaba por diez el tamaño; así los 66 000 valores
+    ocupan 72 KB.
+    """
+    global _VALORES_OFICIALES
+    if _VALORES_OFICIALES is None:
+        try:
+            import gzip
+            from core.config import BASE_DIR
+            ruta = (Path(BASE_DIR) / "resources"
+                    / "indices_inei_valores.json.gz")
+            with gzip.open(ruta, 'rt', encoding='utf-8') as f:
+                _VALORES_OFICIALES = json.load(f)
+        except Exception:
+            # Sin el recurso la app sigue viva: se sincroniza y ya.
+            _VALORES_OFICIALES = {'series': {}}
+    return _VALORES_OFICIALES
+
+
 def series_disponibles() -> list[tuple[str, str]]:
     """[(clave, nombre)] de las series, la más reciente primero."""
     s = _oficial().get('series') or {}
@@ -182,6 +214,9 @@ AREAS_INEI: list[tuple[str, str]] = [
 # La semilla corre UNA vez por serie y por versión. Subir este número al
 # corregir o ampliar los datos oficiales: solo entonces se vuelve a sembrar.
 SEED_VERSION = 2
+# Sube al regenerar `indices_inei_valores.json.gz` con más meses: es lo
+# que hace que una instalación ya existente reciba lo nuevo.
+VALORES_VERSION = 1
 
 
 def _seed_de(serie: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -241,10 +276,52 @@ def asegurar_seed(conn=None, serie: str | None = None) -> None:
                 "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,?)",
                 (clave, str(SEED_VERSION))
             )
+        for s_ in series:
+            _sembrar_valores(conn, s_)
         conn.commit()
     finally:
         if own:
             conn.close()
+
+
+def _sembrar_valores(conn, serie: str) -> int:
+    """Vuelca el histórico empaquetado de una serie. Una vez por versión.
+
+    **`INSERT OR IGNORE`, nunca REPLACE**: si el usuario ya sincronizó o
+    corrigió un valor a mano, el suyo manda. Esto solo rellena lo que falta.
+
+    Con su propio flag, aparte del catálogo: una instalación que ya venía
+    funcionando tiene `seed_inei_<serie>` al día y aun así necesita recibir los
+    valores la primera vez que actualiza a una versión que los trae.
+    """
+    clave = f"seed_inei_valores_{serie}"
+    row = conn.execute("SELECT valor FROM configuracion WHERE clave=?",
+                       (clave,)).fetchone()
+    if int((row['valor'] if row else 0) or 0) >= VALORES_VERSION:
+        return 0
+    bloque = (_valores_oficiales().get('series') or {}).get(serie) or {}
+    areas = bloque.get('areas') or []
+    n = 0
+    for periodo, codigos in (bloque.get('datos') or {}).items():
+        try:
+            anio, mes = (int(x) for x in periodo.split('-'))
+        except ValueError:
+            continue
+        for codigo, valores in codigos.items():
+            for i, valor in enumerate(valores):
+                if valor is None or i >= len(areas):
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO indices_inei_valores "
+                    "(codigo, serie, anio, mes, area, valor) VALUES (?,?,?,?,?,?)",
+                    (codigo, serie, anio, mes, areas[i], float(valor))
+                )
+                n += 1
+    conn.execute(
+        "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,?)",
+        (clave, str(VALORES_VERSION))
+    )
+    return n
 
 
 # ── Catálogo: alta, edición y baja ───────────────────────────────────────────
@@ -668,7 +745,10 @@ MESES_MAP = {
     'junio': 6, 'jun': 6, 'june': 6,
     'julio': 7, 'jul': 7, 'july': 7,
     'agosto': 8, 'ago': 8, 'aug': 8, 'august': 8,
-    'septiembre': 9, 'setiembre': 9, 'sep': 9, 'sept': 9, 'september': 9,
+    # 'set' es la abreviatura que usa el INEI en sus hojas («Set-2013»),
+    # y sin ella se perdía SEPTIEMBRE de todos los años del acumulativo.
+    'septiembre': 9, 'setiembre': 9, 'sep': 9, 'sept': 9, 'set': 9,
+    'september': 9,
     'octubre': 10, 'oct': 10, 'october': 10,
     'noviembre': 11, 'nov': 11, 'november': 11,
     'diciembre': 12, 'dic': 12, 'dec': 12, 'december': 12,

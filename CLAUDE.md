@@ -217,6 +217,44 @@ en `resources/indices_inei_oficial.json` (empaquetado en el `.spec`).
   pueden automatizar**: se cargan con «Importar ▾ → Pegar datos». Por eso
   `_meses_faltantes` los enumera en el diálogo de confirmación: si falta el mes
   de la valorización, no hay K que calcular.
+- **El histórico de índices VIAJA con el programa** (`resources/
+  indices_inei_valores.json.gz`, 72 KB para 66 000 valores). Sin él una
+  instalación nueva arrancaba sin la base vigente —el Excel del INEI lleva
+  meses congelado y gob.pe solo deja el PDF del mes en curso—, así que quien
+  instalara en noviembre tendría enero-marzo y nada más: sin índices no hay K
+  que calcular. Lo regenera **`scripts/generar_indices_valores.py`**, que hay
+  que correr A MANO antes de cortar un release; `_sembrar_valores` lo vuelca en
+  la primera arrancada con **`INSERT OR IGNORE`, nunca REPLACE** (lo que el
+  usuario corrigió a mano manda) bajo su propio flag
+  `seed_inei_valores_<serie>` = `VALORES_VERSION`. El flag es aparte del
+  catálogo a propósito: una instalación que ya venía funcionando tiene
+  `seed_inei_<serie>` al día y aun así debe recibir los valores. **Al
+  regenerar el archivo con más meses, subir `VALORES_VERSION`** o las
+  instalaciones existentes no reciben lo nuevo.
+- **El acumulativo de la base 1992 (`06_..._dic25.xlsx`) es el histórico
+  entero**: 2013-01 a 2025-12, 68 índices, 6 áreas. Le faltan **oct-2014 y
+  abr-2015**, que no están en el archivo del INEI y sí en el seed.
+- **`'set'` es septiembre.** El INEI rotula sus hojas «Set-2013» —la grafía
+  peruana— y `MESES_MAP` tenía `sep`/`sept`/`setiembre` pero no `set`, así que
+  **se perdía septiembre de todos los años**: 5 242 valores. `_MESES_CORTOS_INEI`
+  sí la usaba para armar el nombre del archivo, o sea que el módulo ya sabía
+  cómo escribe el INEI y el mapa del lector no.
+- **La hoja «Indices Modif Ene-Mar 2018» rectifica 6 índices** (04, 05, 17, 38,
+  40, 43) de enero a marzo de 2018, y **las hojas mensuales del propio libro
+  nunca la incorporaron**: siguen con los valores superados. Corresponde al
+  **área 02** (18 de 18 coincidencias con su columna «ANTERIOR») y el generador
+  la aplica. Si aparece otra hoja de correcciones, mirar si pasa lo mismo.
+- **El seed ya NO duplica lo que publica el INEI.** Traía 29 019 valores de
+  procedencia incierta: 25 051 coincidían, **2 212 contradecían al INEI**
+  —incluidos marcadores como 100.00, 500.00 y 1000.00 en 2024— y como la
+  siembra es INSERT OR IGNORE, los del seed ganaban y la basura viajaba en cada
+  instalación. Ahora la propiedad está repartida sin solapamiento: el archivo
+  oficial manda de 2013-01 en adelante y **el seed conserva solo lo que el INEI
+  no publica** — el año 2012 y los dos meses que le faltan (1 612 valores). Se
+  quitaron también los pares (05, área 05) y (38, área 05), que el INEI marca
+  «(*) sin índice» en los 154 meses. **Las instalaciones ya existentes
+  conservan su basura**: la siembra no pisa nada; se corrige sincronizando, que
+  sí hace REPLACE.
 - **NO volver a hardcodear la lista de índices.** Estuvo duplicada en
   `core/indices_inei.py` y `views/recursos_view.py`; la verdad es la tabla y se
   lee con `catalogo(serie=…)`. La constante queda solo como respaldo.

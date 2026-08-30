@@ -281,7 +281,18 @@ def test_k_sin_composicion_usa_el_indice_del_monomio():
 def test_un_componente_sin_datos_no_anula_el_monomio():
     """Se renormaliza sobre los que sí tienen valor, y se avisa cuántos faltan."""
     F, pid = _preparar()
+    import core.database as d
     import core.indices_inei as I
+    # «Sin datos» tiene que ser cierto a propósito, no por casualidad: desde
+    # que el histórico del INEI viaja con el programa, casi todo código tiene
+    # valor en casi todo mes.
+    conn = d.get_db()
+    try:
+        conn.execute("DELETE FROM indices_inei_valores WHERE codigo='77' "
+                     "AND anio IN (2020, 2021) AND mes=1")
+        conn.commit()
+    finally:
+        conn.close()
     I.guardar_valor('21', 2020, 1, 100.0)
     I.guardar_valor('21', 2021, 1, 200.0)
     F.guardar_monomios(pid, [{

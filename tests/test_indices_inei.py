@@ -521,6 +521,103 @@ def test_el_rango_resume_los_periodos_importados():
     assert r([]) == "sin períodos"
 
 
+# ── El histórico viaja con el programa ───────────────────────────────────────
+# Los índices cambian todos los meses y un release sale cada tanto, así que sin
+# esto una instalación nueva arrancaba sin la base vigente: el Excel del INEI
+# lleva meses congelado y gob.pe solo deja el PDF del mes en curso.
+
+def test_set_es_septiembre():
+    """El INEI rotula sus hojas «Set-2013»: sin esa grafía se perdía el mes."""
+    from core.indices_inei import _parse_mes, _parse_hoja_periodo
+    assert _parse_mes('Set') == 9
+    assert _parse_mes('set') == 9
+    assert _parse_mes('Setiembre') == 9
+    assert _parse_mes('Sep') == 9
+    assert _parse_hoja_periodo('Set-2013') == (2013, 9)
+    assert _parse_hoja_periodo('Set_2025') == (2025, 9)
+
+
+def test_una_instalacion_nueva_trae_las_dos_bases():
+    """Sin datos no hay reajuste que calcular: tienen que venir en el paquete."""
+    _preparar()
+    import core.database as d
+    conn = d.get_db()
+    try:
+        for serie, desde, areas in (('1992', (2013, 1), 6), ('2025', (2026, 1), 13)):
+            n, na = conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT area) FROM indices_inei_valores "
+                "WHERE serie=?", (serie,)).fetchone()
+            assert n > 3000, f"serie {serie}: solo {n} valores"
+            assert na == areas, f"serie {serie}: {na} áreas, se esperaban {areas}"
+            hay = conn.execute(
+                "SELECT 1 FROM indices_inei_valores WHERE serie=? AND anio=? "
+                "AND mes=? LIMIT 1", (serie, *desde)).fetchone()
+            assert hay, f"serie {serie}: falta {desde}"
+        # La base 1992 no puede tener un solo mes vacío entre 2013 y 2025:
+        # con un hueco, una valorización de ese mes se queda sin K.
+        faltan = [(y, m) for y in range(2013, 2026) for m in range(1, 13)
+                  if not conn.execute(
+                      "SELECT 1 FROM indices_inei_valores WHERE serie='1992' "
+                      "AND anio=? AND mes=? LIMIT 1", (y, m)).fetchone()]
+        assert not faltan, f"meses sin datos: {faltan}"
+    finally:
+        conn.close()
+
+
+def test_la_siembra_no_pisa_lo_que_el_usuario_ya_tiene():
+    """INSERT OR IGNORE, nunca REPLACE: una corrección a mano manda."""
+    _preparar()
+    import core.database as d
+    import core.indices_inei as I
+    conn = d.get_db()
+    try:
+        conn.execute("UPDATE indices_inei_valores SET valor=1.23 WHERE serie='1992' "
+                     "AND anio=2020 AND mes=6 AND codigo='01' AND area='01'")
+        conn.execute("DELETE FROM configuracion WHERE clave='seed_inei_valores_1992'")
+        conn.commit()
+        I.asegurar_seed(conn, '1992')
+        v = conn.execute(
+            "SELECT valor FROM indices_inei_valores WHERE serie='1992' AND anio=2020 "
+            "AND mes=6 AND codigo='01' AND area='01'").fetchone()['valor']
+        assert v == 1.23, f"la siembra pisó el valor del usuario: {v}"
+    finally:
+        conn.close()
+
+
+def test_la_correccion_de_2018_viaja_aplicada():
+    """El INEI rectificó 6 índices de ene-mar 2018 en una hoja aparte que sus
+    propias hojas mensuales nunca incorporaron. Corresponde al área 02."""
+    _preparar()
+    import core.database as d
+    conn = d.get_db()
+    try:
+        for codigo, esperado in (('43', 662.98), ('17', 665.25), ('04', 935.68)):
+            v = conn.execute(
+                "SELECT valor FROM indices_inei_valores WHERE serie='1992' "
+                "AND anio=2018 AND mes=1 AND area='02' AND codigo=?",
+                (codigo,)).fetchone()
+            assert v and abs(v['valor'] - esperado) < 0.005, \
+                f"código {codigo}: {v['valor'] if v else None}, se esperaba {esperado}"
+    finally:
+        conn.close()
+
+
+def test_el_historico_empaquetado_esta_donde_lo_busca_el_spec():
+    """Si el recurso no viaja, la app degrada en silencio a no tener nada."""
+    import gzip
+    import json
+    from pathlib import Path
+    from core.config import BASE_DIR
+    ruta = Path(BASE_DIR) / "resources" / "indices_inei_valores.json.gz"
+    assert ruta.exists(), f"no está {ruta}"
+    with gzip.open(ruta, 'rt', encoding='utf-8') as f:
+        doc = json.load(f)
+    assert doc.get('_fuente') and doc.get('generado')
+    assert set(doc['series']) == {'1992', '2025'}
+    assert len(doc['series']['1992']['areas']) == 6
+    assert len(doc['series']['2025']['areas']) == 13
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

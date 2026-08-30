@@ -52,6 +52,10 @@ datas = [
     # dos bases, sus áreas geográficas y el Diccionario de Elementos de la
     # Construcción para fórmulas polinómicas.
     ('resources/indices_inei_oficial.json',  'resources'),
+    # El histórico de valores del INEI: sin él una instalación nueva
+    # arranca sin la base vigente. Lo regenera
+    # scripts/generar_indices_valores.py antes de cada release.
+    ('resources/indices_inei_valores.json.gz', 'resources'),
     # El decreto que rige la fórmula polinómica, para poder consultarlo
     # sin internet desde la propia vista.
     ('resources/DS-011-79-VC.pdf',           'resources'),
