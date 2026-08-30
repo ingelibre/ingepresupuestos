@@ -489,6 +489,96 @@ def test_importador_prs_subpresupuestos_dentro_del_proyecto():
     conn.close()
 
 
+
+# ── Importador Delphin — sub-partidas aplanadas, sin doble conteo ────────────
+
+def test_importador_delphin_subpartidas_no_duplican():
+    """Una sub-partida de Delphin entra como UNA línea SC con su costo, y su
+    desglose interno NO se suma además al ACU del padre.
+
+    Delphin anida la sub-partida colgando subtotales de una composición padre
+    (`subtotal_*.id_composicionpadre`, que en la raíz viene como cadena VACÍA,
+    no NULL). El importador los traía todos, así que la partida se quedaba con
+    la línea de la sub-partida —que ya trae su costo completo— y encima con la
+    mano de obra, materiales y equipo internos de esa sub-partida.
+
+    El síntoma que reportó el usuario: el costo unitario se ve bien al importar
+    porque se guarda el de Delphin, pero al editar cualquier dato
+    `_recalcular_pu` recalcula desde los ítems duplicados y salta.
+
+    Contrasta los 194 ACU de la biblioteca contra `analisis_costo.costo_unitario`
+    del propio Delphin. Antes del arreglo discrepaban 13 (todas «Muro de
+    ladrillo…», las que llevan sub-partida).
+    """
+    import shutil as _sh, sqlite3 as _sq, tempfile as _tf
+    fuente = os.path.join(os.path.dirname(__file__), '..', '..',
+                          'datos', 'SQLDelphin_basica.sqlite')
+    if not os.path.isfile(fuente):
+        print("      (saltado: sin la base Delphin de prueba)")
+        return
+
+    # BD limpia: el importador escribe, no debe tocar la de los otros tests
+    fd, dbtmp = _tf.mkstemp(suffix='_delphin.db'); os.close(fd)
+    _sh.copy(SEED, dbtmp)
+    db_previa = d.DB_PATH
+    d.DB_PATH = dbtmp
+    try:
+        import core.config as _cfg
+        cfg_previa = _cfg.DB_PATH
+        _cfg.DB_PATH = dbtmp
+        d.init_db()
+
+        conn = d.get_db()
+        previos = {r[0] for r in conn.execute("SELECT id FROM biblioteca_cu")}
+        conn.close()
+
+        from core.delphin_sqlite_importer import import_biblioteca_delphin_sqlite
+        res = import_biblioteca_delphin_sqlite(fuente)
+        assert res.get('ok'), f"la importación falló: {res}"
+
+        # Costo unitario de referencia: el que trae el propio Delphin
+        src = _sq.connect(fuente); src.row_factory = _sq.Row
+        ref = {str(r['descripcion_costo']).strip().upper(): r['costo_unitario']
+               for r in src.execute(
+                   "SELECT descripcion_costo, costo_unitario FROM analisis_costo")
+               if r['descripcion_costo']}
+        src.close()
+
+        conn = d.get_db()
+        nuevos = [r for r in conn.execute(
+            "SELECT id, descripcion FROM biblioteca_cu") if r['id'] not in previos]
+        assert len(nuevos) >= 190, f"se importaron solo {len(nuevos)} ACU"
+
+        malos = []
+        con_sub = 0
+        for f in nuevos:
+            clave = (f['descripcion'] or '').strip().upper()
+            if clave not in ref:
+                continue
+            items = [dict(x) for x in conn.execute(
+                """SELECT i.cantidad, COALESCE(i.precio, r.precio, 0) AS precio,
+                          r.unidad, r.tipo
+                   FROM biblioteca_acu_items i
+                   JOIN recursos r ON r.id = i.recurso_id
+                   WHERE i.cu_id=?""", (f['id'],))]
+            if any(x['tipo'] == 'SC' for x in items):
+                con_sub += 1
+            calc = d._pu_desde_items(items)
+            if abs(calc - (ref[clave] or 0)) > 0.02:
+                malos.append(f"{f['descripcion'][:44]}: app={calc:.2f} delphin={ref[clave]:.2f}")
+        conn.close()
+
+        assert con_sub > 0, "la biblioteca de prueba ya no trae sub-partidas"
+        assert not malos, ("ACU que no cuadran con Delphin (doble conteo de "
+                           f"sub-partida): {malos[:5]}")
+    finally:
+        d.DB_PATH = db_previa
+        import core.config as _cfg
+        _cfg.DB_PATH = cfg_previa
+        if os.path.exists(dbtmp):
+            os.unlink(dbtmp)
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

@@ -155,6 +155,13 @@ def import_delphin_sqlite(filepath: str,
               TC03 EQUIPO         → EQ
               TC04 SUB-CONTRATOS  → SC
               TC05 SUB-PARTIDAS   → SC (también servicios)
+
+            La sub-partida se APLANA a una sola línea SC con su costo unitario,
+            igual que hace el importador de PowerCost: el vínculo con su ACU no
+            se preserva. Su desglose interno queda fuera por el filtro de
+            subtotal raíz (ver las dos consultas de composiciones). Preservar el
+            vínculo real es «Partida como sub-análisis», el trabajo futuro
+            descrito en CLAUDE.md.
             """
             d = tipos_raw.get(id_tipocosto, '')
             if 'MANO' in d or 'OBRA' in d:
@@ -277,9 +284,15 @@ def import_delphin_sqlite(filepath: str,
         for cuid, row in cus_by_id.items():
             if cuid in padres_set:
                 continue   # es título, no tiene ACU propio
-            # Subtotales y composiciones de ESTE costo_unitario
+            # Subtotales y composiciones de ESTE costo_unitario.
+            # SOLO los subtotales RAÍZ: Delphin anida las sub-partidas colgando
+            # subtotales propios de una composición padre. Sin este filtro, la
+            # partida se lleva la línea de la sub-partida (que ya trae su costo
+            # completo) Y ADEMÁS el desglose interno de esa sub-partida, o sea
+            # todo contado dos veces. Ojo: la raíz trae cadena VACÍA, no NULL.
             subs = src.execute(
-                "SELECT * FROM subtotal_costounitario WHERE id_costounitario=?",
+                "SELECT * FROM subtotal_costounitario WHERE id_costounitario=? "
+                "AND COALESCE(id_composicionpadre, '') = ''",
                 (cuid,)
             ).fetchall()
             if not subs:
@@ -532,11 +545,15 @@ def import_biblioteca_delphin_sqlite(filepath: str,
             "SELECT * FROM analisis_costo ORDER BY descripcion_costo"
         ).fetchall()
 
-        # Pre-fetch de TODAS las composiciones agrupadas por id_analisiscosto
+        # Pre-fetch de las composiciones agrupadas por id_analisiscosto.
+        # Mismo filtro de subtotal RAÍZ que en la importación de proyecto: sin
+        # él, los insumos internos de una sub-partida se suman al ACU del padre
+        # además de la línea de la sub-partida (ver comentario allá).
         comps_por_ac: dict[str, list] = {}
         for cmp_ in src.execute(
             "SELECT c.*, s.id_analisiscosto FROM composicion_analisiscosto c "
             "JOIN subtotal_analisiscosto s ON s.id_subtotal=c.id_subtotal "
+            "WHERE COALESCE(s.id_composicionpadre, '') = '' "
             "ORDER BY c.posicion_composicion"
         ).fetchall():
             comps_por_ac.setdefault(cmp_['id_analisiscosto'], []).append(cmp_)
