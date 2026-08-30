@@ -426,7 +426,7 @@ class AgregarPartidaDialog(QDialog):
         comp_u.popup().setStyleSheet(
             f"QListView {{ border:1px solid {SILVER_300}; border-radius:6px;"
             f" font-size:13px; padding:4px; background:white; }}"
-            f"QListView::item:selected {{ background:#FEF5EB; color:{BLUE_700}; }}"
+            f"QListView::item:selected {{ background:#FDE8D0; color:{BLUE_700}; }}"
         )
         self.cmb_m_unidad.setCompleter(comp_u)
 
@@ -459,7 +459,7 @@ class AgregarPartidaDialog(QDialog):
         comp_g.popup().setStyleSheet(
             f"QListView {{ border:1px solid {SILVER_300}; border-radius:6px;"
             f" font-size:13px; padding:4px; background:white; color:{SLATE_700}; }}"
-            f"QListView::item:selected {{ background:#FEF5EB; color:{BLUE_700}; }}"
+            f"QListView::item:selected {{ background:#FDE8D0; color:{BLUE_700}; }}"
         )
         self.cmb_m_grupo.setCompleter(comp_g)
         col_g.addWidget(self.cmb_m_grupo)

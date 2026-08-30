@@ -150,10 +150,15 @@ QListView::item {
     padding: 5px 12px;
     border-radius: 4px;
 }
-QListView::item:hover,
-QListView::item:selected {
+/* Seleccionado y hover NO pueden pintarse igual: al pasar el mouse por otra
+   fila, la seleccionada dejaba de distinguirse. #FEF5EB es ORANGE_50, que el
+   tema define como «fondo hover muy sutil»; lo seleccionado usa ORANGE_100. */
+QListView::item:hover:!selected {
     background: #FEF5EB;
-    color: #C0621A;
+}
+QListView::item:selected {
+    background: #FDE8D0;
+    color: #7A3800;
 }
 
 /* ── QPushButton ──────────────────────────────────────────────────────────── */
@@ -283,8 +288,8 @@ QTreeWidget::item {
     border-radius: 4px;
 }
 QTreeWidget::item:selected {
-    background: #FEF5EB;
-    color: #C0621A;
+    background: #FDE8D0;
+    color: #7A3800;
 }
 QTreeWidget::item:hover:!selected {
     background: #FEF5EB;
@@ -316,8 +321,8 @@ QTableWidget::item {
     border: none;
 }
 QTableWidget::item:selected {
-    background: #FEF5EB;
-    color: #C0621A;
+    background: #FDE8D0;
+    color: #7A3800;
 }
 QTableWidget::item:hover:!selected {
     background: #FEF5EB;

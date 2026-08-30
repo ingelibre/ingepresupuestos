@@ -156,7 +156,7 @@ class AgregarTituloDialog(QDialog):
             f"QListWidget {{ border:1px solid {SILVER_300}; border-radius:8px;"
             f" font-size:13px; color:{SLATE_700}; background:white; outline:none; }}"
             f"QListWidget::item {{ padding:8px 12px; border-bottom:1px solid #F0F0F0; }}"
-            f"QListWidget::item:selected {{ background:#FEF5EB; color:{BLUE_700}; }}"
+            f"QListWidget::item:selected {{ background:#FDE8D0; color:{BLUE_700}; }}"
             f"QListWidget::item:hover {{ background:{SILVER_100}; }}"
         )
         self.lst_titulos.itemDoubleClicked.connect(self._agregar_seleccionado)

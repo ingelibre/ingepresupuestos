@@ -136,7 +136,7 @@ class PartidaFormDialog(QDialog):
             "QListView { background:white; border:1px solid #D4D4D4;"
             " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
             "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FEF5EB; color:#C0621A; }"
+            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
         )
         self.inp_unidad.setCompleter(_comp)
 

@@ -431,7 +431,7 @@ class _EditarRecursoDialog(QDialog):
             "QListView { background:white; border:1px solid #D4D4D4;"
             " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
             "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FEF5EB; color:#C0621A; }"
+            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
         )
         self._inp_und.setCompleter(comp)
         form.addRow("Unidad:", self._inp_und)
@@ -2847,7 +2847,7 @@ class ProyectoView(QWidget):
         self.tbl_met.setStyleSheet(f"""
             QTableWidget {{ border:none; font-size:11px; gridline-color:#E8EAED; }}
             QTableWidget::item {{ padding:2px 4px; color:#273445; }}
-            QTableWidget::item:selected {{ background:#FEF5EB; color:#273445; }}
+            QTableWidget::item:selected {{ background:#FDE8D0; color:#273445; }}
             QHeaderView::section {{
                 background:{SLATE_500}; color:white; font-size:10px;
                 font-weight:700; padding:4px; border:none;
@@ -2907,7 +2907,7 @@ class ProyectoView(QWidget):
         self.tbl_acero.setStyleSheet(f"""
             QTableWidget {{ border:none; font-size:11px; gridline-color:#E8EAED; }}
             QTableWidget::item {{ padding:2px 4px; color:#273445; }}
-            QTableWidget::item:selected {{ background:#FEF5EB; color:#273445; }}
+            QTableWidget::item:selected {{ background:#FDE8D0; color:#273445; }}
             QHeaderView::section {{
                 background:{SLATE_500}; color:white; font-size:10px;
                 font-weight:700; padding:4px; border:none;
@@ -8089,7 +8089,7 @@ class ProyectoView(QWidget):
             " font-size:12px; padding:4px; outline:none; }"
             "QListView::item { padding:4px 10px; background:white; color:#273445; }"
             "QListView::item:hover { background:#FEF5EB; color:#C0621A; }"
-            "QListView::item:selected { background:#FEF5EB; color:#C0621A; }"
+            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
         )
         from PySide6.QtGui import QPalette as _QPal
         _pal = _popup.palette()
@@ -11857,7 +11857,7 @@ class _DialogSugerirPartidas(QDialog):
             "QTreeWidget { background:white; border:1px solid #E2E8F0;"
             "  font-size:11px; }"
             "QTreeWidget::item { padding:3px 4px; }"
-            "QTreeWidget::item:selected { background:#FEF5EB; color:#C0621A; }"
+            "QTreeWidget::item:selected { background:#FDE8D0; color:#7A3800; }"
             "QHeaderView::section { background:#F8F9FA; color:#1F2A38;"
             "  padding:5px; border:none; border-bottom:1px solid #E2E8F0;"
             "  font-weight:600; font-size:11px; }"
