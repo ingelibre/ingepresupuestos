@@ -701,6 +701,36 @@ def test_el_historico_publicado_degrada_si_no_responde():
         urllib.request.urlopen = real
 
 
+def test_la_url_publicada_apunta_donde_el_repo_guarda_el_archivo():
+    """La raíz del repositorio ES la app: no hay prefijo `app/`.
+
+    Se escribió mal la primera vez y no se nota probando la app —la fuente
+    degrada en silencio a las otras tres—; solo se ve cuando la Action falla o
+    cuando alguien mira por qué el histórico nunca se actualiza. Lo mismo valía
+    para el `working-directory` del workflow, que apuntaba a un directorio
+    inexistente.
+    """
+    import subprocess
+    from pathlib import Path
+    from core.indices_inei import URL_INDICES_PUBLICADOS
+
+    raiz = Path(subprocess.run(
+        ['git', 'rev-parse', '--show-toplevel'],
+        cwd=Path(__file__).parent, capture_output=True, text=True,
+        check=True).stdout.strip())
+    archivo = raiz / "resources" / "indices_inei_valores.json.gz"
+    assert archivo.exists(), f"no está {archivo}"
+    rel = archivo.relative_to(raiz).as_posix()
+    assert URL_INDICES_PUBLICADOS.endswith(rel), (
+        f"la URL termina en …{URL_INDICES_PUBLICADOS[-45:]!r} pero el archivo "
+        f"vive en {rel!r}")
+
+    wf = raiz / ".github" / "workflows" / "indices-inei.yml"
+    assert wf.exists(), "falta el workflow que mantiene el histórico"
+    assert 'working-directory' not in wf.read_text(encoding='utf-8'), \
+        "el workflow apunta a un subdirectorio: la app está en la raíz"
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

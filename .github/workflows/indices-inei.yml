@@ -39,11 +39,9 @@ jobs:
         run: pip install openpyxl pdfplumber
 
       - name: Regenerar el histórico
-        working-directory: app
         run: python3 scripts/generar_indices_valores.py
 
       - name: Publicar si cambió
-        working-directory: app
         run: |
           if git diff --quiet -- resources/indices_inei_valores.json.gz; then
             echo "Sin cambios: el INEI no ha publicado nada nuevo."

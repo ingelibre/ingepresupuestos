@@ -1352,9 +1352,10 @@ def importar_pdf_resolucion(filepath: str, serie: str | None = None) -> dict:
 ELPERUANO_DISPOSITIVO = "https://busquedas.elperuano.pe/dispositivo/NL/{id}-1"
 
 
+# La raíz del repositorio ES la app: no hay prefijo `app/` en las rutas.
 URL_INDICES_PUBLICADOS = (
     "https://raw.githubusercontent.com/ingelibre/ingepresupuestos/main/"
-    "app/resources/indices_inei_valores.json.gz")
+    "resources/indices_inei_valores.json.gz")
 
 
 def _filas_de_bloque(serie: str, bloque: dict) -> list[dict]:
