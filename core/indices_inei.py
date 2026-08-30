@@ -438,8 +438,18 @@ def asegurar_codigos(codigos, nombres: dict | None = None, conn=None,
 def codigos_huerfanos(conn=None, serie: str = SERIE_ACTUAL) -> list[dict]:
     """Códigos que la app usa pero el catálogo de la serie no define.
 
+    Los clasifica, porque la respuesta correcta es distinta en cada caso:
+
+    * ``descontinuado`` — el código SÍ existía en la relación anterior y el
+      INEI lo retiró al reagruparlo (el 22 y el 23, «Cemento Portland Tipo II»
+      y «Tipo V», los absorbió el 21). Darlo de alta en la serie nueva sería
+      inventar un índice que el INEI no publica y que nunca tendrá valores: lo
+      que corresponde es REASIGNAR esos insumos a un código vigente.
+    * ``desconocido`` — no figura en ninguna relación oficial. Suele venir de
+      bibliotecas importadas: el 99, por ejemplo, son subcontratos.
+
     El '00' se excluye: no es un índice del INEI sino el centinela que usa
-    `core.parte_diario` para los insumos sin clasificar.
+    `core.parte_diario` para lo sin clasificar.
     """
     own = conn is None
     if own:
@@ -467,7 +477,25 @@ def codigos_huerfanos(conn=None, serie: str = SERIE_ACTUAL) -> list[dict]:
     finally:
         if own:
             conn.close()
-    return [dict(r) for r in rows]
+
+    # Relaciones OFICIALES de las otras series, para saber si el código fue
+    # descontinuado o nunca existió.
+    otras = {}
+    for clave, datos in (_oficial().get('series') or {}).items():
+        if clave == serie:
+            continue
+        for cod, nombre in (datos.get('indices') or {}).items():
+            otras.setdefault(cod, (clave, nombre))
+
+    out = []
+    for r in rows:
+        d = dict(r)
+        anterior = otras.get(d['codigo'])
+        d['descontinuado'] = anterior is not None
+        d['serie_anterior'] = anterior[0] if anterior else ''
+        d['nombre_anterior'] = anterior[1] if anterior else ''
+        out.append(d)
+    return out
 
 
 # ── Listados ─────────────────────────────────────────────────────────────────

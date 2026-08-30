@@ -74,23 +74,43 @@ def resumen(conn=None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def insumos_sin_indice(limite: int | None = None, conn=None) -> list[dict]:
-    """Los insumos que no tienen índice unificado asignado.
+def insumos_sin_indice(limite: int | None = None, conn=None,
+                       incluir_invalidos: bool = True,
+                       serie: str | None = None) -> list[dict]:
+    """Los insumos que la fórmula no puede clasificar bien.
 
-    El '00' cuenta como sin asignar: no es un índice del INEI sino el centinela
-    que usa `core.parte_diario` para los recursos sin clasificar.
+    Dos casos, y los dos hay que arreglarlos:
+
+    * **sin índice** — vacío o '00', el centinela de `core.parte_diario`;
+    * **con índice INVÁLIDO** — un código que el catálogo de la serie vigente
+      no define. Pasa mucho tras el cambio de base de 2026: el 22 y el 23
+      («Cemento Portland Tipo II» y «Tipo V») los absorbió el 21, y los
+      insumos importados siguen apuntando a los viejos. También los códigos de
+      bibliotecas ajenas, como el 99 de subcontratos.
+
+    Sin incluirlos, el diccionario no podía tocarlos y la fórmula seguía
+    agrupando costo bajo índices que ya no existen y que nunca tendrán valores.
     """
+    from core.indices_inei import SERIE_ACTUAL, asegurar_seed
+    serie = serie or SERIE_ACTUAL
     own = conn is None
     if own:
         conn = get_db()
     try:
-        sql = ("SELECT id, codigo, descripcion, tipo, unidad, "
-               "COALESCE(precio,0) AS precio FROM recursos "
-               "WHERE COALESCE(indice_inei,'') IN ('', '00') "
-               "ORDER BY tipo, descripcion")
+        asegurar_seed(conn)
+        cond = "COALESCE(r.indice_inei,'') IN ('', '00')"
+        params: list = []
+        if incluir_invalidos:
+            cond += (" OR r.indice_inei NOT IN "
+                     "(SELECT codigo FROM indices_inei WHERE serie=?)")
+            params.append(serie)
+        sql = (f"SELECT r.id, r.codigo, r.descripcion, r.tipo, r.unidad, "
+               f"COALESCE(r.precio,0) AS precio, "
+               f"COALESCE(r.indice_inei,'') AS indice_actual "
+               f"FROM recursos r WHERE ({cond}) ORDER BY r.tipo, r.descripcion")
         if limite:
             sql += f" LIMIT {int(limite)}"
-        rows = conn.execute(sql).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     finally:
         if own:
             conn.close()
@@ -231,6 +251,7 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
                 'nombre': nombres.get(cod, f"Índice {cod}"),
                 'puntaje': 100.0, 'parecido_a': ins['descripcion'],
                 'ambiguo': False, 'rival': '', 'fuente': 'oficial',
+                'indice_actual': ins.get('indice_actual', ''),
             })
             continue
 
@@ -245,7 +266,8 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
                 'nombre': nombres.get(cod, f"Índice {cod}"),
                 'puntaje': round(puntaje, 1), 'parecido_a': clave,
                 'ambiguo': ambiguo, 'rival': rival, 'fuente': 'oficial',
-            })
+                'indice_actual': ins.get('indice_actual', ''),
+                })
             continue
 
         # 2. La biblioteca propia, dentro del mismo tipo de insumo.
@@ -266,7 +288,8 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
             'nombre': nombres.get(cod, f"Índice {cod}"),
             'puntaje': round(puntaje, 1), 'parecido_a': desc_origen,
             'ambiguo': ambiguo, 'rival': rival, 'fuente': 'biblioteca',
-        })
+            'indice_actual': ins.get('indice_actual', ''),
+            })
 
     out.sort(key=lambda x: (x['fuente'] != 'oficial', -x['puntaje']))
     return out

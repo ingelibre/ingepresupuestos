@@ -78,6 +78,20 @@ def test_el_centinela_00_cuenta_como_sin_asignar():
     assert rid in {i['id'] for i in DIC.insumos_sin_indice()}
 
 
+def test_los_insumos_con_indice_invalido_tambien_entran():
+    """Un insumo con un código que la base vigente no define está tan roto
+    como uno sin índice: la fórmula agrupa su costo bajo un índice que nunca
+    tendrá valores. El diccionario tiene que poder arreglarlo."""
+    DIC = _preparar()
+    rid = _insumo('INSUMO ZZQX CON CODIGO MUERTO', inei='22')   # descontinuado
+    ids = {i['id'] for i in DIC.insumos_sin_indice()}
+    assert rid in ids, "el insumo con índice inválido quedó fuera"
+    solo_vacios = {i['id'] for i in
+                   DIC.insumos_sin_indice(incluir_invalidos=False)}
+    assert rid not in solo_vacios
+    assert len(ids) > len(solo_vacios)
+
+
 def test_asignar_indice_en_tanda():
     DIC = _preparar()
     a = _insumo('INSUMO ZZQX TANDA UNO')

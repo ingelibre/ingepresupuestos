@@ -631,40 +631,88 @@ class IndicesINEIView(QWidget):
         n = len(self._huerfanos)
         self.btn_huerfanos.setVisible(bool(n))
         if n:
-            self.btn_huerfanos.setText(f"{n} sin definir")
+            desc = sum(1 for h in self._huerfanos if h['descontinuado'])
+            self.btn_huerfanos.setText(f"{n} códigos inválidos")
             self.btn_huerfanos.setToolTip(
-                "Hay códigos usados por insumos o con histórico cargado que "
-                "no están en el catálogo. Clic para darlos de alta."
+                f"{n} códigos usados por insumos no están en el catálogo de "
+                f"esta base"
+                + (f" — {desc} los descontinuó el INEI al reagruparlos"
+                   if desc else "")
+                + ". Clic para ver qué hacer."
             )
 
     def _revisar_huerfanos(self):
-        """Da de alta los códigos huérfanos para que dejen de ser invisibles."""
+        """Qué hacer con los códigos que el catálogo de la serie no define.
+
+        Antes esto ofrecía «darlos de alta» con un nombre provisional, y era un
+        mal consejo: la mayoría son códigos que el INEI RETIRÓ al reagruparlos
+        —el 22 y el 23, «Cemento Portland Tipo II» y «Tipo V», los absorbió el
+        21— o que nunca fueron suyos, como el 99 de las bibliotecas importadas,
+        que acá son 319 subcontratos. Crearlos inventaría índices que el INEI no
+        publica y que NUNCA tendrán valores, así que el reajuste de esa parte
+        del costo quedaría sin poder calcularse.
+
+        Lo que corresponde es reasignar esos insumos a códigos vigentes, que es
+        justo lo que hace el diccionario.
+        """
         if not getattr(self, '_huerfanos', None):
             return
-        filas = "\n".join(
-            f"· {h['codigo']} — {h['n_recursos']} insumo(s),"
-            f" {h['n_valores']} valor(es)"
-            for h in self._huerfanos
+        desc = [h for h in self._huerfanos if h['descontinuado']]
+        desc_n = sum(h['n_recursos'] for h in desc)
+        otros = [h for h in self._huerfanos if not h['descontinuado']]
+        otros_n = sum(h['n_recursos'] for h in otros)
+
+        def _lista(hs, con_nombre):
+            return "\n".join(
+                f"· {h['codigo']} — {h['n_recursos']} insumo(s)"
+                + (f"   ({h['nombre_anterior']})" if con_nombre
+                   and h['nombre_anterior'] else "")
+                for h in hs
+            )
+
+        partes = [
+            f"{len(self._huerfanos)} código(s) están en uso pero NO figuran en "
+            f"el catálogo de la base vigente."
+        ]
+        if desc:
+            partes.append(
+                f"\nDESCONTINUADOS por el INEI — existían en la base anterior "
+                f"y se reagruparon ({desc_n} insumos):\n" + _lista(desc, True))
+        if otros:
+            partes.append(
+                f"\nSIN ORIGEN OFICIAL — no figuran en ninguna relación del "
+                f"INEI; suelen venir de bibliotecas importadas ({otros_n} "
+                f"insumos):\n" + _lista(otros, False))
+        partes.append(
+            "\nLo recomendable es REASIGNAR esos insumos a códigos vigentes "
+            "con el diccionario del INEI. Darlos de alta crearía índices que el "
+            "INEI no publica: nunca tendrán valores y su parte del reajuste no "
+            "se podrá calcular."
         )
-        r = QMessageBox.question(
-            self, "Códigos sin definir",
-            f"{len(self._huerfanos)} código(s) están en uso pero no figuran "
-            f"en el catálogo:\n\n{filas}\n\n"
-            "¿Darlos de alta? Entrarán con un nombre provisional que puedes "
-            "editar (doble clic en la lista).",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-        )
-        if r != QMessageBox.Yes:
-            return
-        n = asegurar_codigos([h['codigo'] for h in self._huerfanos],
-                             serie=self._serie_actual)
-        self._refrescar_lista()
-        self._actualizar_kpis()
-        QMessageBox.information(
-            self, "Listo",
-            f"{n} índice(s) dados de alta. Edítalos para ponerles su nombre "
-            "oficial del INEI."
-        )
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Códigos que el catálogo no define")
+        msg.setText("\n".join(partes))
+        b_dicc = msg.addButton("Abrir el diccionario", QMessageBox.AcceptRole)
+        b_alta = msg.addButton("Darlos de alta igual", QMessageBox.DestructiveRole)
+        msg.addButton("Cerrar", QMessageBox.RejectRole)
+        msg.setDefaultButton(b_dicc)
+        msg.exec()
+
+        if msg.clickedButton() is b_dicc:
+            self._abrir_diccionario()
+        elif msg.clickedButton() is b_alta:
+            n = asegurar_codigos([h['codigo'] for h in self._huerfanos],
+                                 serie=self._serie_actual)
+            self._refrescar_lista()
+            self._actualizar_kpis()
+            QMessageBox.information(
+                self, "Listo",
+                f"{n} índice(s) dados de alta con nombre provisional. "
+                f"Edítalos con doble clic; recuerda que el INEI no publica "
+                f"valores para ellos."
+            )
 
     def _abrir_diccionario(self):
         """El diccionario insumo → índice unificado.

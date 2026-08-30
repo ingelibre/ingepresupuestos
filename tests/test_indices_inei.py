@@ -254,6 +254,30 @@ def test_codigos_huerfanos_encuentra_los_que_el_catalogo_no_define():
     assert '73' in codigos, f"no detectó el huérfano: {sorted(codigos)}"
 
 
+def test_los_huerfanos_distinguen_descontinuado_de_desconocido():
+    """La respuesta correcta es distinta según de dónde venga el código.
+
+    El 22 y el 23 —«Cemento Portland Tipo II» y «Tipo V»— existían en la base
+    1992 y el INEI los retiró al absorberlos el 21: son DESCONTINUADOS. El 99,
+    que en la biblioteca semilla son 319 subcontratos, no figura en ninguna
+    relación oficial: es DESCONOCIDO.
+
+    Importa porque darlos de alta crearía índices que el INEI no publica y que
+    nunca tendrán valores; lo que corresponde es reasignar sus insumos.
+    """
+    I = _preparar()
+    por_codigo = {h['codigo']: h for h in I.codigos_huerfanos()}
+    if '22' in por_codigo:
+        h = por_codigo['22']
+        assert h['descontinuado'], h
+        assert 'cemento' in h['nombre_anterior'].lower(), h['nombre_anterior']
+        assert h['serie_anterior'] == I.SERIE_1992
+    if '99' in por_codigo:
+        h = por_codigo['99']
+        assert not h['descontinuado'], h
+        assert h['nombre_anterior'] == ''
+
+
 def test_codigos_huerfanos_ignora_el_centinela_00():
     """'00' no es un índice del INEI: lo usa parte_diario para lo sin clasificar."""
     I = _preparar()
