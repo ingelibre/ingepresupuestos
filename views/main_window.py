@@ -812,7 +812,11 @@ class MainWindow(QMainWindow):
                 return v
             case "indices_inei":
                 from views.indices_inei_view import IndicesINEIView
-                return IndicesINEIView()
+                # El proyecto desde el que se entró, para que el diccionario
+                # pueda acotarse a sus insumos.
+                ctx = getattr(self, '_pid_contexto_indices', None)
+                return IndicesINEIView(ctx[0], ctx[1]) if ctx \
+                    else IndicesINEIView()
             case "ia":
                 from views.ia_view import IAView
                 return IAView()
@@ -1338,6 +1342,14 @@ class MainWindow(QMainWindow):
         self._cargar_vista("recursos")
 
     def _ir_a_indices_inei(self):
+        # Recordar desde qué proyecto se entra, antes de cambiar de vista.
+        _pid_ctx = self._pid_proyecto_activo()
+        _nom_ctx = ''
+        if _pid_ctx is not None:
+            actual = self.stack.currentWidget()
+            _nom_ctx = str(getattr(actual, 'proyecto_nombre', '') or '')
+        self._pid_contexto_indices = (_pid_ctx, _nom_ctx) if _pid_ctx else None
+
         # Context-aware: si estamos en un proyecto (sidebar colapsado),
         # actuar como atajo modal — no expandir sidebar, mostrar banner
         # para volver al proyecto.

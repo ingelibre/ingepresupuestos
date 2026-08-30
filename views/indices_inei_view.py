@@ -132,9 +132,14 @@ class IndicesINEIView(QWidget):
 
     volver = Signal()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, proyecto_id: int | None = None,
+                 proyecto_nombre: str = '', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setProperty("vista_nombre", "indices_inei")
+        # Contexto: si se llegó desde un proyecto, el diccionario puede
+        # ceñirse a los insumos que ESE proyecto usa.
+        self._pid_contexto = proyecto_id
+        self._nombre_contexto = proyecto_nombre
         asegurar_seed()
         self._codigo_actual: str | None = None
         self._area_actual: str = '01'
@@ -722,7 +727,8 @@ class IndicesINEIView(QWidget):
         sin nada que agrupar.
         """
         from views.diccionario_iu_dialog import DiccionarioIUDialog
-        dlg = DiccionarioIUDialog(self)
+        dlg = DiccionarioIUDialog(self, self._pid_contexto,
+                                  self._nombre_contexto)
         dlg.exec()
         self._refrescar_lista()
         self._actualizar_kpis()
@@ -913,14 +919,19 @@ class IndicesINEIView(QWidget):
 
     # ── Sincronizar automáticamente con INEI ────────────────────────────────
     def _sincronizar_inei(self):
-        """Busca + descarga + importa el último Excel oficial del INEI."""
-        # Bloquear UI durante la descarga
+        """Busca + descarga + importa el Excel oficial del INEI de ESTA base.
+
+        Son dos archivos distintos —uno por cada base— y antes se pedía siempre
+        el de la base 1992. Con la vista en la base vigente parecía que
+        sincronizaba y luego no aparecía ningún valor: habían entrado en la
+        otra serie.
+        """
         self.btn_auto.setEnabled(False)
-        self.btn_auto.setText("Buscando último archivo INEI…")
+        self.btn_auto.setText("Buscando el archivo del INEI…")
         QApplication.processEvents()
 
         try:
-            busq = buscar_ultimo_excel_inei()
+            busq = buscar_ultimo_excel_inei(self._serie_actual)
             if not busq['ok']:
                 QMessageBox.warning(
                     self, "Sincronizar con INEI",
@@ -928,16 +939,14 @@ class IndicesINEIView(QWidget):
                 )
                 return
 
-            self.btn_auto.setText(
-                f"Descargando {busq['mes_detectado'].title()} "
-                f"{busq['anio_detectado']}…"
-            )
+            self.btn_auto.setText("Descargando…")
             QApplication.processEvents()
 
             res = descargar_desde_url(
                 busq['url'],
                 area=self._area_actual,
-                anio_override=busq['anio_detectado']
+                anio_override=busq['anio_detectado'],
+                serie=busq.get('serie', self._serie_actual),
             )
             res['mes_detectado'] = busq['mes_detectado']
             res['anio_detectado_url'] = busq['anio_detectado']
@@ -950,8 +959,8 @@ class IndicesINEIView(QWidget):
                 )
                 return
 
-            fuente = (f"INEI oficial — {busq['mes_detectado'].title()} "
-                      f"{busq['anio_detectado']}  ({res.get('tamano_kb', 0)} KB)")
+            fuente = (f"INEI oficial — {serie_nombre(busq.get('serie', ''))}"
+                      f"  ({res.get('tamano_kb', 0)} KB)")
             self._procesar_resultado_import(res, fuente=fuente)
         finally:
             self.btn_auto.setEnabled(True)

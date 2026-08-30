@@ -22,7 +22,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox, QMessageBox,
-    QFileDialog, QSpinBox, QFrame,
+    QFileDialog, QSpinBox, QFrame, QCheckBox,
 )
 
 from core import diccionario_iu as DIC
@@ -42,10 +42,15 @@ WHITE = "#FFFFFF"
 class DiccionarioIUDialog(QDialog):
     """Clasificación en tanda de los insumos sin índice unificado."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, proyecto_id: int | None = None,
+                 proyecto_nombre: str = ''):
         super().__init__(parent)
         self.setWindowTitle("Diccionario de índices unificados")
         self.resize(1000, 620)
+        # Cuando se llega desde un proyecto, lo que interesa son SUS insumos:
+        # la biblioteca global trae miles que no tienen que ver con la obra.
+        self._pid = proyecto_id
+        self._proyecto_nombre = proyecto_nombre
         self._sugerencias: list[dict] = []
         self._catalogo = catalogo()
         self._build()
@@ -71,6 +76,16 @@ class DiccionarioIUDialog(QDialog):
         # ── Barra de acciones ──
         barra = QHBoxLayout()
         barra.setSpacing(8)
+
+        self.chk_proyecto = QCheckBox("Solo los insumos de este proyecto")
+        self.chk_proyecto.setChecked(bool(self._pid))
+        self.chk_proyecto.setVisible(bool(self._pid))
+        self.chk_proyecto.setToolTip(
+            "Acota la lista a los insumos que el proyecto usa en sus análisis "
+            "de costos" + (f": {self._proyecto_nombre}"
+                           if self._proyecto_nombre else ""))
+        self.chk_proyecto.toggled.connect(self._refrescar_cabecera)
+        barra.addWidget(self.chk_proyecto)
 
         barra.addWidget(QLabel("Parecido mínimo:"))
         self.spin_umbral = QSpinBox()
@@ -173,13 +188,18 @@ class DiccionarioIUDialog(QDialog):
         return b
 
     # ── Datos ───────────────────────────────────────────────────────────────
+    def _pid_filtro(self):
+        return self._pid if (self._pid and self.chk_proyecto.isChecked()) else None
+
     def _refrescar_cabecera(self):
-        pendientes = DIC.insumos_sin_indice()
+        pendientes = DIC.insumos_sin_indice(proyecto_id=self._pid_filtro())
         total = len(pendientes)
         if total:
             from core.indices_inei import diccionario_oficial
             self.lbl_estado.setText(
-                f"<b>{total}</b> insumo(s) sin índice unificado asignado. "
+                f"<b>{total}</b> insumo(s) "
+                + ("del proyecto " if self._pid_filtro() else "")
+                + "sin índice unificado válido. "
                 f"La fórmula polinómica los reparte por el índice de su tipo, "
                 f"que es un supuesto — clasificarlos la vuelve exacta.<br>"
                 f"Las propuestas se apoyan primero en el <b>Diccionario de "
@@ -196,7 +216,9 @@ class DiccionarioIUDialog(QDialog):
         self.btn_sugerir.setEnabled(False)
         self.btn_sugerir.setText("Buscando…")
         try:
-            self._sugerencias = DIC.sugerencias(umbral=self.spin_umbral.value())
+            self._sugerencias = DIC.sugerencias(
+                umbral=self.spin_umbral.value(),
+                proyecto_id=self._pid_filtro())
         finally:
             self.btn_sugerir.setEnabled(True)
             self.btn_sugerir.setText("Buscar propuestas")

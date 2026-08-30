@@ -269,6 +269,35 @@ def test_el_resumen_muestra_los_indices_fuera_del_catalogo():
     assert fuera, "el resumen esconde los índices huérfanos"
 
 
+def test_se_puede_acotar_a_los_insumos_del_proyecto():
+    """Marco, viendo la lista: «¿me muestra solo del proyecto o toda la base?
+    ¿No sería mejor que solo me muestre lo que usa el proyecto?».
+
+    La biblioteca global trae miles de insumos que no tienen que ver con la
+    obra que se está presupuestando.
+    """
+    DIC = _preparar()
+    conn = d.get_db()
+    pid = conn.execute(
+        "SELECT proyecto_id FROM partidas WHERE es_titulo=0 "
+        "GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1").fetchone()[0]
+    usados = {r[0] for r in conn.execute(
+        "SELECT DISTINCT ai.recurso_id FROM acu_items ai "
+        "JOIN partidas p ON p.id = ai.partida_id WHERE p.proyecto_id=?",
+        (pid,))}
+    conn.close()
+
+    todos = DIC.insumos_sin_indice()
+    del_proyecto = DIC.insumos_sin_indice(proyecto_id=pid)
+    assert 0 < len(del_proyecto) < len(todos), (len(del_proyecto), len(todos))
+    assert all(i['id'] in usados for i in del_proyecto), \
+        "coló un insumo que el proyecto no usa"
+
+    # Y las propuestas respetan el filtro.
+    sug = DIC.sugerencias(umbral=90, proyecto_id=pid)
+    assert all(s['recurso_id'] in usados for s in sug)
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

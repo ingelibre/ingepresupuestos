@@ -76,7 +76,8 @@ def resumen(conn=None) -> list[dict]:
 
 def insumos_sin_indice(limite: int | None = None, conn=None,
                        incluir_invalidos: bool = True,
-                       serie: str | None = None) -> list[dict]:
+                       serie: str | None = None,
+                       proyecto_id: int | None = None) -> list[dict]:
     """Los insumos que la fórmula no puede clasificar bien.
 
     Dos casos, y los dos hay que arreglarlos:
@@ -90,6 +91,10 @@ def insumos_sin_indice(limite: int | None = None, conn=None,
 
     Sin incluirlos, el diccionario no podía tocarlos y la fórmula seguía
     agrupando costo bajo índices que ya no existen y que nunca tendrán valores.
+
+    Con `proyecto_id` se acota a los insumos que ESE proyecto usa en sus ACU.
+    Es lo que hace falta cuando se está armando su fórmula: la biblioteca
+    global trae miles de insumos que no tienen nada que ver con la obra.
     """
     from core.indices_inei import SERIE_ACTUAL, asegurar_seed
     serie = serie or SERIE_ACTUAL
@@ -104,10 +109,19 @@ def insumos_sin_indice(limite: int | None = None, conn=None,
             cond += (" OR r.indice_inei NOT IN "
                      "(SELECT codigo FROM indices_inei WHERE serie=?)")
             params.append(serie)
+        filtro_proy = ""
+        if proyecto_id is not None:
+            filtro_proy = (
+                " AND r.id IN (SELECT ai.recurso_id FROM acu_items ai "
+                "              JOIN partidas p ON p.id = ai.partida_id "
+                "             WHERE p.proyecto_id = ?)")
         sql = (f"SELECT r.id, r.codigo, r.descripcion, r.tipo, r.unidad, "
                f"COALESCE(r.precio,0) AS precio, "
                f"COALESCE(r.indice_inei,'') AS indice_actual "
-               f"FROM recursos r WHERE ({cond}) ORDER BY r.tipo, r.descripcion")
+               f"FROM recursos r WHERE ({cond}){filtro_proy} "
+               f"ORDER BY r.tipo, r.descripcion")
+        if proyecto_id is not None:
+            params.append(int(proyecto_id))
         if limite:
             sql += f" LIMIT {int(limite)}"
         rows = conn.execute(sql, params).fetchall()
@@ -174,7 +188,8 @@ def _mejor(objetivo: str, claves: list[str], umbral: int,
 
 
 def sugerencias(umbral: int = 85, limite: int | None = None,
-                conn=None, usar_oficial: bool = True) -> list[dict]:
+                conn=None, usar_oficial: bool = True,
+                proyecto_id: int | None = None) -> list[dict]:
     """Propone un índice unificado para cada insumo sin clasificar.
 
     Dos fuentes, en este orden:
@@ -207,7 +222,8 @@ def sugerencias(umbral: int = 85, limite: int | None = None,
             "WHERE COALESCE(indice_inei,'') NOT IN ('', '00') "
             "  AND COALESCE(descripcion,'') <> ''"
         ).fetchall()
-        pendientes = insumos_sin_indice(limite, conn)
+        pendientes = insumos_sin_indice(limite, conn,
+                                        proyecto_id=proyecto_id)
         nombres = dict(conn.execute(
             "SELECT codigo, nombre FROM indices_inei WHERE serie=?",
             (SERIE_ACTUAL,)).fetchall())

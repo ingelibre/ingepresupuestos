@@ -1089,7 +1089,8 @@ def importar_json(filepath: str) -> dict:
 
 # ─── Descarga por URL ────────────────────────────────────────────────────────
 def descargar_desde_url(url: str, area: str = '01',
-                        anio_override: int | None = None) -> dict:
+                        anio_override: int | None = None,
+                        serie: str | None = None) -> dict:
     """Descarga un Excel desde una URL pública y lo parsea con
     ``importar_excel_inei``. Útil cuando el usuario tiene el link del INEI.
 
@@ -1144,7 +1145,7 @@ def descargar_desde_url(url: str, area: str = '01',
         tmp_path = tmp.name
 
         res = importar_excel_inei(tmp_path, area=area,
-                                  anio_override=anio_override)
+                                  anio_override=anio_override, serie=serie)
         res['url'] = url
         res['tamano_kb'] = round(len(data) / 1024, 1)
         return res
@@ -1242,20 +1243,50 @@ _MESES_CORTOS_INEI = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                       'jul', 'ago', 'set', 'oct', 'nov', 'dic']
 
 
-def buscar_ultimo_excel_inei() -> dict:
-    """Busca por HEAD el último Excel publicado por el INEI siguiendo el
-    patrón estable de URLs ``06_..._{mes_corto}{ano_2dig}.xlsx``.
+def buscar_ultimo_excel_inei(serie: str = SERIE_ACTUAL) -> dict:
+    """Busca por HEAD el último Excel publicado por el INEI para una serie.
 
-    Estrategia: empezar desde el mes actual y retroceder hasta encontrar uno
-    que responda 200. INEI publica datos del mes anterior alrededor del día 15.
+    Son DOS archivos distintos y hasta ahora solo se probaba el viejo:
+
+    * base **Diciembre 2025** — `07_..._1.xlsx`, un único archivo con las 13
+      áreas que el INEI va ampliando mes a mes;
+    * base **Julio 1992** — `06_..._{mes}{año}.xlsx`, uno por mes y acumulativo
+      (el de dic-25 trae desde 2013). Se prueba hacia atrás desde el mes
+      actual hasta dar con uno que responda 200.
+
+    Sincronizar traía siempre el segundo, así que los valores entraban en la
+    serie 1992 y en la vista —que muestra la vigente— no aparecía nada.
 
     Retorna::
 
         {'ok': bool, 'url': str|None, 'msg': str, 'mes_detectado': str|None,
-         'anio_detectado': int|None}
+         'anio_detectado': int|None, 'serie': str}
     """
     import urllib.request
     from datetime import date
+
+    headers = {
+        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64) '
+                       'ingePresupuestos/1.0'),
+    }
+
+    if serie == SERIE_2025:
+        url = f"{INEI_BASE}/{INEI_PATTERN_NUEVA}"
+        try:
+            req = urllib.request.Request(url, method='HEAD', headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                if resp.status == 200:
+                    return {'ok': True, 'url': url, 'serie': SERIE_2025,
+                            'msg': "Archivo del INEI con la base "
+                                   "Diciembre 2025 = 100 (13 áreas).",
+                            'mes_detectado': None, 'anio_detectado': None}
+        except Exception as e:
+            return {'ok': False, 'url': None, 'serie': SERIE_2025,
+                    'msg': f"No se pudo alcanzar el archivo del INEI: {e}",
+                    'mes_detectado': None, 'anio_detectado': None}
+        return {'ok': False, 'url': None, 'serie': SERIE_2025,
+                'msg': "El INEI no responde con el archivo de la base 2025.",
+                'mes_detectado': None, 'anio_detectado': None}
 
     hoy = date.today()
     # Probar desde el mes actual hasta 18 meses atrás
@@ -1268,10 +1299,6 @@ def buscar_ultimo_excel_inei() -> dict:
             m = 12
             y -= 1
 
-    headers = {
-        'User-Agent': ('Mozilla/5.0 (X11; Linux x86_64) '
-                       'ingePresupuestos/1.0'),
-    }
     for y, m in candidatos:
         mes_str = _MESES_CORTOS_INEI[m - 1]
         ano_str = str(y % 100).zfill(2)
@@ -1284,7 +1311,9 @@ def buscar_ultimo_excel_inei() -> dict:
                     return {
                         'ok': True,
                         'url': url,
-                        'msg': f"Último archivo INEI: {mes_str.title()} {y}",
+                        'serie': SERIE_1992,
+                        'msg': (f"Archivo del INEI de {mes_str.title()} {y} "
+                                f"(base Julio 1992 = 100, acumulativo)."),
                         'mes_detectado': mes_str,
                         'anio_detectado': y,
                     }
@@ -1294,6 +1323,7 @@ def buscar_ultimo_excel_inei() -> dict:
     return {
         'ok': False,
         'url': None,
+        'serie': SERIE_1992,
         'msg': ("No se encontró ningún archivo INEI con el patrón conocido en "
                 "los últimos 18 meses. Tu conexión puede estar bloqueada o el "
                 "INEI cambió el formato de URL."),
@@ -1302,18 +1332,21 @@ def buscar_ultimo_excel_inei() -> dict:
     }
 
 
-def descargar_ultimo_inei(area: str = '01') -> dict:
-    """Conveniencia: busca el último Excel disponible en el INEI y lo importa.
+def descargar_ultimo_inei(area: str = '01',
+                          serie: str = SERIE_ACTUAL) -> dict:
+    """Busca el Excel del INEI de esa serie y lo importa.
 
-    Retorna el dict de ``descargar_desde_url`` enriquecido con ``url`` y
-    ``mes/anio_detectado`` si la búsqueda fue exitosa.
+    `area` solo se usa si el archivo resultara ser una planilla de formato
+    libre: el archivo oficial trae TODAS las áreas y se leen todas.
     """
-    busq = buscar_ultimo_excel_inei()
+    busq = buscar_ultimo_excel_inei(serie)
     if not busq['ok']:
         return {'ok': False, 'msg': busq['msg'], 'rows': [], 'ignorados': 0,
-                'url': None}
+                'url': None, 'serie': serie}
     res = descargar_desde_url(busq['url'], area=area,
-                              anio_override=busq['anio_detectado'])
+                              anio_override=busq['anio_detectado'],
+                              serie=busq.get('serie', serie))
     res['mes_detectado'] = busq['mes_detectado']
     res['anio_detectado_url'] = busq['anio_detectado']
+    res.setdefault('serie', busq.get('serie', serie))
     return res
