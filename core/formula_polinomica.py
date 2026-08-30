@@ -55,6 +55,12 @@ def cargar_monomios(proyecto_id: int) -> list[dict]:
 def calcular_desde_acu(proyecto_id: int) -> dict:
     """Auto-deriva los 3 monomios MO/MAT/EQ desde los totales del ACU.
 
+    SUPERADA por `calcular_por_iu`, que agrupa por índice unificado y es la que
+    usa la vista desde la 3.0.4. Se conserva porque su criterio —repartir el CD
+    entre tres monomios por tipo— sigue siendo el que aplica `calcular_por_iu`
+    cuando ningún índice llega al 5%, y porque describe qué hacía la app en las
+    fórmulas guardadas antes de esta versión.
+
     Retorna dict con::
 
         {
@@ -345,13 +351,33 @@ def calcular_por_iu(proyecto_id: int, max_monomios: int = MAX_MONOMIOS,
     monomios.sort(key=lambda m: -m['monto'])
     _simbolos_unicos(monomios)
 
-    for i, m in enumerate(monomios):
-        m['orden'] = i
-        m['coeficiente'] = round(m['monto'] / cd, 4)
-    _ajustar_a_uno(monomios)
+    recalcular_coeficientes(monomios, cd)
 
     return {'ok': True, 'msg': '', 'monomios': monomios, 'cd': cd,
             'ius': ius, 'monto_sin_indice': inc['monto_sin_indice']}
+
+
+def recalcular_coeficientes(monomios: list[dict], cd: float) -> None:
+    """Recalcula el coeficiente de cada monomio desde sus componentes.
+
+    Modifica la lista in situ: renumera el `orden`, recalcula el monto y el
+    coeficiente de cada monomio como la parte del costo directo que aportan sus
+    índices, y cuadra la suma a 1.000.
+
+    Vive en el núcleo y no en la vista porque la usan las dos: el auto-cálculo
+    al armar la fórmula y el editor cuando el usuario mueve un índice de un
+    monomio a otro. Escribirla dos veces es cómo empezaron la cuadrilla y la
+    base del overhead.
+    """
+    if cd <= 0:
+        return
+    for i, m in enumerate(monomios):
+        m['orden'] = i
+        comps = m.get('componentes') or []
+        if comps:
+            m['monto'] = sum(float(c.get('monto') or 0) for c in comps)
+        m['coeficiente'] = round(float(m.get('monto') or 0) / cd, 4)
+    _ajustar_a_uno(monomios)
 
 
 def _ajustar_a_uno(monomios: list[dict]) -> None:

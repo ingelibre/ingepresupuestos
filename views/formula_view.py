@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
 
 from core.database import get_db
 from core.formula_polinomica import (
-    cargar_monomios, calcular_desde_acu, guardar_monomios,
+    cargar_monomios, guardar_monomios,
     cargar_periodos, guardar_periodos, calcular_reajuste_k,
+    calcular_por_iu, cargar_componentes, recalcular_coeficientes,
 )
 from core.indices_inei import listar_areas
 from utils.formatting import fmt, parse_num
@@ -90,6 +91,8 @@ class FormulaView(QWidget):
         self._monomios: list[dict] = []
         self._proyecto_meta: dict = {}
         self._totales_acu: dict | None = None
+        self._cd: float = 0.0          # costo directo con que se armó la fórmula
+        self._ius: list[dict] = []     # incidencia de cada índice unificado
         self._build()
 
     # ── construcción UI ─────────────────────────────────────────────────────
@@ -268,6 +271,7 @@ class FormulaView(QWidget):
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl.setShowGrid(False)
         self.tbl.itemChanged.connect(self._on_item_changed)
+        self.tbl.itemSelectionChanged.connect(self._render_composicion)
 
         h = self.tbl.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Fixed); h.resizeSection(0, 36)
@@ -354,10 +358,209 @@ class FormulaView(QWidget):
         tv.addWidget(foot)
         col.addWidget(card_tbl, 3)
 
-        # Card 3: Cálculo de Reajuste K con valores INEI
+        # Card 3: Composición del monomio seleccionado
+        col.addWidget(self._build_card_composicion(), 2)
+
+        # Card 4: Cálculo de Reajuste K con valores INEI
         col.addWidget(self._build_card_reajuste(), 2)
 
         return col
+
+    # ── card "Composición del monomio" ──────────────────────────────────────
+    def _build_card_composicion(self) -> QFrame:
+        """Qué índices unificados forman el monomio seleccionado.
+
+        Es lo que el usuario pedía ver: hasta ahora el monomio era una fila con
+        un código y un coeficiente, sin manera de saber de dónde salía. Y la
+        columna «Monomio» permite mover un índice a otro, que es la otra mitad
+        del pedido.
+        """
+        from utils.theme import apply_shadow
+        fr = QFrame()
+        fr.setStyleSheet(
+            f"QFrame {{ background:{WHITE}; border:1px solid {SILVER_300};"
+            f"  border-radius:8px; }}"
+        )
+        apply_shadow(fr, 'sm')
+        v = QVBoxLayout(fr)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+
+        head = QFrame()
+        head.setStyleSheet(f"QFrame {{ background:{SLATE_500};"
+                            f"  border-radius:8px 8px 0 0; }}")
+        hl = QHBoxLayout(head); hl.setContentsMargins(12, 8, 12, 8); hl.setSpacing(6)
+        ic = QLabel(); ic.setPixmap(icon("rep-insumos").pixmap(16, 16))
+        ic.setStyleSheet("background:transparent; border:none;")
+        hl.addWidget(ic)
+        self.lbl_comp_titulo = QLabel("Composición del monomio")
+        self.lbl_comp_titulo.setStyleSheet(
+            "color:white; font-weight:600; font-size:13px;"
+            " background:transparent; border:none;"
+        )
+        hl.addWidget(self.lbl_comp_titulo)
+        hl.addStretch(1)
+        self.lbl_comp_badge = QLabel("")
+        self.lbl_comp_badge.setStyleSheet(
+            f"background:{WHITE}; color:{SLATE_500}; padding:3px 10px;"
+            f"  border-radius:4px; font-weight:600; font-size:11px;"
+        )
+        hl.addWidget(self.lbl_comp_badge)
+        v.addWidget(head)
+
+        self.tbl_comp = QTableWidget(0, 5)
+        self.tbl_comp.setHorizontalHeaderLabels(
+            ["Índice", "Descripción", "Monto", "Incidencia", "Monomio"])
+        self.tbl_comp.verticalHeader().setVisible(False)
+        self.tbl_comp.setAlternatingRowColors(True)
+        self.tbl_comp.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_comp.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl_comp.setStyleSheet(
+            "QTableWidget { background:white; border:none; font-size:12px; }"
+            "QTableWidget::item { padding:4px 6px; }"
+            f"QHeaderView::section {{ background:{SILVER_100};"
+            f"  color:{SLATE_500}; padding:6px 8px; border:none;"
+            f"  border-bottom:1px solid {SILVER_300};"
+            f"  font-size:11px; font-weight:700; }}"
+        )
+        h = self.tbl_comp.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.Fixed)
+        h.resizeSection(0, 70)
+        h.setSectionResizeMode(1, QHeaderView.Stretch)
+        for c, w in ((2, 130), (3, 100), (4, 130)):
+            h.setSectionResizeMode(c, QHeaderView.Fixed)
+            h.resizeSection(c, w)
+        v.addWidget(self.tbl_comp, 1)
+
+        self.lbl_comp_pie = QLabel("")
+        self.lbl_comp_pie.setWordWrap(True)
+        self.lbl_comp_pie.setStyleSheet(
+            f"color:{SLATE_500}; font-size:11px; padding:8px 12px;"
+            f" background:{SILVER_100}; border:none;"
+            f" border-top:1px solid {SILVER_300};"
+        )
+        v.addWidget(self.lbl_comp_pie)
+        return fr
+
+    def _render_composicion(self):
+        """Pinta la composición del monomio seleccionado en la tabla."""
+        self.tbl_comp.setRowCount(0)
+        fila = self.tbl.currentRow()
+        if fila < 0 or fila >= len(self._monomios):
+            self.lbl_comp_titulo.setText("Composición del monomio")
+            self.lbl_comp_badge.setText("")
+            self.lbl_comp_pie.setText(
+                "Selecciona un monomio para ver los índices unificados que lo "
+                "forman."
+            )
+            return
+
+        m = self._monomios[fila]
+        comps = m.get('componentes') or []
+        simbolo = m.get('simbolo') or '?'
+        self.lbl_comp_titulo.setText(
+            f"Composición de {simbolo} — {m.get('descripcion') or ''}"
+        )
+        self.lbl_comp_badge.setText(
+            f"{len(comps)} índice" + ("s" if len(comps) != 1 else "")
+        )
+
+        if not comps:
+            self.lbl_comp_pie.setText(
+                "Este monomio no tiene composición guardada: se escribió a mano "
+                "o viene de una versión anterior. Usa «Auto-calcular desde ACU» "
+                "para derivarla del presupuesto."
+            )
+            return
+
+        moneda = self._proyecto_meta.get('moneda', 'Soles')
+        cd = self._cd or sum(
+            float(c.get('monto') or 0)
+            for mm in self._monomios for c in (mm.get('componentes') or [])
+        )
+        for c in comps:
+            r = self.tbl_comp.rowCount()
+            self.tbl_comp.insertRow(r)
+
+            it_c = QTableWidgetItem(c.get('codigo', ''))
+            it_c.setTextAlignment(Qt.AlignCenter)
+            f_mono = QFont("monospace"); f_mono.setBold(True)
+            it_c.setFont(f_mono)
+            self.tbl_comp.setItem(r, 0, it_c)
+
+            self.tbl_comp.setItem(r, 1, QTableWidgetItem(c.get('nombre', '')))
+
+            monto = float(c.get('monto') or 0)
+            it_m = QTableWidgetItem(fmt(monto, moneda))
+            it_m.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.tbl_comp.setItem(r, 2, it_m)
+
+            inc = (monto / cd) if cd else 0
+            it_i = QTableWidgetItem(f"{inc * 100:.2f}%")
+            it_i.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            it_i.setForeground(QColor(SLATE_500))
+            self.tbl_comp.setItem(r, 3, it_i)
+
+            cmb = QComboBox()
+            for j, mm in enumerate(self._monomios):
+                cmb.addItem(f"{mm.get('simbolo') or '?'}", j)
+            cmb.setCurrentIndex(fila)
+            cmb.setToolTip("Mover este índice a otro monomio")
+            cmb.currentIndexChanged.connect(
+                lambda idx, cod=c.get('codigo'), orig=fila:
+                self._mover_componente(cod, orig, idx)
+            )
+            self.tbl_comp.setCellWidget(r, 4, cmb)
+
+        self.lbl_comp_pie.setText(
+            f"El índice del monomio es el de mayor peso; al calcular K los "
+            f"demás entran promediados por su monto. Cambia la columna "
+            f"«Monomio» para mover un índice."
+        )
+
+    def _mover_componente(self, codigo: str, origen: int, destino: int):
+        """Mueve un índice unificado de un monomio a otro y recalcula.
+
+        Los coeficientes se rehacen desde los montos —no se reparten a ojo—,
+        así que la fórmula sigue sumando 1.000 y ningún costo se pierde.
+        """
+        if destino == origen or not codigo:
+            self._render_composicion()
+            return
+        if not (0 <= origen < len(self._monomios)
+                and 0 <= destino < len(self._monomios)):
+            return
+        m_orig = self._monomios[origen]
+        comps = m_orig.get('componentes') or []
+        mov = next((c for c in comps if c.get('codigo') == codigo), None)
+        if mov is None:
+            return
+        if len(comps) == 1:
+            QMessageBox.information(
+                self, "Composición",
+                f"«{mov.get('nombre')}» es el único índice de este monomio.\n"
+                "Mover el último dejaría el monomio vacío: elimínalo con la "
+                "papelera si ya no lo quieres."
+            )
+            self._render_composicion()
+            return
+
+        comps.remove(mov)
+        self._monomios[destino].setdefault('componentes', []).append(mov)
+        for m in self._monomios:
+            cs = m.get('componentes') or []
+            cs.sort(key=lambda x: -float(x.get('monto') or 0))
+            if cs:
+                principal = cs[0]
+                m['indice_inei'] = principal.get('codigo', '')
+                m['descripcion'] = (
+                    principal.get('nombre', '') if len(cs) == 1
+                    else f"{principal.get('nombre', '')} y {len(cs) - 1} más"
+                )
+        recalcular_coeficientes(self._monomios, self._cd)
+        self._render_tabla()
+        self.tbl.selectRow(destino)
+        self._render_composicion()
 
     # ── card "Cálculo de Reajuste K" ────────────────────────────────────────
     def _build_card_reajuste(self) -> QFrame:
@@ -715,6 +918,15 @@ class FormulaView(QWidget):
         self.lbl_proy_meta.setText("<br>".join(partes) or "—")
 
         self._monomios = cargar_monomios(self.pid)
+        # La composición vive en su propia tabla, enlazada por `orden`. Los
+        # monomios escritos a mano (o de versiones anteriores) no tienen, y la
+        # tarjeta lo dice en vez de fingir un desglose.
+        comps = cargar_componentes(self.pid)
+        for m in self._monomios:
+            m['componentes'] = [dict(c) for c in comps.get(m.get('orden'), [])]
+        self._cd = sum(float(c.get('monto') or 0)
+                       for m in self._monomios
+                       for c in (m.get('componentes') or []))
         self._render_tabla()
         self._cargar_periodos_ui()
         self._calcular_k()
@@ -727,6 +939,7 @@ class FormulaView(QWidget):
         self.tbl.blockSignals(False)
         self._actualizar_totales()
         self._render_expr()
+        self._render_composicion()
 
     def _add_row(self, i: int, m: dict):
         row = self.tbl.rowCount()
@@ -830,9 +1043,43 @@ class FormulaView(QWidget):
         self._render_expr()
 
     def _eliminar_fila(self, row: int):
-        if 0 <= row < len(self._monomios):
-            del self._monomios[row]
-            self._render_tabla()
+        """Elimina un monomio. Sus índices se pasan al mayor de los que quedan.
+
+        Descartarlos perdería esa parte del costo directo y la fórmula dejaría
+        de sumar 1.000; el usuario los puede repartir después desde la columna
+        «Monomio» de la composición.
+        """
+        if not (0 <= row < len(self._monomios)):
+            return
+        muerto = self._monomios[row]
+        huerfanos = muerto.get('componentes') or []
+        del self._monomios[row]
+
+        if huerfanos and self._monomios:
+            destino = max(
+                self._monomios,
+                key=lambda m: sum(float(c.get('monto') or 0)
+                                  for c in (m.get('componentes') or []))
+            )
+            destino.setdefault('componentes', []).extend(huerfanos)
+            destino['componentes'].sort(
+                key=lambda x: -float(x.get('monto') or 0))
+            principal = destino['componentes'][0]
+            destino['indice_inei'] = principal.get('codigo', '')
+            destino['descripcion'] = (
+                principal.get('nombre', '')
+                if len(destino['componentes']) == 1
+                else f"{principal.get('nombre', '')} y "
+                     f"{len(destino['componentes']) - 1} más"
+            )
+            QMessageBox.information(
+                self, "Monomio eliminado",
+                f"Sus {len(huerfanos)} índice(s) pasaron a "
+                f"«{destino.get('simbolo')}» para no perder costo directo. "
+                f"Puedes repartirlos desde la composición."
+            )
+            recalcular_coeficientes(self._monomios, self._cd)
+        self._render_tabla()
 
     def _agregar_monomio(self):
         # Primer símbolo libre comenzando por A
@@ -933,7 +1180,7 @@ class FormulaView(QWidget):
         self.btn_calcular.setEnabled(False)
         self.btn_calcular.setText("Calculando…")
         try:
-            r = calcular_desde_acu(self.pid)
+            r = calcular_por_iu(self.pid)
         finally:
             self.btn_calcular.setEnabled(True)
             self.btn_calcular.setText("Auto-calcular desde ACU")
@@ -943,44 +1190,64 @@ class FormulaView(QWidget):
                                 r.get('msg') or "No se pudo calcular.")
             return
 
-        # Reemplazar los monomios existentes
+        n = len(r['monomios'])
         if self._monomios:
             res = QMessageBox.question(
                 self, "Auto-calcular",
-                "Esto reemplazará los monomios actuales por 3 monomios "
-                "base (J/M/E) calculados desde el ACU.\n\n¿Continuar?",
+                f"Esto reemplazará los monomios actuales por {n} monomio(s) "
+                f"derivados del ACU, agrupando los insumos por su índice "
+                f"unificado.\n\n¿Continuar?",
                 QMessageBox.Yes | QMessageBox.No
             )
             if res != QMessageBox.Yes:
                 return
 
         self._monomios = [dict(m) for m in r['monomios']]
-        self._totales_acu = r['totales']
+        self._cd = r['cd']
+        self._ius = r['ius']
+        self._monto_sin_indice = r.get('monto_sin_indice', 0.0)
         self._render_tabla()
         self._actualizar_panel_acu()
+        if self._monomios:
+            self.tbl.selectRow(0)
 
     def _actualizar_panel_acu(self):
-        if not self._totales_acu:
+        """Los índices que más pesan en el presupuesto.
+
+        Antes mostraba los tres porcentajes MO/MAT/EQ, que era todo lo que la
+        fórmula sabía. Ahora que agrupa por índice unificado, lo útil es ver
+        cuáles mandan — y cuánto costo se apoya en insumos sin índice asignado,
+        que es un supuesto y conviene que se vea.
+        """
+        if not self._ius or not self._cd:
             return
-        t = self._totales_acu
-        cd = t['cd'] or 1
         moneda = self._proyecto_meta.get('moneda', 'Soles')
-        rows = [
-            ("Mano de Obra", t['MO'] / cd),
-            ("Materiales",   t['MAT'] / cd),
-            ("Equipos",      t['EQ'] / cd),
-        ]
-        html = "<table cellspacing='0' cellpadding='4' width='100%'>"
-        for k, v in rows:
+        html = "<table cellspacing='0' cellpadding='3' width='100%'>"
+        for i in self._ius[:6]:
             html += (
-                f"<tr><td>{k}</td>"
-                f"<td align='right'><b>{v * 100:.1f}%</b></td></tr>"
+                f"<tr><td><b>{i['codigo']}</b> "
+                f"<span style='color:#95A3AB'>{i['nombre'][:24]}</span></td>"
+                f"<td align='right'><b>{i['incidencia'] * 100:.1f}%</b></td></tr>"
+            )
+        if len(self._ius) > 6:
+            resto = sum(i['incidencia'] for i in self._ius[6:])
+            html += (
+                f"<tr><td><span style='color:#95A3AB'>otros "
+                f"{len(self._ius) - 6} índices</span></td>"
+                f"<td align='right'>{resto * 100:.1f}%</td></tr>"
             )
         html += (
             f"<tr style='border-top:1px solid #D4D4D4;'>"
             f"<td><b>C.D. Total</b></td>"
-            f"<td align='right'><b>{fmt(cd, moneda)}</b></td></tr>"
+            f"<td align='right'><b>{fmt(self._cd, moneda)}</b></td></tr>"
         )
+        sin = getattr(self, '_monto_sin_indice', 0.0)
+        if sin:
+            html += (
+                f"<tr><td colspan='2' style='color:#C0621A; font-size:10px;'>"
+                f"{fmt(sin, moneda)} ({sin / self._cd * 100:.0f}%) en insumos "
+                f"sin índice asignado, contados en el de su tipo.</td></tr>"
+            )
         html += "</table>"
         self.lbl_acu.setText(html)
         self.card_acu['frame'].setVisible(True)
