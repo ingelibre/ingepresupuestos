@@ -305,6 +305,26 @@ def test_ninguna_vista_reescribe_el_estilo_de_pestana():
             f"{arch} volvió a escribir el CSS de la pestaña a mano"
 
 
+def test_la_regla_del_editor_no_pinta_los_widgets_permanentes():
+    """El borde naranja es para marcar que una celda está EN EDICIÓN.
+
+    La regla alcanza a cualquier descendiente de la vista, así que al incluir
+    QComboBox pintaba de naranja los desplegables permanentes de una columna
+    —los de «Monomio» en la composición de la fórmula— y quedaban como cuadros
+    de colores rompiendo la tabla.
+    """
+    import re
+    from pathlib import Path
+    from core.config import BASE_DIR
+    qss = (Path(BASE_DIR) / "resources" / "styles" / "main.qss").read_text(
+        encoding='utf-8')
+    m = re.search(r'((?:QAbstractItemView [A-Za-z]+,?\s*)+)\{[^}]*?'
+                  r'border:\s*1\.5px solid #F37329', qss)
+    assert m, "no encuentro la regla del editor de celda"
+    selectores = [s.strip() for s in m.group(1).split(',') if s.strip()]
+    assert selectores == ['QAbstractItemView QLineEdit'], selectores
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
