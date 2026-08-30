@@ -20,6 +20,7 @@ SOLO LEE del presupuesto/ACU, nunca lo modifica. Ver `[[project_modulo_ejecucion
 import math
 
 from core.database import get_db
+from core import obra_crud
 
 
 # ── Sincronización parte diario → valorización ───────────────────────────────
@@ -124,13 +125,7 @@ def listar_partes(proyecto_id: int) -> list[dict]:
 
 
 def get_parte(parte_id: int) -> dict | None:
-    conn = get_db()
-    try:
-        r = conn.execute("SELECT * FROM parte_diario WHERE id=?",
-                         (parte_id,)).fetchone()
-        return dict(r) if r else None
-    finally:
-        conn.close()
+    return obra_crud.obtener('parte_diario', parte_id)
 
 
 def set_observaciones(parte_id: int, texto: str) -> bool:
@@ -149,23 +144,11 @@ def set_observaciones(parte_id: int, texto: str) -> bool:
 
 
 def cerrar_parte(parte_id: int):
-    conn = get_db()
-    try:
-        conn.execute("UPDATE parte_diario SET estado='cerrado' WHERE id=?",
-                     (parte_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('parte_diario', parte_id, abierto=False)
 
 
 def reabrir_parte(parte_id: int):
-    conn = get_db()
-    try:
-        conn.execute("UPDATE parte_diario SET estado='abierto' WHERE id=?",
-                     (parte_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('parte_diario', parte_id, abierto=True)
 
 
 def eliminar_parte(parte_id: int) -> bool:
@@ -477,30 +460,8 @@ def get_recursos_dia(parte_id: int, clase: str) -> list[dict]:
 def save_recursos_dia(parte_id: int, clase: str, filas: list[dict]) -> bool:
     """Reemplaza los recursos del día de una clase. Filas vacías se ignoran.
     Devuelve False si el parte está cerrado."""
-    conn = get_db()
-    try:
-        pd = conn.execute("SELECT estado FROM parte_diario WHERE id=?",
-                         (parte_id,)).fetchone()
-        if not pd or pd['estado'] == 'cerrado':
-            return False
-        conn.execute("DELETE FROM parte_diario_recurso WHERE parte_id=? AND clase=?",
-                     (parte_id, clase))
-        orden = 0
-        for f in filas:
-            desc = (f.get('descripcion') or '').strip()
-            cant = f.get('cantidad')
-            if not desc and not cant:
-                continue
-            orden += 1
-            conn.execute(
-                "INSERT INTO parte_diario_recurso (parte_id, clase, recurso_id, "
-                "descripcion, unidad, cantidad, orden) VALUES (?,?,?,?,?,?,?)",
-                (parte_id, clase, f.get('recurso_id'), desc,
-                 (f.get('unidad') or ''), float(cant or 0), orden))
-        conn.commit()
-        return True
-    finally:
-        conn.close()
+    return obra_crud.reemplazar_detalle('parte_diario_recurso', parte_id,
+                                        clase, filas)
 
 
 _CLASE_TIPO = {'mat': 'MAT', 'eq': 'EQ', 'sc': 'SC'}

@@ -20,6 +20,7 @@ Futuro: vincular con el cuaderno de obra (consumo real) y con la valorización A
 import math
 
 from core.database import get_db
+from core import obra_crud
 from core import clasificador
 
 _TIPO_CLASE = {'MAT': 'mat', 'EQ': 'eq', 'SC': 'sc'}
@@ -62,9 +63,7 @@ def crear_requerimiento(proyecto_id: int, fecha: str = '',
     tipo = (tipo or clasificador.tipo_de_categoria(categoria or '')).strip() or 'mat'
     conn = get_db()
     try:
-        n = conn.execute(
-            "SELECT COALESCE(MAX(numero), 0) + 1 AS n FROM requerimientos "
-            "WHERE proyecto_id=?", (proyecto_id,)).fetchone()['n']
+        n = obra_crud.siguiente_numero(conn, 'requerimientos', proyecto_id)
         cur = conn.execute(
             "INSERT INTO requerimientos (proyecto_id, numero, fecha, categoria, tipo) "
             "VALUES (?,?,?,?,?)",
@@ -96,24 +95,11 @@ def set_categoria(req_id: int, categoria: str):
 
 
 def listar_requerimientos(proyecto_id: int) -> list[dict]:
-    conn = get_db()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM requerimientos WHERE proyecto_id=? ORDER BY numero",
-            (proyecto_id,)).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    return obra_crud.listar('requerimientos', proyecto_id)
 
 
 def get_requerimiento(req_id: int) -> dict | None:
-    conn = get_db()
-    try:
-        r = conn.execute("SELECT * FROM requerimientos WHERE id=?",
-                         (req_id,)).fetchone()
-        return dict(r) if r else None
-    finally:
-        conn.close()
+    return obra_crud.obtener('requerimientos', req_id)
 
 
 def set_notas(req_id: int, notas: str):
@@ -127,23 +113,11 @@ def set_notas(req_id: int, notas: str):
 
 
 def cerrar_requerimiento(req_id: int):
-    conn = get_db()
-    try:
-        conn.execute("UPDATE requerimientos SET estado='cerrado' WHERE id=?",
-                     (req_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('requerimientos', req_id, abierto=False)
 
 
 def reabrir_requerimiento(req_id: int):
-    conn = get_db()
-    try:
-        conn.execute("UPDATE requerimientos SET estado='abierto' WHERE id=?",
-                     (req_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('requerimientos', req_id, abierto=True)
 
 
 def eliminar_requerimiento(req_id: int) -> bool:
@@ -193,31 +167,8 @@ def get_detalle(req_id: int, tipo: str) -> list[dict]:
 def save_detalle(req_id: int, tipo: str, filas: list[dict]) -> bool:
     """Reemplaza el detalle de un tipo. Devuelve False si el requerimiento está
     cerrado. Filas vacías se ignoran."""
-    conn = get_db()
-    try:
-        rq = conn.execute("SELECT estado FROM requerimientos WHERE id=?",
-                         (req_id,)).fetchone()
-        if not rq or rq['estado'] == 'cerrado':
-            return False
-        conn.execute("DELETE FROM requerimiento_detalle WHERE requerimiento_id=? "
-                     "AND tipo=?", (req_id, tipo))
-        orden = 0
-        for f in filas:
-            desc = (f.get('descripcion') or '').strip()
-            cant = f.get('cantidad')
-            if not desc and not cant:
-                continue
-            orden += 1
-            conn.execute(
-                "INSERT INTO requerimiento_detalle (requerimiento_id, tipo, "
-                "recurso_id, descripcion, unidad, cantidad, orden) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (req_id, tipo, f.get('recurso_id'), desc, (f.get('unidad') or ''),
-                 float(cant or 0), orden))
-        conn.commit()
-        return True
-    finally:
-        conn.close()
+    return obra_crud.reemplazar_detalle('requerimiento_detalle', req_id,
+                                        tipo, filas)
 
 
 # ── Presupuesto vs requerido ─────────────────────────────────────────────────

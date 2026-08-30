@@ -22,6 +22,7 @@ Ver `[[project_modulo_ejecucion_obra]]`.
 """
 
 from core.database import get_db, parcial_wysiwyg, _r2
+from core import obra_crud
 
 
 # ── Cabecera: crear / listar / cerrar / eliminar ─────────────────────────────
@@ -31,10 +32,7 @@ def crear_valorizacion(proyecto_id: int, periodo_desde: str = '',
     """Crea una valorización nueva con número correlativo. Devuelve su id."""
     conn = get_db()
     try:
-        n = conn.execute(
-            "SELECT COALESCE(MAX(numero), 0) + 1 AS n FROM valorizaciones "
-            "WHERE proyecto_id=?", (proyecto_id,)
-        ).fetchone()['n']
+        n = obra_crud.siguiente_numero(conn, 'valorizaciones', proyecto_id)
         cur = conn.execute(
             "INSERT INTO valorizaciones (proyecto_id, numero, periodo_desde, "
             "periodo_hasta) VALUES (?,?,?,?)",
@@ -53,46 +51,20 @@ def crear_valorizacion(proyecto_id: int, periodo_desde: str = '',
 
 def listar_valorizaciones(proyecto_id: int) -> list[dict]:
     """Lista las valorizaciones del proyecto ordenadas por número."""
-    conn = get_db()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM valorizaciones WHERE proyecto_id=? ORDER BY numero",
-            (proyecto_id,)
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    return obra_crud.listar('valorizaciones', proyecto_id)
 
 
 def get_valorizacion(val_id: int) -> dict | None:
-    conn = get_db()
-    try:
-        r = conn.execute("SELECT * FROM valorizaciones WHERE id=?",
-                         (val_id,)).fetchone()
-        return dict(r) if r else None
-    finally:
-        conn.close()
+    return obra_crud.obtener('valorizaciones', val_id)
 
 
 def cerrar_valorizacion(val_id: int):
     """Congela la valorización (no se puede editar su metrado)."""
-    conn = get_db()
-    try:
-        conn.execute("UPDATE valorizaciones SET estado='cerrada' WHERE id=?",
-                     (val_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('valorizaciones', val_id, abierto=False)
 
 
 def reabrir_valorizacion(val_id: int):
-    conn = get_db()
-    try:
-        conn.execute("UPDATE valorizaciones SET estado='abierta' WHERE id=?",
-                     (val_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    obra_crud.set_estado('valorizaciones', val_id, abierto=True)
 
 
 def set_periodo(val_id: int, periodo_desde: str, periodo_hasta: str) -> bool:

@@ -176,6 +176,11 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 - **Almacén:** kárdex de MATERIALES (Pedido/Ingresado/Consumido/Stock/Por llegar) + entradas con fecha + kárdex por día.
 - **Curva S:** programado vs reprogramado vs real; denominador = presupuesto contractual; cortes semana/mes/mes_cal.
 - **Cuaderno/parte diario:** metrado ejecutado por día; push parte→valorización (`metrado_periodo = Σ metrado_dia` en el rango); celda de valorización solo-lectura cuando `origen='diario'`.
+- **Ciclo de vida común — `core/obra_crud.py` (2026-08-29).** Los tres documentos (requerimiento · parte diario · valorización) cuelgan de un proyecto, se leen por id, se listan, se cierran/reabren y dos guardan un detalle por categoría. Eso estaba escrito **tres veces**; ahora sale de `obra_crud`: `obtener` · `listar` · `set_estado` · `siguiente_numero` · `reemplazar_detalle` (+ `estado_abierto`/`estado_cerrado`). Los módulos conservan su API pública —hay **65 llamadas** desde vistas y reportes— y quedan como envoltorios de una línea.
+  - **TRAMPA, la razón por la que esto es delicado:** requerimientos y partes usan `'abierto'`/`'cerrado'`; las valorizaciones, **`'abierta'`/`'cerrada'`**. El género NO es un descuido: hay consultas por todo el proyecto que filtran por esas cadenas exactas. Por eso el estado sale del dict `_DOCS` y nunca se escribe a mano. Test: `test_las_valorizaciones_usan_estado_en_femenino`.
+  - **Lo que NO se unificó, a propósito:** `crear_*` y `eliminar_*`. Parecen clones pero son seis reglas de negocio distintas — el requerimiento deriva su `tipo` de la categoría y al borrarse recompacta la numeración y borra adjuntos; el parte es *get-or-create* por fecha y al borrarse re-sincroniza su valorización; la valorización arrastra los partes del período al nacer y solo deja borrar la ÚLTIMA. Duplicado no es lo mismo que parecido.
+  - Los nombres de tabla se interpolan en el SQL, así que `_DOCS` y `_DETALLES` son **lista blanca**; `listar(orden=)` valida el nombre de columna. Tests de eso incluidos.
+  - Verificado con una batería de 24 mediciones sobre las 14 funciones públicas (crear/get/listar/cerrar/reabrir/eliminar/detalle, con sus caminos de error) antes y después: **24/24 idénticas**. Tests: `tests/test_obra_crud.py` (11).
 
 ---
 
