@@ -7,7 +7,8 @@ import os
 import re
 
 from core.database import get_db, _siguiente_codigo_inei
-from utils.formatting import pad_codigo as _pad_codigo, parse_num, parse_num_opt
+from utils.formatting import (pad_codigo as _pad_codigo, num_importado,
+                              parse_num, parse_num_opt)
 
 
 def _norm_desc(s: str) -> str:
@@ -87,15 +88,8 @@ def _resolve_recurso(conn, codigo: str, descripcion: str, tipo: str,
 # ─── UTILS ────────────────────────────────────────────────────────────────────
 
 def safe_float(val):
-    """Celda de Excel → float. Las celdas numéricas llegan como int/float;
-    las de TEXTO pueden traer separador de miles («1,234.56») y el viejo
-    replace(',', '.') las partía en dos puntos → except → 0.0 silencioso.
-    parse_num desambigua por estructura (mismo criterio que la UI)."""
-    if val is None:
-        return 0.0
-    if isinstance(val, (int, float)):
-        return float(val)
-    return parse_num(val)
+    """Celda de Excel → float. Ver `utils.formatting.num_importado`."""
+    return num_importado(val)
 
 def safe_str(val):
     if val is None:

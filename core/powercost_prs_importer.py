@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 from typing import Optional
+from utils.formatting import num_importado
 
 _IS_WINDOWS = sys.platform == 'win32'
 
@@ -289,12 +290,8 @@ def _str(v) -> str:
 
 
 def _num(v, default: float = 0.0) -> float:
-    if v is None or v == '':
-        return default
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
+    """Ver `utils.formatting.num_importado`."""
+    return num_importado(v, default)
 
 
 def _int(v, default: int = 0) -> int:

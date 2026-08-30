@@ -135,3 +135,31 @@ def fecha_dmy(iso) -> str:
     """
     p = str(iso or '').split('-')
     return f"{p[2]}/{p[1]}/{p[0]}" if len(p) == 3 else str(iso or '')
+
+
+def num_importado(val, default: float = 0.0) -> float:
+    """Valor numérico leído de un archivo importado → float.
+
+    Un mismo campo puede llegar de tres formas según de dónde venga el
+    archivo, y las tres tienen que dar lo mismo:
+
+    * **número nativo** — SQLite (Delphin) y las celdas numéricas de Excel
+      devuelven int/float ya resueltos;
+    * **texto** — mdb-export (PowerCost) y las celdas de TEXTO de Excel
+      devuelven cadenas, que pueden traer separador de miles («1,234.56»).
+      El viejo ``float(v)`` las partía en dos puntos → excepción → 0.0 en
+      silencio, que es exactamente el bug que reportó un usuario en la UI
+      (ver `parse_num`);
+    * **ausente** — ``None`` o cadena vacía.
+
+    ``default`` es lo que se devuelve cuando no hay número, y NO es un
+    detalle: varios campos lo usan para su valor de negocio —jornada 8 h,
+    rendimiento 1, participación 1—. Poner 0 ahí anularía el ACU entero, así
+    que un texto sin número tampoco cae a 0: cae al default, como siempre.
+    """
+    if val is None or val == '':
+        return default
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    n = parse_num_opt(val)
+    return default if n is None else n
