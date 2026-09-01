@@ -1,0 +1,88 @@
+# IngePresupuestos snap — strict confinement over the PyInstaller bundle.
+# Staged by CI (build-linux.yml, job "snap"): @VERSION@ substituted, onedir
+# in ./payload, desktop entry in snap/gui/. mdbtools is staged because the
+# PowerCost importer shells out to it; LibreOffice integrations degrade
+# gracefully when absent (same story as the Flatpak).
+name: ingepresupuestos
+base: core22
+version: "@VERSION@"
+title: IngePresupuestos
+summary: Presupuestos de obra civil — APU, metrados e índices INEI, libre
+description: |
+  IngePresupuestos es software libre (GPL-3.0) de presupuestos de obra
+  civil, hecho por y para ingenieros, arquitectos y contratistas peruanos:
+  análisis de precios unitarios, metrados, fórmula polinómica e índices
+  INEI actualizados, sin licencias por asiento ni candados.
+
+  Tus presupuestos existentes entran directo:
+
+  - Importadores nativos de S10 (.S2K), PowerCost (.prs), Delphin
+    (.sqlite), Excel e IFC.
+  - Exporta a Excel, Word y PDF listos para entregar.
+  - Asistente IA opcional con tu propia clave.
+  - Base de datos propia, abierta y portable (.db).
+
+  Parte del ecosistema Inge, junto a IngeTrazo (modelado 3D/BIM) e
+  IngeCAD (CAD 2D con DWG nativo): terreno → trazo → BIM → presupuesto.
+
+  IngePresupuestos is free, open-source construction budgeting software
+  for the Peruvian market: unit price analysis, quantity takeoffs, INEI
+  index-based escalation formulas, and native importers for S10,
+  PowerCost, Delphin, Excel and IFC. Spanish UI.
+
+  S10 y PowerCost son marcas de sus respectivos titulares; IngePresupuestos
+  es un proyecto independiente, sin afiliación con ellos.
+license: GPL-3.0-or-later
+website: https://ingepresupuestos.com
+contact: https://github.com/ingelibre/ingepresupuestos/issues
+source-code: https://github.com/ingelibre/ingepresupuestos
+issues: https://github.com/ingelibre/ingepresupuestos/issues
+grade: stable
+confinement: strict
+
+apps:
+  ingepresupuestos:
+    command: opt/ingepresupuestos/ingepresupuestos
+    plugs:
+      - opengl
+      - x11
+      - wayland
+      - desktop
+      - desktop-legacy
+      - home
+      - network
+      - removable-media
+    environment:
+      QT_QPA_PLATFORM: xcb
+      FONTCONFIG_PATH: $SNAP/etc/fonts
+      # The PowerCost importer finds mdb-* on PATH; they live in the snap.
+      PATH: $SNAP/usr/bin:$PATH
+
+parts:
+  bundle:
+    plugin: dump
+    source: payload
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/opt/ingepresupuestos"
+      cp -a "$CRAFT_PART_SRC/." "$CRAFT_PART_INSTALL/opt/ingepresupuestos/"
+    stage-packages:
+      - libgl1
+      - libegl1
+      - libopengl0
+      - libx11-6
+      - libx11-xcb1
+      - libxcb-glx0
+      - libxkbcommon-x11-0
+      - libxcb-cursor0
+      - libxcb-icccm4
+      - libxcb-image0
+      - libxcb-keysyms1
+      - libxcb-randr0
+      - libxcb-render-util0
+      - libxcb-shape0
+      - libxcb-xinerama0
+      - libxcb-xkb1
+      - libfontconfig1
+      - fontconfig-config
+      - fonts-dejavu-core
+      - mdbtools

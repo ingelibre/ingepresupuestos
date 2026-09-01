@@ -164,3 +164,100 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
     secrets: inherit
+
+  snap:
+    name: Snap (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1 libegl1 libgl1 mdbtools file
+
+      - name: Instalar dependencias Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      # Igual que el AppImage: el modelo RAG es opcional y tolerante.
+      - name: Descargar modelo RAG (model2vec) desde R2
+        run: |
+          mkdir -p resources/models
+          if curl -fsSL "https://downloads.ingepresupuestos.com/models/potion-multilingual-128M.tar.gz" -o /tmp/m2v.tar.gz; then
+            tar -xzf /tmp/m2v.tar.gz -C resources/models/ && echo "modelo RAG OK"
+          else
+            echo "::warning::modelo RAG no disponible — el snap saldrá sin Fase 2 (usa fuzzy)"
+          fi
+
+      - name: Compilar con PyInstaller
+        run: pyinstaller ingepresupuestos.spec --noconfirm
+
+      - name: Armar el árbol del snap
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION=$(grep '^CURRENT_VERSION' core/update_manager.py | head -1 | cut -d'"' -f2)
+          fi
+          echo "snap para versión: $VERSION"
+          mkdir -p build/snap-stage/snap/gui build/snap-stage/payload
+          sed "s/@VERSION@/$VERSION/" packaging/snap/snapcraft.yaml.in \
+            > build/snap-stage/snap/snapcraft.yaml
+          cp -a dist/ingepresupuestos/. build/snap-stage/payload/
+          cp resources/icons/icon-256.png build/snap-stage/snap/gui/ingepresupuestos.png
+          sed -e 's|^Exec=.*|Exec=ingepresupuestos %F|' \
+              -e 's|^Icon=.*|Icon=${SNAP}/meta/gui/ingepresupuestos.png|' \
+              installer/ingepresupuestos.desktop \
+              > build/snap-stage/snap/gui/ingepresupuestos.desktop
+
+      - name: Construir el snap
+        id: snapbuild
+        uses: snapcore/action-build@v1
+        with:
+          path: build/snap-stage
+
+      - name: Humo del snap
+        run: |
+          sudo snap install --dangerous "${{ steps.snapbuild.outputs.snap }}"
+          test -x /snap/ingepresupuestos/current/opt/ingepresupuestos/ingepresupuestos
+          echo "instalado y binario presente"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IngePresupuestos-snap-x86_64
+          path: ${{ steps.snapbuild.outputs.snap }}
+          if-no-files-found: error
+
+      - name: Adjuntar al release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "IngePresupuestos ${GITHUB_REF_NAME#v}" \
+              --notes "Ver CHANGELOG para los detalles."
+          gh release upload "${GITHUB_REF_NAME}" "${{ steps.snapbuild.outputs.snap }}" --clobber
+
+      - name: Publicar a la Snap Store (si hay credencial)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "Sin SNAPCRAFT_STORE_CREDENTIALS — se omite la publicación."
+            exit 0
+          fi
+          sudo snap install snapcraft --classic
+          snapcraft upload "${{ steps.snapbuild.outputs.snap }}" --release=stable
