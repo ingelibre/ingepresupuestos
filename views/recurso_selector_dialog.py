@@ -28,6 +28,28 @@ _TIPO_FG  = {'MO': '#856404', 'MAT': '#0F5132', 'EQ':  '#084298',
              'SC': '#6A36B1'}
 
 
+def _cuadrilla_y_cantidad(tipo, unidad, *, cuad, cant, rend, jornada,
+                          es_global) -> tuple[float, float]:
+    """Qué se graba en `acu_items` para un insumo que entra al ACU.
+
+    Devuelve `(cuadrilla, cantidad)`. La regla es la del ACU (helpers de
+    `core.database`): en MO y equipo por hora o por día la cantidad se DERIVA
+    de la cuadrilla; en todo lo demás —y en toda partida global— la cuadrilla
+    no aplica y se graba 0, nunca el «1.000» que trae el campo por defecto.
+
+    Las DOS pestañas del diálogo pasan por aquí. Hasta la 3.0.4 «Crear nuevo
+    recurso» grababa la cuadrilla tal cual para cualquier tipo, así que un
+    material nuevo entraba con cuadrilla 1.0 mientras «Buscar en catálogo» le
+    ponía 0 (reporte de David Ramos, 2 sep 2026).
+    """
+    if es_global or not (_es_por_dia(tipo, unidad) or _es_por_hora(tipo, unidad)):
+        return 0.0, cant
+    if cuad <= 0:
+        return 0.0, cant
+    factor = 1 if _es_por_dia(tipo, unidad) else jornada
+    return cuad, _rn(cuad / (rend or 1) * factor, get_decimales_cant_acu())
+
+
 class RecursoSelectorDialog(QDialog):
     """Buscar recursos del catálogo (checkboxes) o crear uno nuevo y agregarlos al ACU."""
 
@@ -44,10 +66,14 @@ class RecursoSelectorDialog(QDialog):
         # Proyecto de la partida — para priorizar recursos ya usados (evita duplicados).
         conn = get_db()
         prow = conn.execute(
-            "SELECT proyecto_id FROM partidas WHERE id=?", (part_id,)
+            "SELECT proyecto_id, unidad FROM partidas WHERE id=?", (part_id,)
         ).fetchone()
         conn.close()
         self._proyecto_id = prow['proyecto_id'] if prow else None
+        # Partida global (glb/est/serv): cantidad directa en todos los
+        # insumos, la cuadrilla no aplica a ninguno. Se decide UNA vez y la
+        # usan tanto el formulario como la grabación, para que no discrepen.
+        self._partida_es_global = bool(prow) and _es_partida_global(prow['unidad'])
         self._build_ui()
         self._buscar()
 
@@ -338,24 +364,34 @@ class RecursoSelectorDialog(QDialog):
             "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
         )
         self.inp_n_unidad.setCompleter(comp_u)
+        self.inp_n_unidad.textChanged.connect(self._sync_cuadrilla_nuevo)
         form.addRow("Unidad:", self.inp_n_unidad)
 
         self.inp_n_precio = QLineEdit("0.00")
         form.addRow("Precio:", self.inp_n_precio)
 
+        # Cuadrilla O cantidad, nunca las dos: la misma regla que decide qué
+        # celda se edita en la tabla del ACU (ver _sync_cuadrilla_nuevo).
         self.inp_n_cuad = QLineEdit("1.000")
         self.inp_n_cuad.setMaximumWidth(80)
+        self.inp_n_cuad.setToolTip(
+            "Solo mano de obra y equipo por hora o por día: la cantidad se "
+            "calcula como cuadrilla / rendimiento × jornada.")
         form.addRow("Cuadrilla:", self.inp_n_cuad)
 
         self.inp_n_cant = QLineEdit("0.0000")
         self.inp_n_cant.setMaximumWidth(80)
+        self.inp_n_cant.setToolTip(
+            "Cantidad directa por unidad de partida: materiales, subcontratos "
+            "y equipo que no va por hora.")
         form.addRow("Cantidad:", self.inp_n_cant)
 
         self.lbl_n_error = QLabel("")
         self.lbl_n_error.setStyleSheet("color:#dc3545; font-size:11px;")
         form.addRow("", self.lbl_n_error)
 
-        # Inicializar código con tipo por defecto
+        # Inicializar código con el tipo por defecto (y con él, qué campo
+        # queda activo: cuadrilla o cantidad).
         self._on_tipo_nuevo()
         return w
 
@@ -555,7 +591,7 @@ class RecursoSelectorDialog(QDialog):
 
         conn = get_db()
         partida = conn.execute(
-            "SELECT rendimiento, proyecto_id, unidad FROM partidas WHERE id=?",
+            "SELECT rendimiento, proyecto_id FROM partidas WHERE id=?",
             (self.part_id,)
         ).fetchone()
         if not partida:
@@ -568,7 +604,7 @@ class RecursoSelectorDialog(QDialog):
         ).fetchone()
         jornada = (proy['jornada_laboral'] if proy else None) or 8
         rend    = partida['rendimiento'] or 1
-        es_global = _es_partida_global(partida['unidad'])
+        es_global = self._partida_es_global
 
         for recurso_id in self._checked_ids:
             rec = conn.execute(
@@ -577,16 +613,9 @@ class RecursoSelectorDialog(QDialog):
             if not rec:
                 continue
 
-            if not es_global and _es_por_dia(rec['tipo'], rec['unidad']):
-                cuadrilla_real = cuad
-                cantidad_real  = _rn(cuad / rend, get_decimales_cant_acu()) if cuad > 0 else cant
-            elif not es_global and _es_por_hora(rec['tipo'], rec['unidad']):
-                cuadrilla_real = cuad
-                cantidad_real  = (_rn(cuad / rend * jornada, get_decimales_cant_acu())
-                                  if cuad > 0 else cant)
-            else:
-                cuadrilla_real = 0.0
-                cantidad_real  = cant
+            cuadrilla_real, cantidad_real = _cuadrilla_y_cantidad(
+                rec['tipo'], rec['unidad'], cuad=cuad, cant=cant, rend=rend,
+                jornada=jornada, es_global=es_global)
 
             # Un insumo = un precio por proyecto: si el recurso ya se usa
             # en este proyecto, entra con ese precio (no el del catálogo).
@@ -646,20 +675,18 @@ class RecursoSelectorDialog(QDialog):
             cuad = cant = 0.0
 
         partida = conn.execute(
-            "SELECT rendimiento, proyecto_id, unidad FROM partidas WHERE id=?",
+            "SELECT rendimiento, proyecto_id FROM partidas WHERE id=?",
             (self.part_id,)
         ).fetchone()
-        if (partida and not _es_partida_global(partida['unidad'])
-                and (_es_por_dia(tipo, unidad) or _es_por_hora(tipo, unidad))
-                and cuad > 0 and cant == 0):
-            proy = conn.execute(
-                "SELECT jornada_laboral FROM proyectos WHERE id=?",
-                (partida['proyecto_id'],)
-            ).fetchone()
-            jornada = (proy['jornada_laboral'] if proy else None) or 8
-            factor = 1 if _es_por_dia(tipo, unidad) else jornada
-            cant = _rn(cuad / (partida['rendimiento'] or 1) * factor,
-                       get_decimales_cant_acu())
+        proy = conn.execute(
+            "SELECT jornada_laboral FROM proyectos WHERE id=?",
+            (partida['proyecto_id'] if partida else None,)
+        ).fetchone()
+        cuad, cant = _cuadrilla_y_cantidad(
+            tipo, unidad, cuad=cuad, cant=cant,
+            rend=(partida['rendimiento'] if partida else None) or 1,
+            jornada=(proy['jornada_laboral'] if proy else None) or 8,
+            es_global=self._partida_es_global)
 
         conn.execute(
             "INSERT INTO acu_items "
@@ -681,8 +708,51 @@ class RecursoSelectorDialog(QDialog):
             return self.inp_n_inei.text().strip() if hasattr(self, 'inp_n_inei') else ''
         return val or ''
 
+    def _cuadrilla_aplica(self, tipo, unidad) -> bool:
+        """¿La cantidad de este insumo se deriva de la cuadrilla? Regla del ACU
+        (`core.database`), acotada por la partida global."""
+        return (not self._partida_es_global
+                and (_es_por_dia(tipo, unidad) or _es_por_hora(tipo, unidad)))
+
+    def _sync_cuadrilla_nuevo(self):
+        """Habilita cuadrilla O cantidad según tipo y unidad del recurso nuevo.
+
+        Es lo que hace la tabla del ACU con sus celdas: MO y equipo por hora o
+        por día editan la cuadrilla y la cantidad sale de la fórmula;
+        materiales, subcontratos y equipo por unidad editan la cantidad y no
+        tienen cuadrilla. Antes los dos campos estaban siempre activos.
+        """
+        if not hasattr(self, 'inp_n_cant'):
+            return   # todavía construyendo el formulario
+        aplica = self._cuadrilla_aplica(self.cmb_n_tipo.currentData(),
+                                        self.inp_n_unidad.text().strip())
+        self.inp_n_cuad.setEnabled(aplica)
+        self.inp_n_cant.setEnabled(not aplica)
+        # El campo que no aplica se vacía (un material con «1.000» de cuadrilla
+        # a la vista era justamente la confusión) y su valor se guarda para
+        # devolverlo si el tipo o la unidad vuelven a hacerlo aplicable: la
+        # unidad se escribe letra a letra y pasa por estados intermedios.
+        if aplica:
+            if not self.inp_n_cuad.text().strip():
+                self.inp_n_cuad.setText(getattr(self, '_cuad_previa', '') or "1.000")
+            self.inp_n_cuad.setPlaceholderText("")
+            if self.inp_n_cant.text().strip():
+                self._cant_previa = self.inp_n_cant.text()
+            self.inp_n_cant.clear()
+            self.inp_n_cant.setPlaceholderText("auto")
+        else:
+            if self.inp_n_cuad.text().strip():
+                self._cuad_previa = self.inp_n_cuad.text()
+            self.inp_n_cuad.clear()
+            self.inp_n_cuad.setPlaceholderText("no aplica")
+            if not self.inp_n_cant.text().strip():
+                self.inp_n_cant.setText(getattr(self, '_cant_previa', '') or "0.0000")
+            self.inp_n_cant.setPlaceholderText("")
+
     def _on_tipo_nuevo(self):
-        """Al cambiar tipo, preselecciona el índice INEI por defecto del tipo."""
+        """Al cambiar tipo: cuadrilla o cantidad según la regla del ACU, y el
+        índice INEI por defecto del tipo."""
+        self._sync_cuadrilla_nuevo()
         if not hasattr(self, 'cmb_n_tipo') or not hasattr(self, 'cmb_n_inei'):
             return
         from core.config import INEI_DEFAULT

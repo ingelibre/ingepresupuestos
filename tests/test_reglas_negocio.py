@@ -697,6 +697,92 @@ def test_unidades_que_derivan_la_cantidad_de_la_cuadrilla():
         assert not d.partida_global(u), u
 
 
+def test_el_dialogo_de_recursos_graba_cuadrilla_solo_donde_aplica():
+    """«Crear nuevo recurso» grababa la cuadrilla tal cual para cualquier tipo:
+    un material entraba al ACU con cuadrilla 1.0 (el valor por defecto del
+    campo) mientras «Buscar en catálogo» le ponía 0. Reporte de David Ramos,
+    2 sep 2026.
+
+    Ahora las dos pestañas pasan por `_cuadrilla_y_cantidad`, y el formulario
+    habilita cuadrilla O cantidad con la misma regla que la tabla del ACU.
+    """
+    import os, inspect
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    import views.recurso_selector_dialog as RS
+
+    # Las dos pestañas usan la función única, ninguna resuelve la regla a mano
+    for fn in (RS.RecursoSelectorDialog._agregar_existentes,
+               RS.RecursoSelectorDialog._agregar_nuevo):
+        fuente = inspect.getsource(fn)
+        assert '_cuadrilla_y_cantidad(' in fuente, fn.__name__
+        assert '_es_por_hora(' not in fuente, \
+            f"{fn.__name__} volvió a decidir la cuadrilla por su cuenta"
+
+    conn = _db_seed()
+    p = conn.execute(
+        "SELECT p.id, p.rendimiento, pr.jornada_laboral FROM partidas p "
+        "JOIN proyectos pr ON pr.id = p.proyecto_id "
+        "WHERE p.rendimiento > 0 "
+        "  AND lower(p.unidad) NOT IN ('glb','gbl','est','serv') LIMIT 1"
+    ).fetchone()
+    conn.close()
+    part_id, rend = p['id'], p['rendimiento']
+    jornada = p['jornada_laboral'] or 8
+
+    dlg = RS.RecursoSelectorDialog(part_id, {})
+    def _tipo(t):
+        dlg.cmb_n_tipo.setCurrentIndex(dlg.cmb_n_tipo.findData(t))
+    def _campos():
+        return dlg.inp_n_cuad.isEnabled(), dlg.inp_n_cant.isEnabled()
+
+    # Formulario: cuadrilla O cantidad, según tipo y unidad
+    _tipo('MAT'); dlg.inp_n_unidad.setText('kg')
+    assert _campos() == (False, True), 'material: solo cantidad'
+    _tipo('SC'); dlg.inp_n_unidad.setText('glb')
+    assert _campos() == (False, True), 'subcontrato: solo cantidad'
+    _tipo('MO'); dlg.inp_n_unidad.setText('hh')
+    assert _campos() == (True, False), 'mano de obra: solo cuadrilla'
+    _tipo('EQ'); dlg.inp_n_unidad.setText('hm')
+    assert _campos() == (True, False), 'equipo por hora: solo cuadrilla'
+    dlg.inp_n_unidad.setText('und')
+    assert _campos() == (False, True), 'equipo por unidad: solo cantidad'
+
+    # Grabación: el material entra con cuadrilla 0 aunque el campo traiga 1.000
+    _tipo('MAT'); dlg.inp_n_unidad.setText('kg')
+    dlg.inp_n_desc.setText('TEST material sin cuadrilla')
+    dlg.inp_n_precio.setText('10')
+    dlg.inp_n_cant.setText('2.5')
+    dlg.inp_n_cuad.setText('1.000')          # como quedaba antes del arreglo
+    dlg._agregar_nuevo()
+    conn = _db_seed()
+    fila = conn.execute(
+        "SELECT ai.cuadrilla, ai.cantidad FROM acu_items ai "
+        "JOIN recursos r ON r.id = ai.recurso_id "
+        "WHERE ai.partida_id=? AND r.descripcion=?",
+        (part_id, 'TEST material sin cuadrilla')).fetchone()
+    conn.close()
+    assert (fila['cuadrilla'], fila['cantidad']) == (0, 2.5), dict(fila)
+
+    # …y la MO deriva su cantidad de la cuadrilla, como en la tabla del ACU
+    _tipo('MO'); dlg.inp_n_unidad.setText('hh')
+    dlg.inp_n_desc.setText('TEST peon con cuadrilla')
+    dlg.inp_n_precio.setText('20')
+    dlg.inp_n_cuad.setText('2')
+    dlg._agregar_nuevo()
+    conn = _db_seed()
+    fila = conn.execute(
+        "SELECT ai.cuadrilla, ai.cantidad FROM acu_items ai "
+        "JOIN recursos r ON r.id = ai.recurso_id "
+        "WHERE ai.partida_id=? AND r.descripcion=?",
+        (part_id, 'TEST peon con cuadrilla')).fetchone()
+    conn.close()
+    assert fila['cuadrilla'] == 2, dict(fila)
+    assert fila['cantidad'] == d._rn(2 / rend * jornada,
+                                     d.get_decimales_cant_acu()), dict(fila)
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
