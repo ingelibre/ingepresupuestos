@@ -85,6 +85,11 @@
   </branding>
 
   <releases>
+    <release version="3.0.6" date="2026-09-03">
+      <description>
+        <p>Tres sugerencias de un usuario: al crear un recurso desde el ACU, la cuadrilla solo se habilita para mano de obra y equipo por hora o por día, y materiales y subcontratos usan solo la cantidad; al salir de un presupuesto abierto hacia Inicio o los catálogos queda la franja «Volver al proyecto» desde cualquier destino; y los reportes PDF ganan un ajuste de tamaño del texto con tres pasos (100, 90 y 80 %) para que entren más filas por hoja, sin tocar encabezado, pie ni portada. Histórico de índices unificados del INEI al 30 de agosto de 2026.</p>
+      </description>
+    </release>
     <release version="3.0.4" date="2026-08-30">
       <description>
         <p>Actualización a la Resolución Jefatural 016-2026-INEI: nueva base Diciembre 2025 = 100 con 13 áreas geográficas y 77 índices unificados (códigos 01 a 95), conviviendo con la base anterior sin mezclarlas. Se incluye el Diccionario de Elementos de la Construcción del INEI (1930 elementos) para clasificar los insumos. La importación del archivo oficial del INEI, que leía las áreas geográficas como si fueran meses, ahora carga el histórico completo. La fórmula polinómica se arma agrupando por índice unificado sobre el subtotal del presupuesto, con monomio de gastos generales y utilidad, coeficientes al milésimo, composición visible y editable, y hasta cuatro fórmulas por obra; el coeficiente K reajusta las valorizaciones, salvo en obras por administración directa. Además: los insumos por porcentaje %MT y %EQ se calculan sobre materiales y equipos, y la importación de Delphin ya no duplica los insumos de las sub-partidas.</p>
