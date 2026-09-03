@@ -34,7 +34,7 @@ Tests sin GUI (usan copia temporal de `presupuestos_seed.db`, nunca la BD activa
 ```bash
 QT_QPA_PLATFORM=offscreen venv/bin/python3 tests/test_reglas_negocio.py   # reglas de negocio
 venv/bin/python3 tests/test_core.py
-# también: test_almacen.py · test_curva_s.py · test_valorizacion.py
+# también: test_almacen.py · test_curva_s.py · test_valorizacion.py · test_catalogos.py · test_navegacion.py
 ```
 
 ---
@@ -160,6 +160,15 @@ Topbar (← Inicio · pestañas · Total) + toolbar + `QSplitter` H/V. Panel der
 - Panel ACU: cabeceras MO/MAT/EQ/SC con `_acu_row_ids[row]==-1` → saltar en edit/menu/delegate.
 - Vistas ancladas al `_root_stack` (NO diálogos): Pie, Cronograma, Reportes, Metrados, Fórmula, Memoria Descriptiva.
 - **Panel Metrados/Acero:** solo se recarga cuando su pestaña está visible. Recuerda su partida dueña en `_met_panel_pid`; los 4 caminos de guardado (acero/metrados, silencioso/explícito) escriben SIEMPRE a `_met_panel_pid`, nunca a la partida seleccionada en el árbol (si difieren, evitaba copiar la planilla a otra partida).
+- **Agregar recursos al ACU (`views/recurso_selector_dialog.py`):** lo que se graba en `acu_items` lo decide UNA función, `_cuadrilla_y_cantidad`, para las dos pestañas (Buscar y Crear nuevo). Cuadrilla solo donde la regla del ACU la deriva (MO y equipo por hora/día, partida no global); en lo demás se graba 0, nunca el «1.000» del campo. El formulario de recurso nuevo habilita cuadrilla O cantidad con esa misma regla (`_sync_cuadrilla_nuevo`), igual que las celdas de la tabla. Hasta la 3.0.4 «Crear nuevo» grababa la cuadrilla tal cual para cualquier tipo (reporte de David Ramos, 2 sep 2026). Test: `test_el_dialogo_de_recursos_graba_cuadrilla_solo_donde_aplica`.
+
+---
+
+## Navegación — `views/main_window.py`
+
+`QStackedWidget` con una vista por nombre (`vista_nombre`). Las ProyectoView abiertas siguen vivas en el stack (`_proyectos_abiertos`): volver a un proyecto es cambiar de índice, no abrirlo de nuevo.
+- **Una sola puerta a las vistas globales: `_ir_a_vista_global(nombre, nav=, bot=, headerbar=, tab=)`.** Todo `_ir_a_*` (Inicio, Insumos, Biblioteca, INEI, Importar, Exportar, Config, Acerca, IA) pasa por ahí. Regla: **si se sale de un proyecto queda el banner «← Volver al proyecto»**, sea cual sea el destino, y el sidebar se muestra. Se decide con `_pid_proyecto_activo()` ANTES de cambiar de vista. Hasta la 3.0.4 el banner lo ponían solo INEI/Config/IA, y solo si `_sb_collapsed`: desde el menú lateral (sidebar visible) Inicio y Catálogos no dejaban camino de vuelta (reporte de David Ramos, 2 sep 2026). NO volver a decidir el banner dentro de un `_ir_a_*` suelto — `tests/test_navegacion.py` lo vigila.
+- Límite conocido: borrar desde Inicio un proyecto que sigue abierto no cierra su pestaña ni el banner (ya pasaba con la barra de pestañas de los proyectos).
 
 ---
 

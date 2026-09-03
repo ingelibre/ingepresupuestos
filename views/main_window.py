@@ -453,9 +453,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.usuario = usuario
         self._proyectos_abiertos: list[dict] = []   # [{pid, nombre}]
-        # Si el usuario está viendo INEI/Config como atajo desde un proyecto,
-        # aquí guardamos el pid al que volver. None = no hay proyecto al que
-        # regresar (estamos en flujo normal con sidebar visible).
+        # Proyecto al que vuelve el banner «← Volver al proyecto» cuando el
+        # usuario salió de uno hacia una vista global (ver _ir_a_vista_global).
+        # None = no hay proyecto al que regresar.
         self._volver_a_pid: int | None = None
         # ¿Usar barra de título custom o nativa del sistema? Configurable.
         try:
@@ -623,8 +623,8 @@ class MainWindow(QMainWindow):
         self._headerbar = self._make_headerbar()
         rv.addWidget(self._headerbar)
 
-        # Banner "← Volver al proyecto X" — visible solo cuando el usuario
-        # vino desde un proyecto y está usando INEI/Configuración como atajo
+        # Banner «← Volver al proyecto X» — visible mientras el usuario está
+        # en una vista global habiendo salido de un proyecto (_ir_a_vista_global)
         self._banner_volver = self._make_banner_volver()
         rv.addWidget(self._banner_volver)
 
@@ -874,7 +874,7 @@ class MainWindow(QMainWindow):
 
         nombre_corto = nombre[:50] + "…" if len(nombre) > 50 else nombre
         self._btn_volver_proy.setText(f"←  Volver al proyecto «{nombre_corto}»")
-        self._lbl_volver_meta.setText("  ·  estás viendo un atajo global")
+        self._lbl_volver_meta.setText("  ·  sigue abierto")
         self._volver_a_pid = pid
         self._banner_volver.setVisible(True)
 
@@ -1079,11 +1079,36 @@ class MainWindow(QMainWindow):
                 w.actualizar_btn_sidebar(self._sb_collapsed)
 
     def _ir_a_dashboard(self):
-        self._ocultar_banner_volver()
+        self._ir_a_vista_global("dashboard", nav=0, headerbar=True)
+
+    def _ir_a_vista_global(self, nombre: str, *, nav: int | None = None,
+                           bot: int | None = None, headerbar: bool = False,
+                           tab: str | None = None):
+        """Única puerta a las vistas globales: Inicio, catálogos, Importar,
+        Exportar, Configuración, Acerca de.
+
+        Regla: **si se sale de un proyecto queda el banner «← Volver al
+        proyecto»**, sea cual sea el destino, y el sidebar se muestra. Hasta
+        la 3.0.4 el banner lo ponían solo Índices INEI, Configuración e IA, y
+        solo si el sidebar estaba colapsado: bastaba mostrar el sidebar desde
+        el proyecto y pulsar Inicio o Catálogos para perder el camino de
+        vuelta (reporte de David Ramos, 2 sep 2026). La decisión se toma ANTES
+        de cambiar de vista, que es cuando todavía se sabe de dónde se viene.
+        """
+        pid_actual = self._pid_proyecto_activo()
         self._expandir_sidebar()
-        self._activar_nav(0)
-        self._headerbar.setVisible(True)
-        self._cargar_vista("dashboard")
+        if nav is not None:
+            self._activar_nav(nav)
+        if bot is not None:
+            self._activar_bot(bot)
+        self._headerbar.setVisible(headerbar)
+        self._cargar_vista(nombre)
+        if tab:
+            self._seleccionar_tab_config(tab)
+        if pid_actual is not None:
+            self._mostrar_banner_volver(pid_actual)
+        else:
+            self._ocultar_banner_volver()
 
     # ── Resize por bordes (FramelessWindowHint) ──────────────────────────────
 
@@ -1318,91 +1343,37 @@ class MainWindow(QMainWindow):
         menu.exec(pos)
 
     def _ir_a_importar(self):
-        self._expandir_sidebar()
-        self._activar_nav(3)
-        self._headerbar.setVisible(False)
-        self._cargar_vista("importar")
+        self._ir_a_vista_global("importar", nav=3)
 
     def _ir_a_exportar(self):
-        self._expandir_sidebar()
-        self._activar_nav(4)
-        self._headerbar.setVisible(False)
-        self._cargar_vista("exportar")
+        self._ir_a_vista_global("exportar", nav=4)
 
     def _ir_a_biblioteca(self):
-        self._expandir_sidebar()
-        self._activar_nav(2)              # botón "Catálogos"
-        self._headerbar.setVisible(False)
-        self._cargar_vista("biblioteca")
+        self._ir_a_vista_global("biblioteca", nav=2)      # botón «Catálogos»
 
     def _ir_a_recursos(self):
-        self._expandir_sidebar()
-        self._activar_nav(2)              # botón "Catálogos"
-        self._headerbar.setVisible(False)
-        self._cargar_vista("recursos")
+        self._ir_a_vista_global("recursos", nav=2)        # botón «Catálogos»
 
     def _ir_a_indices_inei(self):
-        # Recordar desde qué proyecto se entra, antes de cambiar de vista.
+        # Recordar desde qué proyecto se entra, antes de cambiar de vista:
+        # el diccionario puede acotarse a los insumos de ese proyecto.
         _pid_ctx = self._pid_proyecto_activo()
         _nom_ctx = ''
         if _pid_ctx is not None:
             actual = self.stack.currentWidget()
             _nom_ctx = str(getattr(actual, 'proyecto_nombre', '') or '')
         self._pid_contexto_indices = (_pid_ctx, _nom_ctx) if _pid_ctx else None
-
-        # Context-aware: si estamos en un proyecto (sidebar colapsado),
-        # actuar como atajo modal — no expandir sidebar, mostrar banner
-        # para volver al proyecto.
-        if self._sb_collapsed:
-            pid_actual = self._pid_proyecto_activo()
-            self._cargar_vista("indices_inei")
-            if pid_actual is not None:
-                self._mostrar_banner_volver(pid_actual)
-            return
-        # Flujo normal con sidebar visible
-        self._ocultar_banner_volver()
-        self._expandir_sidebar()
-        self._activar_nav(2)              # botón "Catálogos"
-        self._headerbar.setVisible(False)
-        self._cargar_vista("indices_inei")
+        self._ir_a_vista_global("indices_inei", nav=2)    # botón «Catálogos»
 
     def _ir_a_configuracion(self):
-        # Context-aware: si estamos en un proyecto, mostrar como atajo modal
-        if self._sb_collapsed:
-            pid_actual = self._pid_proyecto_activo()
-            self._headerbar.setVisible(False)
-            self._cargar_vista("configuracion")
-            if pid_actual is not None:
-                self._mostrar_banner_volver(pid_actual)
-            return
-        # Flujo normal con sidebar visible
-        self._ocultar_banner_volver()
-        self._expandir_sidebar()
-        self._activar_bot(0)
-        self._headerbar.setVisible(False)
-        self._cargar_vista("configuracion")
+        self._ir_a_vista_global("configuracion", bot=0)
 
     def _ir_a_acerca(self):
-        self._expandir_sidebar()
-        self._activar_bot(1)
-        self._headerbar.setVisible(False)
-        self._cargar_vista("acerca")
+        self._ir_a_vista_global("acerca", bot=1)
 
     def _ir_a_ia(self):
-        """IA ahora vive como tab dentro de Configuración — redirigimos allí
-        seleccionando la tab 'IA' al cargar la vista."""
-        if self._sb_collapsed:
-            pid_actual = self._pid_proyecto_activo()
-            self._headerbar.setVisible(False)
-            self._cargar_vista("configuracion")
-            self._seleccionar_tab_config('ia')
-            if pid_actual is not None:
-                self._mostrar_banner_volver(pid_actual)
-            return
-        self._expandir_sidebar()
-        self._headerbar.setVisible(False)
-        self._cargar_vista("configuracion")
-        self._seleccionar_tab_config('ia')
+        """IA vive como pestaña dentro de Configuración."""
+        self._ir_a_vista_global("configuracion", bot=0, tab='ia')
 
     def _seleccionar_tab_config(self, nombre: str):
         """Si la vista activa es ConfiguracionView, selecciona la tab pedida."""
