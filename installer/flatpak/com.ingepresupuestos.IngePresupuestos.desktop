@@ -9,6 +9,6 @@ Icon=com.ingepresupuestos.IngePresupuestos
 Terminal=false
 Categories=Office;Finance;Engineering;Spreadsheet;
 Keywords=presupuesto;obra;construcción;ingeniería;ACU;cronograma;Gantt;CAPECO;INEI;
-MimeType=application/x-sqlite3;
+MimeType=application/x-ingepresupuestos-db;application/vnd.sqlite3;application/x-sqlite3;
 StartupNotify=true
 StartupWMClass=ingepresupuestos

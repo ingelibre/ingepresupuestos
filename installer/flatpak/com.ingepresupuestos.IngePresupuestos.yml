@@ -91,6 +91,24 @@ modules:
       - install -Dm644 installer/flatpak/${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 resources/icons/elementary/24/ingepresupuestos.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
       - install -Dm644 installer/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      # 5. Tipo MIME de los presupuestos (.db) con su icono de documento.
+      #    Flatpak solo exporta iconos cuyo nombre empieza por el id de la
+      #    app: los iconos van con ese prefijo y el XML exportado apunta a
+      #    esos nombres (un "application-x-ingepresupuestos-db" a secas
+      #    nunca sale del sandbox y el gestor de archivos pinta la hoja
+      #    genérica de SQLite). Mismo arreglo que IngeTrazo 7e86f29.
+      - |
+        mkdir -p "${FLATPAK_DEST}/share/mime/packages"
+        sed -e 's|<icon name="\([^"]*\)"/>|<icon name="'"${FLATPAK_ID}"'.\1"/>|' \
+          resources/mime/ingepresupuestos.xml > "${FLATPAK_DEST}/share/mime/packages/${FLATPAK_ID}.xml"
+        grep -q "${FLATPAK_ID}.application-x-ingepresupuestos-db" "${FLATPAK_DEST}/share/mime/packages/${FLATPAK_ID}.xml"
+        for d in resources/icons/hicolor/*/mimetypes; do
+          size=$(basename "$(dirname "$d")")
+          for f in "$d"/*.png "$d"/*.svg; do
+            [ -f "$f" ] || continue
+            install -Dm644 "$f" "${FLATPAK_DEST}/share/icons/hicolor/${size}/mimetypes/${FLATPAK_ID}.$(basename "$f")"
+          done
+        done
     sources:
       - type: dir
         path: .staging/src
