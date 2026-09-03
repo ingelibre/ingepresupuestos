@@ -34,7 +34,7 @@ Tests sin GUI (usan copia temporal de `presupuestos_seed.db`, nunca la BD activa
 ```bash
 QT_QPA_PLATFORM=offscreen venv/bin/python3 tests/test_reglas_negocio.py   # reglas de negocio
 venv/bin/python3 tests/test_core.py
-# también: test_almacen.py · test_curva_s.py · test_valorizacion.py · test_catalogos.py · test_navegacion.py
+# también: test_almacen.py · test_curva_s.py · test_valorizacion.py · test_catalogos.py · test_navegacion.py · test_pdf_escala_texto.py
 ```
 
 ---
@@ -134,6 +134,7 @@ Tokens centralizados. **NO hardcodear hex.**
 - **Word:** python-docx; header/footer tabla 1×3 con NUMPAGES; `_set_table_fixed_layout` obligatorio.
 - **Excel:** openpyxl; pie tripartito `oddFooter`; **Excel = PDF visible, no PDF CSS**.
 - **ODT/ODS:** se genera el `.docx`/`.xlsx` nativo y se convierte con **LibreOffice headless** (`core/soffice.py`). Sin LibreOffice → aviso, sin crash.
+- **Tamaño del texto del PDF — `rep_escala_texto`, pasos fijos `ESCALAS_TEXTO = (100, 90, 80)`** (3 sep 2026; pedido de David Ramos: «que quepa en menos páginas»). `_PdfRenderer` maqueta el cuerpo a `body/k` y lo dibuja con `painter.scale(k)` en `_aplicar_escala`; **con k=1 no toca el painter y el PDF sale idéntico** (verificado píxel a píxel en los 13 tipos contra la versión anterior). Encabezado, pie y portada no cambian; Gantt, curva S, Word y Excel tampoco. Son pasos y no un slider a propósito: un conjunto finito se verifica entero. **No agregar pasos >100 sin verificar tablas anchas** (Presupuesto/Insumos/Metrados en A4 retrato): reducir es seguro porque las tablas van al 100 % del ancho y llenan el cuerpo igual; agrandar puede sacarlas por el margen. Se elige en «Editar formato». Tests: `tests/test_pdf_escala_texto.py` (menos páginas con las mismas palabras; ninguna tinta en los márgenes del cuerpo).
 
 ### Datos de empresa y logo — UNA sola fuente: las claves `rep_*`
 `FORMATO_CLAVES` en `core/pdf_reports.py` (nombre, subtítulo, **RUC/dirección/teléfono**, color, logo, escala, pies). Las editan **dos puertas al mismo dato**: «Editar formato» (Centro de Reportes / Gantt) y Configuración → «Datos de empresa». Antes esa tarjeta guardaba su propio juego `empresa_*` y solo copiaba nombre y logo —y solo si no estaban vacíos—, así que había dos verdades y quitar el logo allí no lo quitaba del PDF. Los valores viejos se migran y **se borran** una vez en `init_db` (flag `empresa_unificada`); NO reintroducir un fallback de lectura a `empresa_*` — resucitaría el logo al borrarlo. Fuera de reportes usar `pdf_reports.empresa_info()`.

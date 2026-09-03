@@ -52,6 +52,7 @@ FORMATO_CLAVES = {
     'rep_color_marca_dk':   '#C0621A',
     'rep_logo_b64':         '',         # PNG en base64 (sin prefijo data:)
     'rep_logo_escala':      '100',      # % del tamaño base del logo (50–200)
+    'rep_escala_texto':     '100',      # % del texto del cuerpo del PDF — pasos fijos ESCALAS_TEXTO
     'rep_pie_izquierdo':    '',         # texto opcional adicional en pie
     'rep_pie_central':      '',         # si vacío, usa fecha
     'rep_pie_derecho':      '',         # si vacío, usa "Página X de N"
@@ -114,6 +115,30 @@ def logo_escala(formato: dict | None = None) -> float:
     except (TypeError, ValueError):
         pct = 100.0
     return max(50.0, min(200.0, pct)) / 100.0
+
+
+# Pasos permitidos del tamaño del texto del cuerpo del PDF. Son pasos FIJOS y
+# no un slider a propósito: un conjunto finito se verifica entero (los 13
+# tipos de reporte en cada paso) y un continuo no. Reducir es la dirección
+# segura: las tablas van al 100 % del ancho y llenan el cuerpo igual, solo
+# entran más filas por página. Agrandar puede sacar una tabla ancha por el
+# margen derecho, por eso no hay pasos por encima de 100 —si algún día se
+# agregan, verificar Presupuesto, Insumos y Metrados en A4 retrato—. Pedido
+# de David Ramos (2 sep 2026): «que quepa en menos páginas».
+ESCALAS_TEXTO = (100, 90, 80)
+
+
+def texto_escala(formato: dict | None = None) -> float:
+    """Factor del tamaño del texto del cuerpo del PDF (1.0 = como siempre).
+
+    Clave `rep_escala_texto`, en %. Cualquier valor que no sea uno de
+    ESCALAS_TEXTO cae al paso más cercano; lo vacío o ilegible es 100."""
+    fmt = formato if formato is not None else get_formato()
+    try:
+        pct = float(str(fmt.get('rep_escala_texto') or 100).replace(',', '.'))
+    except (TypeError, ValueError):
+        pct = 100.0
+    return min(ESCALAS_TEXTO, key=lambda e: abs(e - pct)) / 100.0
 
 
 def escala_papel(page_w_px: float, dpi: float) -> float:
@@ -3607,6 +3632,18 @@ class _PdfRenderer:
         self.margin_bot_body = int(0.7 * self.dpi)
         self.header_h = int(0.85 * self.dpi)
         self.footer_h = int(0.5 * self.dpi)
+        # Tamaño del texto del cuerpo (1.0 = como siempre). El cuerpo se
+        # maqueta a body/k —página lógica más grande, entran más filas— y se
+        # dibuja con painter.scale(k). Encabezado, pie y portada no cambian.
+        self.escala_texto = texto_escala(self.formato)
+
+    def _aplicar_escala(self, painter: QPainter):
+        """Escala uniforme del cuerpo. Con factor 1 NO toca el painter: el
+        PDF de siempre sale byte a byte igual (verificado píxel a píxel en los
+        13 tipos de reporte el 3 sep 2026)."""
+        k = self.escala_texto
+        if k != 1.0:
+            painter.scale(k, k)
 
     # --- HTML helpers --------------------------------------------------------
 
@@ -4023,7 +4060,11 @@ class _PdfRenderer:
 
             body_w = self.page_w - 2 * self.margin_x
             body_h = self.page_h - self.margin_top_body - self.margin_bot_body
-            doc.setPageSize(QSizeF(body_w, body_h))
+            # Tamaño LÓGICO del cuerpo (ver escala_texto): a k<1 la página
+            # lógica es más grande y al dibujar se reduce con painter.scale.
+            k = self.escala_texto
+            lw, lh = body_w / k, body_h / k
+            doc.setPageSize(QSizeF(lw, lh))
             doc.setDocumentMargin(0)
 
             n_body_pages = max(1, doc.pageCount())
@@ -4048,9 +4089,10 @@ class _PdfRenderer:
                 painter.translate(self.margin_x, self.margin_top_body)
                 clip = QRectF(0, 0, body_w, body_h)
                 painter.setClipRect(clip)
+                self._aplicar_escala(painter)
                 # Mover el cuerpo para que muestre la página i
-                painter.translate(0, -i * body_h)
-                doc.drawContents(painter, QRectF(0, i * body_h, body_w, body_h))
+                painter.translate(0, -i * lh)
+                doc.drawContents(painter, QRectF(0, i * lh, lw, lh))
                 painter.restore()
 
                 self._draw_footer(painter, page_idx, total_pages)
@@ -4172,6 +4214,10 @@ class _PdfRenderer:
         try:
             body_w = self.page_w - 2 * self.margin_x
             body_h = self.page_h - self.margin_top_body - self.margin_bot_body
+            # Todo el plan de páginas se hace en unidades LÓGICAS (cuerpo/k);
+            # solo al dibujar se vuelve a píxeles con painter.scale(k).
+            k = self.escala_texto
+            lw, lh = body_w / k, body_h / k
 
             # Separador vertical entre chunks consecutivos en la misma página
             sep_h = 18.0
@@ -4183,13 +4229,13 @@ class _PdfRenderer:
 
             for chunk_html in chunks:
                 # Medición natural (alto sin paginar)
-                nat_doc, nat_h = self._measure_html(chunk_html, body_w)
+                nat_doc, nat_h = self._measure_html(chunk_html, lw)
 
-                if cur_y + nat_h <= body_h:
+                if cur_y + nat_h <= lh:
                     # Cabe entero en el espacio restante
                     cur_page.append((nat_doc, cur_y, 0.0, nat_h))
                     cur_y += nat_h + sep_h
-                elif nat_h <= body_h:
+                elif nat_h <= lh:
                     # No cabe ahora pero sí en una página completa → nueva página
                     if cur_page:
                         pages.append(cur_page)
@@ -4199,7 +4245,7 @@ class _PdfRenderer:
                     # Chunk más alto que una página → slicear el doc natural
                     # por bloques (saltando gaps internos como los que
                     # introducen las imágenes centradas)
-                    page_slices = self._find_block_break_points(nat_doc, body_h)
+                    page_slices = self._find_block_break_points(nat_doc, lh)
                     # page_slices = [(src_y, visible_h), ...]
 
                     if cur_page:
@@ -4238,12 +4284,13 @@ class _PdfRenderer:
 
                 for doc, y_off, src_y, h_visible in blocks:
                     painter.save()
-                    painter.translate(self.margin_x, self.margin_top_body + y_off)
-                    # Clip vertical exacto a la porción visible
-                    painter.setClipRect(QRectF(0, 0, body_w, h_visible + 5))
+                    painter.translate(self.margin_x, self.margin_top_body + y_off * k)
+                    # Clip vertical exacto a la porción visible (en píxeles)
+                    painter.setClipRect(QRectF(0, 0, body_w, h_visible * k + 5))
+                    self._aplicar_escala(painter)
                     # Si es porción de un chunk multi-página, desplazar el origen
                     painter.translate(0, -src_y)
-                    doc.drawContents(painter, QRectF(0, src_y, body_w, h_visible))
+                    doc.drawContents(painter, QRectF(0, src_y, lw, h_visible))
                     painter.restore()
 
                 self._draw_footer(painter, page_idx, total_pages)

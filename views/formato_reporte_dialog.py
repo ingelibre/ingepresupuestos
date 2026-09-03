@@ -15,7 +15,7 @@ from typing import Optional
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QColorDialog, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
+    QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy,
     QSlider, QSpacerItem, QToolButton, QVBoxLayout, QWidget,
 )
@@ -208,6 +208,30 @@ class FormatoReporteDialog(QDialog):
             "El color oscuro se calcula automáticamente."
         ))
 
+        # ── Tamaño del texto del cuerpo del PDF ──
+        # Pasos fijos (pdf_reports.ESCALAS_TEXTO), no un slider: cada paso
+        # está verificado en los 13 tipos de reporte.
+        body_l.addWidget(self._section_title("Texto de los reportes PDF"))
+        txt_row = QHBoxLayout()
+        txt_row.setSpacing(10)
+        txt_row.addWidget(QLabel("Tamaño del texto:"))
+        self.cmb_escala_texto = QComboBox()
+        self.cmb_escala_texto.setCursor(Qt.PointingHandCursor)
+        self.cmb_escala_texto.setFixedWidth(220)
+        _rotulos = {100: "Normal", 90: "Compacto", 80: "Muy compacto"}
+        for pct in pdf_reports.ESCALAS_TEXTO:
+            self.cmb_escala_texto.addItem(
+                f"{_rotulos.get(pct, 'Escala')} ({pct} %)", pct)
+        txt_row.addWidget(self.cmb_escala_texto)
+        txt_row.addStretch(1)
+        body_l.addLayout(txt_row)
+        body_l.addWidget(self._hint(
+            "Reduce el texto del cuerpo para que entren más filas por página "
+            "y el reporte ocupe menos hojas. Encabezado, pie y portada no "
+            "cambian. Solo afecta al PDF: en Word y Excel el tamaño se cambia "
+            "en el propio programa."
+        ))
+
         # ── Pie de página personalizado ──
         body_l.addWidget(self._section_title("Pie de página (opcional)"))
         form2 = QFormLayout()
@@ -323,6 +347,9 @@ class FormatoReporteDialog(QDialog):
             _esc = 100
         self.sld_logo.setValue(max(50, min(200, _esc)))
         self._on_logo_escala(self.sld_logo.value())
+        _pct = int(round(pdf_reports.texto_escala(f) * 100))
+        self.cmb_escala_texto.setCurrentIndex(
+            max(0, self.cmb_escala_texto.findData(_pct)))
         self._update_logo_preview(f.get('rep_logo_b64') or '')
 
     # ─── Logo ────────────────────────────────────────────────────────────────
@@ -425,6 +452,7 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_central']       = self.inp_pie_cen.text().strip()
         self._formato['rep_pie_derecho']       = self.inp_pie_der.text().strip()
         self._formato['rep_logo_escala']       = str(self.sld_logo.value())
+        self._formato['rep_escala_texto']      = str(self.cmb_escala_texto.currentData())
         self._formato['rep_empresa_ruc']       = self.inp_ruc.text().strip()
         self._formato['rep_empresa_direccion'] = self.inp_direccion.text().strip()
         self._formato['rep_empresa_telefono']  = self.inp_telefono.text().strip()
