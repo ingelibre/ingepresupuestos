@@ -13,8 +13,7 @@ Copyright (C) 2026 Marco Sumari
 
 > **Software libre.** Todo el código está bajo GPL-3.0-or-later: puedes usarlo,
 > estudiarlo, modificarlo y redistribuirlo, también con fines comerciales y sin
-> límite de equipos. En agosto de 2026 el proyecto estuvo una semana camino de
-> volverse propietario; se revirtió antes de publicar ninguna versión cerrada.
+> límite de equipos.
 
 ---
 
