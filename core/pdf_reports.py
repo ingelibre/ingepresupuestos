@@ -20,7 +20,9 @@ Tipos de reporte:
 """
 from __future__ import annotations
 
+import re
 import io
+import json
 import os
 from datetime import datetime
 from html import escape
@@ -37,7 +39,8 @@ from core.database import (
     get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
     get_insumos_para_partidas, set_config, _orden_mo,
 )
-from utils.formatting import fecha_dmy as _dmy, fmt as _fmt_money
+from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money,
+                             texto_rendimiento)
 
 # ── Configuración de formato (editable por el usuario) ───────────────────────
 # Las claves se leen desde la tabla `configuracion`; los defaults aquí abajo se
@@ -56,7 +59,115 @@ FORMATO_CLAVES = {
     'rep_pie_izquierdo':    '',         # texto opcional adicional en pie
     'rep_pie_central':      '',         # si vacío, usa fecha
     'rep_pie_derecho':      '',         # si vacío, usa "Página X de N"
+    # Dejar el texto en blanco significa «usa el valor por defecto», así que no
+    # había forma de decir «acá NO va nada»: David Ramos escribió un punto en el
+    # pie central para vaciarlo (5 sep 2026). Estas tres banderas son ese «nada»
+    # explícito — '1' oculta el hueco entero.
+    'rep_pie_izq_oculto':   '0',
+    'rep_pie_cen_oculto':   '0',
+    'rep_pie_der_oculto':   '0',
+    # Encabezado de cada página (logo, razón social, título del reporte). Al
+    # ocultarlo el cuerpo sube y recupera esa franja — entran más filas por
+    # hoja, que es lo que el usuario busca al quitarlo.
+    'rep_encabezado_oculto': '0',
+    # El pie entero (línea + tres textos). Marco, 8 sep 2026: «debería haber
+    # una opción para desactivar todo el pie así como con el encabezado».
+    'rep_pie_oculto': '0',
+    # Márgenes del papel en milímetros. Los valores por defecto son los que
+    # el PDF tuvo siempre (0.6″ laterales, 0.7″ abajo, 0.6″ arriba sin
+    # encabezado): con ellos sale idéntico. El superior mueve juntos el
+    # encabezado y el cuerpo; el inferior, el pie y el final del cuerpo.
+    # Pedido de David Ramos (7 sep 2026): «una opción para configurar los
+    # márgenes».
+    'rep_margen_sup':       '15',
+    'rep_margen_inf':       '18',
+    'rep_margen_izq':       '15',
+    'rep_margen_der':       '15',
+    # Colores de los títulos en los reportes: esquema activo y esquemas
+    # guardados por el usuario (JSON). Ver ESQUEMAS_FABRICA.
+    'rep_esquema_titulos':  'clasico',
+    'rep_esquemas_titulos': '',
 }
+
+# ── Colores de los títulos de los reportes ───────────────────────────────────
+# Un ESQUEMA es un juego de cinco colores, uno por nivel de título. Los de
+# fábrica viven acá; los del usuario, en `rep_esquemas_titulos` (JSON). El
+# activo se elige en `rep_esquema_titulos`. «Clásico» son los colores de
+# siempre —los mismos de `theme.NIVEL_FG`—, así que una instalación sin
+# estas claves imprime igual que antes. Solo afecta a los reportes (PDF,
+# Excel); en pantalla el árbol y el Gantt siguen con los del tema. Pedido de
+# David Ramos (5 sep 2026): «alguna configuración para el color de los
+# títulos, que se pueda guardar».
+# `sub` es el color de la cabecera de sub-presupuesto (proyectos con varios):
+# en Clásico es el slate-800 que el PDF usó siempre. Hasta el 8 sep 2026 el
+# Excel del Presupuesto lo pintaba de naranja oscuro por su cuenta (Marco:
+# «en el PDF aparece negro y en Excel de otro color»).
+ESQUEMAS_FABRICA = {
+    'clasico':   {'nombre': 'Clásico', 'sub': '#1F2A38',
+                  'colores': ['#B71C1C', '#0D52BF', '#6A1B9A', '#AD1457', '#92400E']},
+    'sobrio':    {'nombre': 'Sobrio (grises)', 'sub': '#1F2A38',
+                  'colores': ['#1F2A38', '#2E3C52', '#485A6C', '#64748B', '#64748B']},
+    'azul':      {'nombre': 'Azul corporativo', 'sub': '#082A66',
+                  'colores': ['#0B3D91', '#0D52BF', '#1E6FD9', '#3B82C4', '#5B7FA6']},
+    'verde':     {'nombre': 'Verde', 'sub': '#0F3D14',
+                  'colores': ['#1B5E20', '#2E7D32', '#388E3C', '#4E8A5A', '#6B8F71']},
+    'monocromo': {'nombre': 'Monocromo (negro)', 'sub': '#000000',
+                  'colores': ['#000000', '#000000', '#000000', '#000000', '#000000']},
+}
+ESQUEMA_DEFECTO = 'clasico'
+_HEX = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+
+def esquemas_titulos(formato: dict | None = None) -> dict:
+    """Todos los esquemas: los de fábrica y después los del usuario, cada
+    uno ``{'nombre', 'colores': [5 hex], 'fabrica': bool}``. Un esquema de
+    usuario mal formado se ignora; un color inválido cae al de Clásico."""
+    fmt = formato if formato is not None else get_formato()
+    out = {k: {'nombre': v['nombre'], 'colores': list(v['colores']), 'sub': v['sub'],
+               'fabrica': True}
+           for k, v in ESQUEMAS_FABRICA.items()}
+    crudo = fmt.get('rep_esquemas_titulos') or ''
+    try:
+        propios = json.loads(crudo) if crudo else {}
+    except (TypeError, ValueError):
+        propios = {}
+    base = ESQUEMAS_FABRICA[ESQUEMA_DEFECTO]['colores']
+    if isinstance(propios, dict):
+        for k, v in propios.items():
+            if not isinstance(v, dict) or k in out:
+                continue
+            cols = v.get('colores') or []
+            if not isinstance(cols, list):
+                continue
+            cols = [c if isinstance(c, str) and _HEX.match(c) else base[i]
+                    for i, c in enumerate((cols + base)[:5])]
+            sub = v.get('sub')
+            if not (isinstance(sub, str) and _HEX.match(sub)):
+                sub = ESQUEMAS_FABRICA[ESQUEMA_DEFECTO]['sub']
+            out[str(k)] = {'nombre': str(v.get('nombre') or k), 'colores': cols,
+                           'sub': sub, 'fabrica': False}
+    return out
+
+
+def colores_titulos(formato: dict | None = None) -> dict[int, str]:
+    """Color por nivel de título del esquema activo: claves 1–5 son los
+    niveles y la clave 0 es la cabecera de sub-presupuesto. Si el esquema
+    activo no existe —se borró, o el nombre está mal— cae a Clásico."""
+    fmt = formato if formato is not None else get_formato()
+    todos = esquemas_titulos(fmt)
+    clave = str(fmt.get('rep_esquema_titulos') or ESQUEMA_DEFECTO)
+    esq = todos.get(clave, todos[ESQUEMA_DEFECTO])
+    out = {i + 1: esq['colores'][i] for i in range(5)}
+    out[0] = esq['sub']
+    return out
+
+
+# Márgenes: tope y piso en mm. Por debajo de 5 las impresoras no imprimen;
+# por encima de 40 en A4 retrato el cuerpo se queda sin ancho útil.
+MARGEN_MIN_MM = 5
+MARGEN_MAX_MM = 40
+MARGENES_CLAVES = ('rep_margen_sup', 'rep_margen_inf',
+                   'rep_margen_izq', 'rep_margen_der')
 
 
 # Claves antiguas de «Configuración → Datos de empresa». Esa tarjeta guardaba
@@ -104,6 +215,14 @@ def set_formato(formato: dict):
             set_config(k, formato[k] or '')
 
 
+def _oculto(formato: dict, clave: str) -> bool:
+    """¿La bandera de «no imprimir este hueco» está puesta?
+
+    Las claves de formato son cadenas: cualquier cosa distinta de '1' es no.
+    """
+    return str((formato or {}).get(clave) or '0') == '1'
+
+
 def logo_escala(formato: dict | None = None) -> float:
     """Factor manual del tamaño del logo (1.0 = tamaño base de la banda).
 
@@ -139,6 +258,24 @@ def texto_escala(formato: dict | None = None) -> float:
     except (TypeError, ValueError):
         pct = 100.0
     return min(ESCALAS_TEXTO, key=lambda e: abs(e - pct)) / 100.0
+
+
+def margenes_mm(formato: dict | None = None) -> dict:
+    """Los cuatro márgenes en mm, acotados a MARGEN_MIN_MM–MARGEN_MAX_MM.
+
+    Devuelve ``{'sup', 'inf', 'izq', 'der'}``. Lo vacío o ilegible cae al
+    valor por defecto de FORMATO_CLAVES, así que un formato viejo sin estas
+    claves imprime exactamente como antes."""
+    fmt = formato if formato is not None else get_formato()
+    out = {}
+    for lado in ('sup', 'inf', 'izq', 'der'):
+        clave = f'rep_margen_{lado}'
+        try:
+            mm = float(str(fmt.get(clave) or '').replace(',', '.'))
+        except (TypeError, ValueError):
+            mm = float(FORMATO_CLAVES[clave])
+        out[lado] = max(float(MARGEN_MIN_MM), min(float(MARGEN_MAX_MM), mm))
+    return out
 
 
 def escala_papel(page_w_px: float, dpi: float) -> float:
@@ -406,11 +543,13 @@ def _brand_colors() -> tuple[str, str, str]:
         return (ORANGE, ORANGE_DARK, ORANGE_SOFT)
 
 
-def _base_css() -> str:
+def _base_css(formato: dict | None = None) -> str:
     """CSS común a todos los HTML de reportes. Función (no constante)
     para que respete el toggle 'Reportes sobrios' en tiempo real sin
-    requerir reiniciar la app."""
+    requerir reiniciar la app. Los colores de título salen del esquema
+    activo (`colores_titulos`)."""
     o, od, os_ = _brand_colors()
+    _t = colores_titulos(formato)
     return f"""
 <style>
   body {{
@@ -467,7 +606,7 @@ def _base_css() -> str:
   /* Colores de fuente por nivel = espejo del programa (NIVEL_ESTILO en
      proyecto_view.py): N1 rojo, N2 arándano, N3 morado, N4 rosa. */
   table.data tr.titulo1 td {{
-    background: white; color: #B71C1C;
+    background: white; color: {_t[1]};
     font-weight: 700; font-size: 9.5pt;
     padding-top: 10pt; padding-bottom: 5pt;
     border-top: 1.5pt solid {SLATE_700};
@@ -476,23 +615,23 @@ def _base_css() -> str:
     text-decoration: underline;
   }}
   table.data tr.titulo2 td {{
-    background: white; color: #0D52BF;
+    background: white; color: {_t[2]};
     font-weight: 700; font-size: 9pt;
     padding-top: 8pt; padding-bottom: 4pt;
     border-top: 0.5pt solid {SLATE_300};
   }}
   table.data tr.titulo3 td {{
-    background: white; color: #6A1B9A;
+    background: white; color: {_t[3]};
     font-weight: 700; font-size: 8.8pt;
     padding-top: 7pt; padding-bottom: 4pt;
   }}
   table.data tr.titulo4 td {{
-    background: white; color: #AD1457;
+    background: white; color: {_t[4]};
     font-weight: 700; font-size: 8.6pt;
     padding-top: 6pt; padding-bottom: 4pt;
   }}
   table.data tr.titulo5 td {{
-    background: white; color: #92400E;
+    background: white; color: {_t[5]};
     font-weight: 700; font-size: 8.5pt; font-style: italic;
     padding-top: 6pt; padding-bottom: 4pt;
   }}
@@ -665,6 +804,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     # sin saber a cuál pertenece cada uno. Con un solo sub → dict vacío y
     # el reporte sale exactamente igual que siempre.
     _sub_de_partida: dict = {}
+    _col_sub = colores_titulos()[0]       # cabecera de sub-presupuesto, del esquema
     _grupos_sub = agrupar_items_por_sub(pid, items)
     if _grupos_sub:
         for _nom_sub, _its in _grupos_sub:
@@ -695,7 +835,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                 '<td align="right" style="background:white;color:%s;'
                 'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
                 'text-decoration:underline;border:none;">%s %s</td></tr>'
-                % (_od_hp, escape(_nom_sub), _od_hp,
+                % (_col_sub, escape(_nom_sub), _col_sub,
                    sym, _fmt(_cd_sub * factor, dec))
             )
 
@@ -854,13 +994,19 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
 
         # Encabezado de la partida — dentro del wrap (usar <p> con margins
         # explícitos para evitar colapso de altura en QTextDocument)
-        rendimiento = p.get('rendimiento') or 0
+        # Sin rendimiento el segmento entero DESAPARECE de la meta — no se
+        # imprime «— /día», que es un hueco con unidades (pedido de David
+        # Ramos, 5 sep 2026: subcontratos y partidas globales no dependen del
+        # rendimiento).
+        rend_txt = texto_rendimiento(p.get('rendimiento'), p.get('unidad'))
+        meta_rend = (f'Rendimiento: <b>{escape(rend_txt)}</b> &nbsp;·&nbsp; '
+                     if rend_txt else '')
         head_html = (
             f'<p style="margin:0 0 4pt 0;font-size:10pt;font-weight:700;color:{SLATE_900}">'
             f'{escape(p.get("item") or "")} &nbsp; {escape(p.get("descripcion") or "")}</p>'
             f'<p style="margin:0;font-size:8.5pt;color:{SLATE_500}">'
             f'Unidad: <b>{escape(p.get("unidad") or "—")}</b> &nbsp;·&nbsp; '
-            f'Rendimiento: <b>{_fmt(rendimiento, 2) if rendimiento else "—"} {p.get("unidad") or ""}/día</b> &nbsp;·&nbsp; '
+            f'{meta_rend}'
             f'Costo Unit.: <b>{sym} {_fmt(cu, dec)}</b>'
             f'</p>'
         )
@@ -997,7 +1143,7 @@ def _html_metrados(pid: int, proy: dict, items: list) -> str:
             _sub_emitido = _nom_sub_cab
             parts.append(
                 f'<p style="margin:14pt 0 6pt 0;font-size:10.5pt;'
-                f' font-weight:700;color:{od};text-decoration:underline">'
+                f' font-weight:700;color:{colores_titulos()[0]};text-decoration:underline">'
                 f'{escape(_nom_sub_cab)}</p>'
             )
 
@@ -1699,7 +1845,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
     # Colores de fuente por nivel = espejo del programa (NIVEL_ESTILO en
     # proyecto_view.py), igual que el reporte de Presupuesto: N1 rojo, N2
     # arándano, N3 morado, N4 rosa, N5 marrón.
-    _NIVEL_COL = {1: '#B71C1C', 2: '#0D52BF', 3: '#6A1B9A', 4: '#AD1457'}
+    _NIVEL_COL = colores_titulos()
 
     # Tab de la columna Descripción (igual que Presupuesto): sangría colgante
     # por profundidad real del ítem (`item.count('.')-min_dots`, NO `nivel`).
@@ -1762,7 +1908,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             if rp.get('sub'):
                 # Cabecera de sub-presupuesto: subrayada y en oscuro (el rojo
                 # queda para los títulos de partida, que van debajo).
-                _s_css = ('padding:9pt 6pt 4pt;color:#1F2A38;background:white;'
+                _s_css = (f'padding:9pt 6pt 4pt;color:{_NIVEL_COL[0]};background:white;'
                           'font-weight:700;font-size:10pt;'
                           'text-decoration:underline;')
                 _celdas_s = ''.join(
@@ -1779,7 +1925,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             if rp['titulo']:
                 niv = rp['nivel']
                 _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
-                _tcolor = _NIVEL_COL[1] if niv <= 1 else _NIVEL_COL.get(niv, "#92400E")
+                _tcolor = _NIVEL_COL[1] if niv <= 1 else _NIVEL_COL.get(niv, _NIVEL_COL[5])
                 if niv <= 1:
                     t_css = (f'padding:5pt 6pt;color:{_NIVEL_COL[1]};'
                               f'background:white;font-weight:700;'
@@ -1787,7 +1933,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
                               f'letter-spacing:0.5pt;')
                     _u0, _u1 = '<u>', '</u>'
                 else:
-                    t_css = (f'padding:5pt 6pt;color:{_NIVEL_COL.get(niv, "#92400E")};'
+                    t_css = (f'padding:5pt 6pt;color:{_NIVEL_COL.get(niv, _NIVEL_COL[5])};'
                               f'background:white;font-weight:700;'
                               f'font-size:9pt;')
                     _u0, _u1 = '', ''
@@ -2824,7 +2970,7 @@ def _html_insumos(pid: int, proy: dict, por_sub: bool = False) -> str:
                     _out.append('<p style="margin-top:30pt">&nbsp;</p>')
                 _out.append(
                     f'<p style="margin:0 0 10pt 0;font-size:11pt;font-weight:700;'
-                    f' color:{_od2};text-decoration:underline">'
+                    f' color:{colores_titulos()[0]};text-decoration:underline">'
                     f'{escape(_nom)}</p>'
                 )
                 _out.append(_html_insumos_bloque(pid, proy, _ins))
@@ -3241,7 +3387,7 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
             # y los items. Mismo rojo del título N1 de Presupuesto.
             parts.append(
                 f'<p style="margin:12pt 0 4pt 0;font-size:10pt;font-weight:700;'
-                f'color:#B71C1C">{escape(rub["nombre"].upper())}</p>'
+                f'color:{colores_titulos()[1]}">{escape(rub["nombre"].upper())}</p>'
             )
             gg_items = conn.execute(
                 "SELECT * FROM gastos_generales WHERE proyecto_id=? AND rubro=? "
@@ -3414,11 +3560,11 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
             _nom_sub, _cd_sub = _c
             estructura_rows.append(
                 f'<tr><td colspan="2" style="padding:10pt 6pt 4pt;'
-                f' font-size:9.5pt;font-weight:700;color:{od};'
+                f' font-size:9.5pt;font-weight:700;color:{colores_titulos()[0]};'
                 f' text-decoration:underline">'
                 f'{escape(_nom_sub)}</td>'
                 f'<td align="right" style="padding:10pt 8pt 4pt;'
-                f' font-size:9.5pt;font-weight:700;color:{od};'
+                f' font-size:9.5pt;font-weight:700;color:{colores_titulos()[0]};'
                 f' text-decoration:underline">'
                 f'{sym} {_fmt(_cd_sub, dec)}</td></tr>'
             )
@@ -3627,11 +3773,29 @@ class _PdfRenderer:
         self.dpi = 96
         self.page_w = int(w_in * self.dpi)
         self.page_h = int(h_in * self.dpi)
-        self.margin_x = int(0.6 * self.dpi)
-        self.margin_top_body = int(1.05 * self.dpi)
-        self.margin_bot_body = int(0.7 * self.dpi)
+        # Márgenes configurables (mm → px). Con los valores por defecto los
+        # cuatro `_dy`/`margin_*` dan lo mismo que las constantes de siempre
+        # (57 / 100 / 67 px en A4 a 96 dpi), así que el PDF no cambia.
+        mm = margenes_mm(self.formato)
+        _px = lambda v: int(round(v / 25.4 * self.dpi))
+        self.margin_x = _px(mm['izq'])          # izquierdo
+        self.margin_r = _px(mm['der'])          # derecho
+        # Sin encabezado el cuerpo arranca con un margen normal (el mismo que
+        # los laterales) en vez de dejar en blanco la franja del encabezado.
+        self.sin_encabezado = _oculto(self.formato, 'rep_encabezado_oculto')
         self.header_h = int(0.85 * self.dpi)
         self.footer_h = int(0.5 * self.dpi)
+        # El encabezado y el pie están cotados desde el borde del papel; el
+        # margen superior/inferior los desplaza en bloque junto con el cuerpo.
+        _base_sup = _px(float(FORMATO_CLAVES['rep_margen_sup']))
+        _base_inf = _px(float(FORMATO_CLAVES['rep_margen_inf']))
+        self.header_dy = _px(mm['sup']) - _base_sup
+        self.footer_dy = _px(mm['inf']) - _base_inf
+        if self.sin_encabezado:
+            self.margin_top_body = _px(mm['sup'])
+        else:
+            self.margin_top_body = int(1.05 * self.dpi) + self.header_dy
+        self.margin_bot_body = _px(mm['inf'])
         # Tamaño del texto del cuerpo (1.0 = como siempre). El cuerpo se
         # maqueta a body/k —página lógica más grande, entran más filas— y se
         # dibuja con painter.scale(k). Encabezado, pie y portada no cambian.
@@ -3648,7 +3812,7 @@ class _PdfRenderer:
     # --- HTML helpers --------------------------------------------------------
 
     def _wrap_html(self, body_html: str) -> str:
-        return f"<html><head>{_base_css()}</head><body>{body_html}</body></html>"
+        return f"<html><head>{_base_css(self.formato)}</head><body>{body_html}</body></html>"
 
     def _draw_cover(self, painter: QPainter):
         """Dibuja la portada completa con QPainter — control preciso de centrado."""
@@ -3675,7 +3839,7 @@ class _PdfRenderer:
         _o2, _od2, _os2 = _brand_colors()
         color_marca_dk = QColor(self.formato.get('rep_color_marca_dk') or _od2)
         # La fecha ocupa la derecha; dejar holgura para no pisarla.
-        txt_w = self.page_w - self.margin_x - txt_x - 150
+        txt_w = self.page_w - self.margin_r - txt_x - 150
         if txt_w >= 90:
             f = QFont('Inter', 14); f.setBold(True)
             painter.setFont(f); painter.setPen(color_marca_dk)
@@ -3686,7 +3850,7 @@ class _PdfRenderer:
 
         f2 = QFont('Inter', 9)
         painter.setFont(f2); painter.setPen(QColor(SLATE_300))
-        painter.drawText(QRectF(0, 18, self.page_w - self.margin_x, 30),
+        painter.drawText(QRectF(0, 18, self.page_w - self.margin_r, 30),
                          Qt.AlignVCenter | Qt.AlignRight, _hoy_formateado())
 
         # Tipo de reporte (eyebrow)
@@ -3707,7 +3871,7 @@ class _PdfRenderer:
         f4 = QFont('Inter', 22); f4.setBold(True)
         painter.setFont(f4); painter.setPen(QColor(SLATE_900))
         rect_nombre = QRectF(self.margin_x + 20, y,
-                             self.page_w - 2 * self.margin_x - 40, 200)
+                             self.page_w - self.margin_x - self.margin_r - 40, 200)
         flags = Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap
         # Calcular alto necesario
         bound = painter.boundingRect(rect_nombre, flags, nombre)
@@ -3721,7 +3885,7 @@ class _PdfRenderer:
             f5 = QFont('Inter', 11); f5.setItalic(True)
             painter.setFont(f5); painter.setPen(QColor(SLATE_500))
             painter.drawText(QRectF(self.margin_x, y_after_title,
-                                     self.page_w - 2 * self.margin_x, 22),
+                                     self.page_w - self.margin_x - self.margin_r, 22),
                               Qt.AlignCenter, sub)
             y_after_title += 22
 
@@ -3758,7 +3922,7 @@ class _PdfRenderer:
         # largos como "Ubicación" en proyectos públicos peruanos.
         max_k = max(fm_k.horizontalAdvance(k) for k, _ in rows)
         gap = 18
-        avail = self.page_w - 2 * self.margin_x - 40
+        avail = self.page_w - self.margin_x - self.margin_r - 40
         max_v = avail - max_k - gap
         block_w = max_k + gap + max_v
         block_x = (self.page_w - block_w) / 2
@@ -3842,7 +4006,16 @@ class _PdfRenderer:
     def _draw_header(self, painter: QPainter, page_index: int):
         if page_index == 0 and self.with_cover:
             return  # sin encabezado en portada
+        if self.sin_encabezado:
+            return  # el usuario lo apagó en «Editar formato»
+        painter.save()
+        painter.translate(0, self.header_dy)     # margen superior configurable
+        try:
+            self._draw_header_contenido(painter)
+        finally:
+            painter.restore()
 
+    def _draw_header_contenido(self, painter: QPainter):
         _o, _od, _os = _brand_colors()
         color_marca    = QColor(self.formato.get('rep_color_marca') or _o)
         color_marca_dk = QColor(self.formato.get('rep_color_marca_dk') or _od)
@@ -3899,7 +4072,7 @@ class _PdfRenderer:
 
         # Centro: título reporte (en banda visual)
         center_x = self.margin_x + left_w + 12
-        center_w = self.page_w - 2 * self.margin_x - left_w - right_w - 24
+        center_w = self.page_w - self.margin_x - self.margin_r - left_w - right_w - 24
         f3 = QFont('Inter', 10)
         f3.setBold(True)
         painter.setFont(f3)
@@ -3938,7 +4111,7 @@ class _PdfRenderer:
                          texto_lineas)
 
         # Derecha: solo costo al (cliente lo movemos al pie)
-        right_x = self.page_w - self.margin_x - right_w
+        right_x = self.page_w - self.margin_r - right_w
         f5 = QFont('Inter', 8)
         f5.setBold(True)
         painter.setFont(f5)
@@ -3960,19 +4133,21 @@ class _PdfRenderer:
         pen.setWidth(1)
         painter.setPen(pen)
         painter.drawLine(self.margin_x, self.header_h - 8,
-                         self.page_w - self.margin_x, self.header_h - 8)
+                         self.page_w - self.margin_r, self.header_h - 8)
 
     def _draw_footer(self, painter: QPainter, page_index: int, page_count: int):
         if page_index == 0 and self.with_cover:
             return  # sin pie en portada
+        if _oculto(self.formato, 'rep_pie_oculto'):
+            return  # el usuario lo apagó en «Editar formato»
 
-        y = self.page_h - self.footer_h + 6
+        y = self.page_h - self.footer_h + 6 - self.footer_dy   # margen inferior configurable
         # Línea separadora
         pen = QPen(QColor(SLATE_100))
         pen.setWidth(1)
         painter.setPen(pen)
         painter.drawLine(self.margin_x, y,
-                         self.page_w - self.margin_x, y)
+                         self.page_w - self.margin_r, y)
 
         f = QFont('Inter', 7)
         painter.setFont(f)
@@ -3983,6 +4158,8 @@ class _PdfRenderer:
         if not pie_izq:
             cliente = self.proyecto.get('cliente') or ''
             pie_izq = f"Cliente: {cliente}" if cliente else ''
+        if _oculto(self.formato, 'rep_pie_izq_oculto'):
+            pie_izq = ''
         if pie_izq:
             fm = QFontMetrics(f)
             elided = fm.elidedText(pie_izq, Qt.ElideRight, 320)
@@ -3990,9 +4167,10 @@ class _PdfRenderer:
             painter.drawText(rect_l, Qt.AlignLeft | Qt.AlignVCenter, elided)
 
         # Centro: pie central custom o fecha
-        pie_cen = self.formato.get('rep_pie_central') or _hoy_formateado()
-        rect_c = QRectF(0, y + 6, self.page_w, 14)
-        painter.drawText(rect_c, Qt.AlignCenter, pie_cen)
+        if not _oculto(self.formato, 'rep_pie_cen_oculto'):
+            pie_cen = self.formato.get('rep_pie_central') or _hoy_formateado()
+            rect_c = QRectF(0, y + 6, self.page_w, 14)
+            painter.drawText(rect_c, Qt.AlignCenter, pie_cen)
 
         # Derecha: pie derecho custom o paginación.
         # Si hay numeración global (pie_total seteado por el Reporte Completo),
@@ -4003,8 +4181,11 @@ class _PdfRenderer:
         else:
             pie_der = self.formato.get('rep_pie_derecho') or \
                       f"Página {page_index + 1} de {page_count}"
-        rect_r = QRectF(self.page_w - self.margin_x - 160, y + 6, 160, 14)
-        painter.drawText(rect_r, Qt.AlignRight | Qt.AlignVCenter, pie_der)
+        if _oculto(self.formato, 'rep_pie_der_oculto'):
+            pie_der = ''
+        if pie_der:
+            rect_r = QRectF(self.page_w - self.margin_r - 160, y + 6, 160, 14)
+            painter.drawText(rect_r, Qt.AlignRight | Qt.AlignVCenter, pie_der)
 
     # --- Render principal ----------------------------------------------------
 
@@ -4055,10 +4236,10 @@ class _PdfRenderer:
         try:
             # ── Pre-render: paginar el cuerpo para saber total de páginas
             doc = QTextDocument()
-            doc.setDefaultStyleSheet(_base_css().replace('<style>', '').replace('</style>', ''))
+            doc.setDefaultStyleSheet(_base_css(self.formato).replace('<style>', '').replace('</style>', ''))
             doc.setHtml(self._wrap_html(body_html))
 
-            body_w = self.page_w - 2 * self.margin_x
+            body_w = self.page_w - self.margin_x - self.margin_r
             body_h = self.page_h - self.margin_top_body - self.margin_bot_body
             # Tamaño LÓGICO del cuerpo (ver escala_texto): a k<1 la página
             # lógica es más grande y al dibujar se reduce con painter.scale.
@@ -4128,7 +4309,7 @@ class _PdfRenderer:
     def _measure_html(self, html: str, body_w: float):
         """Crea un QTextDocument para html y devuelve (doc, altura)."""
         doc = QTextDocument()
-        doc.setDefaultStyleSheet(_base_css().replace('<style>', '').replace('</style>', ''))
+        doc.setDefaultStyleSheet(_base_css(self.formato).replace('<style>', '').replace('</style>', ''))
         doc.setHtml(self._wrap_html(html))
         # Setear ancho fijo; alto "infinito" para medir el contenido completo
         doc.setPageSize(QSizeF(body_w, 1_000_000))
@@ -4212,7 +4393,7 @@ class _PdfRenderer:
             raise RuntimeError("No se pudo iniciar QPdfWriter")
 
         try:
-            body_w = self.page_w - 2 * self.margin_x
+            body_w = self.page_w - self.margin_x - self.margin_r
             body_h = self.page_h - self.margin_top_body - self.margin_bot_body
             # Todo el plan de páginas se hace en unidades LÓGICAS (cuerpo/k);
             # solo al dibujar se vuelve a píxeles con painter.scale(k).
@@ -4878,7 +5059,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
     BANANA = "#FFF9CC"           # grupo «Actual» (período en curso)
     GHBG = "#F1F5F9"             # fondo de cabeceras de grupo
     GRID = "#CBD5E1"             # gridline sutil
-    _NIVEL = {1: '#B71C1C', 2: '#0D52BF', 3: '#6A1B9A', 4: '#AD1457', 5: '#92400E'}
+    _NIVEL = colores_titulos()       # el esquema activo, como en Presupuesto
     BORDER_TD = f'border-bottom:0.4pt solid {GRID};'
 
     parts = []
@@ -4972,7 +5153,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
             item = escape(f['item'] or '')
             cel_desc = escape(f['descripcion'] or '')
         if es_tit:
-            col = _NIVEL.get(min(max(niv, 1), 5), '#92400E')
+            col = _NIVEL.get(min(max(niv, 1), 5), _NIVEL[5])
             deco = 'text-transform:uppercase;letter-spacing:0.4pt;' if niv <= 1 else ''
             btop = f'border-top:1.2pt solid {SLATE_700};' if (niv <= 1 or total) else ''
             base_css = (f'{BORDER_TD}{btop}padding:5pt 6pt;color:{col};'

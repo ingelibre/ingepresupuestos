@@ -315,22 +315,56 @@ def _llamar_qwen(prompt: str, api_key: str, max_tokens: int):
         return None, f'Error Qwen: {err}'
 
 
+def _gemini_candidatos(client) -> list[str]:
+    """Los modelos de la cuenta que sirven para generar texto (sin embeddings,
+    sin AQA, sin los que no soportan `generateContent`)."""
+    candidatos = []
+    for m in client.models.list():
+        name = (getattr(m, 'name', '') or '').split('/')[-1]
+        if not name or 'embedding' in name.lower() or 'aqa' in name.lower():
+            continue
+        acciones = (getattr(m, 'supported_actions', None)
+                    or getattr(m, 'supported_generation_methods', None) or [])
+        if acciones and 'generateContent' not in acciones:
+            continue
+        candidatos.append(name)
+    return candidatos
+
+
+def listar_modelos_gemini(api_key: str) -> tuple[list[str], str]:
+    """Modelos de texto que la clave puede usar, ordenados con los «flash»
+    estables primero. Devuelve (lista, error). Es lo que rellena el
+    desplegable «Ver modelos de mi cuenta» de Configuración."""
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        cands = _gemini_candidatos(client)
+        import re as _re
+
+        def _ver(nl):
+            m = _re.search(r'(\d+(?:\.\d+)?)', nl)
+            return float(m.group(1)) if m else 0.0
+
+        def _rank(n):
+            nl = n.lower()
+            estable = not any(t in nl for t in ('preview', 'exp', 'thinking'))
+            return (0 if 'flash' in nl else 1, 0 if estable else 1, -_ver(nl), n)
+        cands.sort(key=_rank)
+        return cands, ''
+    except Exception as e:
+        err = str(e)
+        if 'api_key' in err.lower() or 'api key' in err.lower() or '401' in err or '403' in err:
+            return [], 'La clave no es válida: revísala en aistudio.google.com/app/apikey.'
+        return [], err
+
+
 def _gemini_modelo_disponible(client, prefer: str = 'flash') -> str | None:
     """Pregunta a Google qué modelos hay y elige uno que soporte generación de
     contenido (prefiriendo los «flash», más baratos/rápidos). Permite que la app
     sobreviva a cambios de versión (p.ej. si Google retira el modelo configurado
     al sacar Gemini 3): se autodescubre el reemplazo. Devuelve el nombre o None."""
     try:
-        candidatos = []
-        for m in client.models.list():
-            name = (getattr(m, 'name', '') or '').split('/')[-1]
-            if not name or 'embedding' in name.lower() or 'aqa' in name.lower():
-                continue
-            acciones = (getattr(m, 'supported_actions', None)
-                        or getattr(m, 'supported_generation_methods', None) or [])
-            if acciones and 'generateContent' not in acciones:
-                continue
-            candidatos.append(name)
+        candidatos = _gemini_candidatos(client)
         if not candidatos:
             return None
         import re as _re
@@ -369,9 +403,35 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
         except Exception:
             pass
         cfg = types.GenerateContentConfig(**cfg_kwargs)
+
+        def _saturado(e) -> bool:
+            em = str(e)
+            return '503' in em or 'UNAVAILABLE' in em or 'high demand' in em \
+                or 'overloaded' in em.lower()
+
         try:
-            resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
-            return resp.text, None
+            try:
+                resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
+                return resp.text, None
+            except Exception as e_503:
+                # «503 UNAVAILABLE: high demand» es pasajero (Marco lo vio el
+                # 8 sep 2026 con la conexión recién probada OK): un reintento
+                # a los 2 s, y si sigue, un modelo hermano SIN guardarlo.
+                if not _saturado(e_503):
+                    raise
+                import time as _t
+                _t.sleep(2)
+                try:
+                    resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
+                    return resp.text, None
+                except Exception as e_2:
+                    if not _saturado(e_2):
+                        raise
+                    alt = _gemini_modelo_disponible(client)
+                    if alt and alt != modelo:
+                        resp = client.models.generate_content(model=alt, contents=prompt, config=cfg)
+                        return resp.text, None
+                    raise
         except Exception as e_mod:
             # ¿El modelo configurado ya no existe/soporta generación? (típico al
             # cambiar de versión). Autodescubrir un reemplazo, usarlo y guardarlo.
@@ -402,6 +462,15 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
             )
         if '429' in err or 'RESOURCE_EXHAUSTED' in err:
             return None, f'Límite Gemini alcanzado. Intenta en unos minutos.\nDetalle: {err}'
+        if '503' in err or 'UNAVAILABLE' in err or 'high demand' in err:
+            return None, (
+                f'Gemini está saturado en este momento (el modelo «{modelo}» '
+                'responde 503, «alta demanda»). No es tu clave ni tu conexión: '
+                'se reintentó dos veces y con un modelo hermano.\n'
+                '• Vuelve a intentarlo en un minuto, o\n'
+                '• en Configuración → Inteligencia artificial elige otro modelo '
+                '(gemini-2.5-flash-lite suele estar libre).'
+            )
         return None, f'Error Gemini: {err}'
 
 
@@ -1549,7 +1618,7 @@ def chat_proyecto_asistente(proyecto_id: int, historial: list, mensaje: str) -> 
     ia_proveedor = get_config('ia_proveedor', '')
     api_key      = get_config('api_key', '')
     if not api_key and ia_proveedor != 'ollama':
-        return None, 'No hay clave API configurada. Ve a IA / API Key.'
+        return None, 'No hay una IA configurada. Ve a Configuración → Inteligencia artificial, elige un proveedor (Groq, Gemini y OpenRouter son gratuitos) y pega tu clave.'
 
     conn = get_db()
     contexto = _resumen_proyecto(conn, proyecto_id)
@@ -1591,7 +1660,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
     ia_proveedor = get_config('ia_proveedor', '')
     api_key      = get_config('api_key', '')
     if not api_key and ia_proveedor != 'ollama':
-        return None, 'No hay clave API configurada. Ve a IA / API Key.'
+        return None, 'No hay una IA configurada. Ve a Configuración → Inteligencia artificial, elige un proveedor (Groq, Gemini y OpenRouter son gratuitos) y pega tu clave.'
 
     conn = get_db()
     contexto = _resumen_proyecto(conn, proyecto_id)

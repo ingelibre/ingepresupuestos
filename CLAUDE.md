@@ -34,7 +34,7 @@ Tests sin GUI (usan copia temporal de `presupuestos_seed.db`, nunca la BD activa
 ```bash
 QT_QPA_PLATFORM=offscreen venv/bin/python3 tests/test_reglas_negocio.py   # reglas de negocio
 venv/bin/python3 tests/test_core.py
-# también: test_almacen.py · test_curva_s.py · test_valorizacion.py · test_catalogos.py · test_navegacion.py · test_pdf_escala_texto.py
+# también: test_almacen.py · test_curva_s.py · test_valorizacion.py · test_catalogos.py · test_navegacion.py · test_pdf_escala_texto.py · test_formato_reporte.py
 ```
 
 ---
@@ -67,13 +67,28 @@ Rutas (`core/config.py`): `BASE_DIR` (read-only; bajo PyInstaller = `_internal/`
 # Precios por proyecto — siempre COALESCE
 COALESCE(ai.precio, r.precio, 0)
 
-# Cantidad MO en ACU — y equipo por hora (unidad hh/hm): se DERIVA de la cuadrilla.
+# Cantidad MO en ACU — y equipo por hora (unidad hh/hm/he): se DERIVA de la cuadrilla.
 #   Helpers en core/database.py: recurso_por_hora · recurso_por_dia · partida_global.
 #   UNA sola definición (2026-08-29): antes vivían tres veces, con un comentario
 #   que pedía «mantener en sync» a mano. Las vistas las importan con su nombre
 #   local (_recurso_por_hora en proyecto_view, _es_por_hora en el selector).
 #   NO volver a copiarlas: deciden la cantidad de MO de TODO el presupuesto.
 cantidad = (cuadrilla / rendimiento) * jornada_laboral
+# `he` (hora-equipo) entró el 6 sep 2026: son 12 equipos del seed que quedaban con
+#   cantidad directa mientras el mismo equipo en `hm` la derivaba. Se confirmó
+#   con los datos antes de tocarlo — 23 de 26 líneas con `he` y cuadrilla YA
+#   cumplían la fórmula, o sea que el origen (S10/PowerCost) lo trataba como
+#   horario y el raro era el programa. `recurso_por_hora` también quita el punto
+#   final: «hh.» y «hh» son la misma unidad. `powercost_prs_importer` conserva
+#   SU copia del vocabulario A PROPÓSITO — es fidelidad al archivo ajeno, con
+#   sus excepciones calibradas (EQ-día), no la regla de la app.
+# RENDIMIENTO VACÍO (0 o NULL) = «no aplica» — subcontratos, servicios, partidas
+#   globales. El campo se deja en blanco y el reporte OMITE el segmento entero
+#   (`utils.formatting.texto_rendimiento`, único formateador: PDF + 3 hojas de
+#   Excel). Todo lo que divide hace `rend or 1`, y `_guardar_rendimiento` no
+#   deriva nada con rendimiento 0 (sería división por cero). Antes se forzaba a
+#   1.0 al guardar, así que el reporte estampaba «1.00 glb/día» en partidas que
+#   no dependen del rendimiento (pedido de David Ramos, 5 sep 2026).
 # MO/EQ por DÍA (unidad día/jor): cuadrilla habilitada pero SIN jornada →
 #   cantidad = cuadrilla / rendimiento   (rendimiento ya es por día). Helper _recurso_por_dia.
 # EXCEPCIÓN — partida GLOBAL (unidad glb/gbl/est/serv, como PowerCost): sin cuadrilla;
@@ -120,7 +135,7 @@ Total = cantidad * (%part/100) * precio
 
 Tokens centralizados. **NO hardcodear hex.**
 - Paleta: `C.brand = '#F37329'` (naranja). Tipos recurso: MO `#F39C12` · MAT `#27AE60` · EQ `#607D8B` · SC `#7A36B1`.
-- Niveles de título (`NIVEL_ESTILO`): N1 rojo `#B71C1C`, N2 arándano `#0D52BF`, N3 morado `#6A1B9A`, N4 rosa `#AD1457`.
+- Niveles de título: el COLOR lo da **`theme.nivel_fg(nivel)`**, su único dueño — N1 rojo `#B71C1C`, N2 arándano `#0D52BF`, N3 morado `#6A1B9A`, N4 rosa `#AD1457`, **N5 ámbar `#92400E`**; el nivel se ACOTA al más profundo definido. `proyecto_view.NIVEL_ESTILO` le agrega tinte de fondo y tamaño en pt, y el Gantt y el cronograma valorizado pintan con el mismo color. Hasta la 3.0.6 el nivel 5 no existía: caía a un fallback **negro de 10 pt**, más grande que su propio padre de 9 pt, y el Gantt pintaba TODO nivel ≥2 de arándano (reporte de David Ramos, 5 sep 2026). `metrados_view` y `control_obra_view` siguen con su copia — pendiente de unificar.
 - `accent_color(*, on_dark=False)` = acento ambiental (topbars); NO en CTAs/focus (esos siempre naranjas). `accent_reportes()` → `('#273445','#1F2A38','#F1F5F9')`.
 - **Pestañas de topbar oscura:** `theme.tab_topbar(activo, padding=…)`. Estaba copiada en **cuatro** vistas (Cronograma, Control de Obra, Metrados y las pestañas de rubro del pie en `proyecto_view`) y **tres hardcodeaban el hex de la marca**. Las cuatro daban el mismo CSS salvo el padding: Cronograma y Control de Obra `4px 14px` (el default), Metrados `3px 14px`, pie `3px 12px`. Ese parámetro existe solo para no mover píxeles de barras ya en uso, **no es un punto de extensión**. Tests: `test_tab_topbar_reproduce_las_cuatro_densidades`, `test_ninguna_vista_reescribe_el_estilo_de_pestana`.
 - **Modo sobrio es el único modo** — no reintroducir toggles de tema.
@@ -135,6 +150,81 @@ Tokens centralizados. **NO hardcodear hex.**
 - **Excel:** openpyxl; pie tripartito `oddFooter`; **Excel = PDF visible, no PDF CSS**.
 - **ODT/ODS:** se genera el `.docx`/`.xlsx` nativo y se convierte con **LibreOffice headless** (`core/soffice.py`). Sin LibreOffice → aviso, sin crash.
 - **Tamaño del texto del PDF — `rep_escala_texto`, pasos fijos `ESCALAS_TEXTO = (100, 90, 80)`** (3 sep 2026; pedido de David Ramos: «que quepa en menos páginas»). `_PdfRenderer` maqueta el cuerpo a `body/k` y lo dibuja con `painter.scale(k)` en `_aplicar_escala`; **con k=1 no toca el painter y el PDF sale idéntico** (verificado píxel a píxel en los 13 tipos contra la versión anterior). Encabezado, pie y portada no cambian; Gantt, curva S, Word y Excel tampoco. Son pasos y no un slider a propósito: un conjunto finito se verifica entero. **No agregar pasos >100 sin verificar tablas anchas** (Presupuesto/Insumos/Metrados en A4 retrato): reducir es seguro porque las tablas van al 100 % del ancho y llenan el cuerpo igual; agrandar puede sacarlas por el margen. Se elige en «Editar formato». Tests: `tests/test_pdf_escala_texto.py` (menos páginas con las mismas palabras; ninguna tinta en los márgenes del cuerpo).
+
+### Encabezado y pie configurables (6 sep 2026)
+Cinco banderas en `FORMATO_CLAVES`: `rep_pie_izq_oculto` · `rep_pie_cen_oculto`
+· `rep_pie_der_oculto` · `rep_encabezado_oculto` · **`rep_pie_oculto`** (el pie
+entero, línea incluida; Marco, 8 sep 2026), todas `'0'` por defecto y
+leídas con **`pdf_reports._oculto(formato, clave)`** (solo `'1'` es sí — las
+claves de formato son cadenas). **Existen porque dejar un texto en blanco
+significaba «usa el valor por defecto»**, así que no había forma de pedir que un
+hueco quedara vacío: David Ramos escribió un punto en el pie central para
+conseguirlo (5 sep 2026). Su ejemplo —«que abajo solo se muestre el número de
+página»— es apagar izquierda y centro. Apagar el encabezado no solo deja de
+dibujarlo: **`margin_top_body` baja de 1.05 a 0.6 pulgadas** y el cuerpo recupera
+esa franja, que es de dónde sale el ahorro de hojas. La portada no cambia.
+Tests: `tests/test_formato_reporte.py`.
+
+### Márgenes del papel (7 sep 2026)
+Cuatro claves en `FORMATO_CLAVES`: `rep_margen_sup` · `rep_margen_inf` ·
+`rep_margen_izq` · `rep_margen_der`, en **milímetros**, leídas con
+**`pdf_reports.margenes_mm(formato)`** (acota a `MARGEN_MIN_MM`–`MARGEN_MAX_MM`,
+5–40; lo ilegible cae al defecto). Los defectos **15 / 18 / 15 / 15** reproducen
+la geometría de siempre (57 px laterales, cuerpo a 100 px con encabezado, en A4
+a 96 dpi) — un formato viejo sin las claves imprime igual. `_PdfRenderer` tiene
+ahora `margin_x` (izquierdo) **y `margin_r`** (derecho): NO volver a escribir
+`page_w - 2 * margin_x`. El encabezado y el pie están cotados desde el borde
+del papel, así que el superior los desplaza en bloque con `header_dy` (un
+`painter.translate` en `_draw_header`) y el inferior con `footer_dy`. La
+portada no cambia; el Gantt tiene sus propios márgenes (10 mm fijos en
+`cronograma_view`). Pedido de David Ramos: «una opción para configurar los
+márgenes» (en su primer envío decía «bordes»; el reenvío del 7 sep lo aclaró).
+Tests en `tests/test_formato_reporte.py` (geometría por defecto intacta, el
+izquierdo corre el cuerpo, el superior lo baja, el derecho no deja tinta).
+
+**El diálogo «Editar formato» (`views/formato_reporte_dialog.py`) es apaisado
+desde el 7 sep 2026:** menú de secciones a la izquierda (`QListWidget`) y una
+página por sección (`QStackedWidget`, cada una en su `QScrollArea`) — Empresa ·
+Logo · Color de marca · Página y texto · Encabezado y pie. 780×580, acotado a la
+pantalla; ninguna sección necesita scroll a ese alto, y si la ventana se achica
+la barra de botones sigue fija abajo. Recuerda la última sección abierta en la
+sesión (`_ultima_seccion`, atributo de clase). Los nombres de los widgets
+(`inp_*`, `chk_*`, `sld_logo`, `cmb_escala_texto`, `spn_margen_*`) son la API
+que usan `_load_values`/`_save_and_accept`; no renombrarlos al mover cosas de
+página.
+
+**Configuración (`views/configuracion_view.py`) también es menú lateral + página
+por sección** desde el 8 sep 2026 (Marco: «hago mucho scroll»): doce secciones en
+cuatro grupos (General · Sistema · Interfaz · Cuenta), definidas en
+`_SECCIONES`; cada tarjeta `_card_*` es una sección y ninguna necesita scroll a
+700 px de alto. `set_tab(nombre)` sigue aceptando los nombres viejos de pestaña
+(`general` → Empresa, `accesibilidad` → Apariencia, `ia`, `idioma`, `usuarios`)
+porque `main_window` entra con `tab='ia'`. Recuerda la última sección abierta
+(`_ultima_seccion`, atributo de clase: la vista se recrea al volver).
+
+### Colores de los títulos en los reportes — esquemas (8 sep 2026)
+**Un solo dueño: `pdf_reports.colores_titulos(formato)` → `{0..5: hex}`** (0 = cabecera
+de sub-presupuesto, `sub` en el esquema; en Clásico es el slate-800 que el PDF
+usó siempre — el Excel del Presupuesto lo pintaba de naranja por su cuenta
+hasta el 8 sep 2026), que lee
+el esquema activo (`rep_esquema_titulos`) entre `ESQUEMAS_FABRICA` (Clásico ·
+Sobrio · Azul corporativo · Verde · Monocromo) y los propios del usuario
+(`rep_esquemas_titulos`, JSON `{clave: {nombre, colores[5]}}`, leídos con
+`esquemas_titulos`). **Clásico = `theme.NIVEL_FG`**, así que sin las claves todo
+sale como siempre — se verificó regenerando los 24 reportes (17 PDF por
+píxeles + 7 Excel por XML) antes y después de unificar: idénticos. Consumen la
+función: el CSS del PDF (`_base_css(formato)`, clases `titulo1..5`), el ACU, el
+rubro de Gastos Generales y el cronograma valorizado; en Excel, Presupuesto,
+Gastos Generales y Valorización. **NO volver a escribir los hex de nivel en
+`core/`** — el escáner de conceptos duplicados los cazaba en 9 archivos.
+**Solo reportes:** el árbol y el Gantt en pantalla siguen con `theme.nivel_fg`;
+Word no usa colores de nivel (Resumen va en slate a propósito). Se edita en
+«Editar formato → Colores de títulos»: los de fábrica no se modifican —tocar un
+color crea «Personalizado»—, «Guardar como…» con nombre, «Eliminar» solo
+propios; un esquema activo inexistente cae a Clásico y un hex inválido cae al
+de Clásico de ese nivel. Tests en `tests/test_formato_reporte.py` (Clásico ==
+tema; desconocido → Clásico; JSON roto se ignora; Monocromo pinta el título
+negro en el PDF). Pedido de David Ramos (5 sep 2026); diseño de Marco.
 
 ### Datos de empresa y logo — UNA sola fuente: las claves `rep_*`
 `FORMATO_CLAVES` en `core/pdf_reports.py` (nombre, subtítulo, **RUC/dirección/teléfono**, color, logo, escala, pies). Las editan **dos puertas al mismo dato**: «Editar formato» (Centro de Reportes / Gantt) y Configuración → «Datos de empresa». Antes esa tarjeta guardaba su propio juego `empresa_*` y solo copiaba nombre y logo —y solo si no estaban vacíos—, así que había dos verdades y quitar el logo allí no lo quitaba del PDF. Los valores viejos se migran y **se borran** una vez en `init_db` (flag `empresa_unificada`); NO reintroducir un fallback de lectura a `empresa_*` — resucitaría el logo al borrarlo. Fuera de reportes usar `pdf_reports.empresa_info()`.
@@ -162,13 +252,26 @@ Topbar (← Inicio · pestañas · Total) + toolbar + `QSplitter` H/V. Panel der
 - Vistas ancladas al `_root_stack` (NO diálogos): Pie, Cronograma, Reportes, Metrados, Fórmula, Memoria Descriptiva.
 - **Panel Metrados/Acero:** solo se recarga cuando su pestaña está visible. Recuerda su partida dueña en `_met_panel_pid`; los 4 caminos de guardado (acero/metrados, silencioso/explícito) escriben SIEMPRE a `_met_panel_pid`, nunca a la partida seleccionada en el árbol (si difieren, evitaba copiar la planilla a otra partida).
 - **Agregar recursos al ACU (`views/recurso_selector_dialog.py`):** lo que se graba en `acu_items` lo decide UNA función, `_cuadrilla_y_cantidad`, para las dos pestañas (Buscar y Crear nuevo). Cuadrilla solo donde la regla del ACU la deriva (MO y equipo por hora/día, partida no global); en lo demás se graba 0, nunca el «1.000» del campo. El formulario de recurso nuevo habilita cuadrilla O cantidad con esa misma regla (`_sync_cuadrilla_nuevo`), igual que las celdas de la tabla. Hasta la 3.0.4 «Crear nuevo» grababa la cuadrilla tal cual para cualquier tipo (reporte de David Ramos, 2 sep 2026). Test: `test_el_dialogo_de_recursos_graba_cuadrilla_solo_donde_aplica`.
+  Los tres campos numéricos (precio, cuadrilla, cantidad) llevan **validador**: aceptaban texto y `parse_num` lo convertía en 0.0 **en silencio**, así que el recurso entraba al ACU con precio cero (reporte de David Ramos, 5 sep 2026).
+  **Clic derecho sobre un insumo del catálogo → Editar / Duplicar y editar**, sin salir del ACU. Reusa `RecursoFormDialog` de `recursos_view` (import perezoso), así que no hay una segunda forma de editar un insumo que pueda divergir; duplicar conserva tipo, índice INEI, unidad y precio, y **cancelar el formulario borra la copia** para no dejar «(copia)» huérfanos. Lo que se edita se ve en TODO el programa —descripción, tipo, unidad e índice viven solo en `recursos`—; el **precio no se propaga** a los ACU ya armados, y eso es la regla «un insumo = un precio por proyecto», no un olvido.
+- **«↻ Precios del catálogo»** (barra de la pestaña Insumos, siempre visible con el
+  proyecto editable, con contador). Abre `views/actualizar_precios_dialog.py`: la
+  lista de insumos cuyo precio en el proyecto difiere del catálogo, con casillas,
+  y aplica con `database.actualizar_precios_desde_catalogo` (=
+  `unificar_precio_recurso` con el catálogo como origen; recalcula PU). Es la
+  **puerta explícita** al pedido «si se modifica un recurso que se actualice en
+  todos» (David Ramos, 5 sep 2026): el precio de `acu_items` sigue siendo una
+  foto por proyecto y editar el catálogo sigue sin tocar presupuestos armados.
+  `precios_desactualizados` excluye overhead y catálogo en 0 («sin precio» no es
+  «poner a cero»). Test: `test_actualizar_precios_desde_catalogo`.
+- **Duplicar una partida** la inserta como **HERMANA justo debajo** y le pone el correlativo que le toca (`tree._renumerar()`, el mismo camino que mover/anidar), y abre su ficha para renombrarla. Antes grababa el ítem del original + «.x», que por el punto la convertía en HIJA al reconstruir el árbol —el padre se busca por prefijo del ítem— y el «.x» quedaba a la vista (reporte de David Ramos, 5 sep 2026). El ítem temporal ya no lleva punto.
 
 ---
 
 ## Navegación — `views/main_window.py`
 
 `QStackedWidget` con una vista por nombre (`vista_nombre`). Las ProyectoView abiertas siguen vivas en el stack (`_proyectos_abiertos`): volver a un proyecto es cambiar de índice, no abrirlo de nuevo.
-- **Una sola puerta a las vistas globales: `_ir_a_vista_global(nombre, nav=, bot=, headerbar=, tab=)`.** Todo `_ir_a_*` (Inicio, Insumos, Biblioteca, INEI, Importar, Exportar, Config, Acerca, IA) pasa por ahí. Regla: **si se sale de un proyecto queda el banner «← Volver al proyecto»**, sea cual sea el destino, y el sidebar se muestra. Se decide con `_pid_proyecto_activo()` ANTES de cambiar de vista. Hasta la 3.0.4 el banner lo ponían solo INEI/Config/IA, y solo si `_sb_collapsed`: desde el menú lateral (sidebar visible) Inicio y Catálogos no dejaban camino de vuelta (reporte de David Ramos, 2 sep 2026). NO volver a decidir el banner dentro de un `_ir_a_*` suelto — `tests/test_navegacion.py` lo vigila.
+- **Una sola puerta a las vistas globales: `_ir_a_vista_global(nombre, nav=, bot=, headerbar=, tab=)`.** Todo `_ir_a_*` (Inicio, Insumos, Biblioteca, INEI, Importar, Exportar, Config, Acerca, IA) pasa por ahí. Regla: **si se sale de un proyecto queda el banner «← Volver al proyecto»**, sea cual sea el destino, y el sidebar se muestra. Se decide con `_pid_proyecto_activo() or _pid_volver_vigente()` ANTES de cambiar de vista: se sale de un proyecto, **o ya se estaba en una vista global con banner**. Encadenar destinos (Proyecto → Catálogo de insumos → Importar, o cancelar Importar, que vuelve a Inicio) dejaba el primer término en None y borraba el banner a mitad de camino — el proyecto seguía abierto y ya no se veía cómo volver (reporte de David Ramos, 5 sep 2026). `_pid_volver_vigente` valida contra el STACK, no contra `_volver_a_pid`: una pestaña cerrada deja de tener camino de vuelta sin que haya que acordarse de limpiar nada. Hasta la 3.0.4 el banner lo ponían solo INEI/Config/IA, y solo si `_sb_collapsed`: desde el menú lateral (sidebar visible) Inicio y Catálogos no dejaban camino de vuelta (reporte de David Ramos, 2 sep 2026). NO volver a decidir el banner dentro de un `_ir_a_*` suelto — `tests/test_navegacion.py` lo vigila.
 - Límite conocido: borrar desde Inicio un proyecto que sigue abierto no cierra su pestaña ni el banner (ya pasaba con la barra de pestañas de los proyectos).
 
 ---
@@ -420,6 +523,10 @@ Vista anclada al `_root_stack`, botón «Control de Obra» en el topbar tras Cro
 - **Auth** (`utils/auth.py`): roles admin·usuario·invitado; primer usuario = admin.
 - **Estados:** solo `elaboracion` es editable; `_require_editable(nivel)`.
 - **IA (opcional, `core/ai_specs.py`):** 6 proveedores (clave del usuario). Specs/rendimiento por partida; validar_proyecto, memoria descriptiva. Override `done()` en diálogos IA.
+- **Gemini 503 «high demand»** es pasajero y NO es la clave: `_llamar_gemini` reintenta a los 2 s y luego prueba un modelo hermano (`_gemini_modelo_disponible`) sin guardarlo; si aún así falla, el mensaje dice qué es y qué hacer (esperar un minuto o elegir `gemini-2.5-flash-lite`). Marco lo vio el 8 sep 2026 con «Probar conexión» recién en verde.
+- **Modelo de Gemini: desplegable editable** (`ia_view._ModeloCombo`, 8 sep 2026) con cuatro modelos curados y una nota cada uno (`GEMINI_MODELOS`; defecto `gemini-2.5-flash`), más «Ver modelos de mi cuenta», que llama a `ai_specs.listar_modelos_gemini(api_key)` en un hilo y rellena la lista con lo que la clave puede usar. Conserva la API `text()`/`setText()` del QLineEdit al que reemplaza, así carga/guardado no cambiaron. NO listar los quince modelos de Google de fábrica: la mitad son versiones viejas, imagen o audio. Los otros proveedores con campo libre (OpenAI, DeepSeek, Qwen) siguen así; OpenRouter ya tenía su propio listado.
+- **`widgets/flow_layout.py` — `FlowLayout`** (8 sep 2026): fila que se envuelve. Vivía en `dashboard_view` (chips de portafolio, que lo importa de ahí ahora); el chat de Tuxia lo usa para sus botones rápidos porque en una sola fila imponían **587 px de ancho mínimo** al panel y el texto salía cortado por la derecha hasta redimensionar. Las burbujas del chat llevan además `QSizePolicy.Ignored` horizontal: un párrafo con saltos de línea nunca debe fijar el ancho del panel.
+- **Sin IA configurada, el chat lo dice y explica cómo activarla:** `asistente_local.guia_configurar_ia()` es EL texto (tres pasos, proveedores gratis, dónde sale la clave) y lo usan `bienvenida(nombre, hay_ia=False)`, la respuesta offline y el comando **`/ia`** del chat, que además emite `_ChatACU.ir_a_ia` → `ProyectoView.ir_a_ia` → Configuración → Inteligencia artificial. La sección se llama así desde el 8 sep 2026 (antes «IA / API Key»); no volver a escribir el nombre viejo en mensajes.
 - **«Sugerir partidas» (RAG):** la IA arma la estructura, la biblioteca/proyectos ponen los costos. Fase 1 fuzzy + Fase 2 semántica (`core/biblioteca_embeddings.py`, model2vec int8, sin PyTorch), fusión RRF; el modelo se baja de R2 al build (si falta, degrada a fuzzy). Corre en QThread. **El tar.gz del modelo NUNCA estuvo en R2 hasta 2026-08-08** — todos los binarios ≤2.9.0 salieron solo-fuzzy sin que nadie lo notara. Ya está subido (`downloads.ingepresupuestos.com/models/potion-multilingual-128M.tar.gz`, int8 140 MB); la 2.9.1 será la primera con Fase 2. Regenerarlo si se pierde: `StaticModel.from_pretrained('minishlab/potion-multilingual-128M', quantize_to='int8')` + `save_pretrained` + tar.gz + `wrangler r2 object put`.
 - **i18n** (`utils/i18n.py`): `tr("texto español")`, importar dentro del método. Cobertura parcial.
 - **Contacto** (`views/acerca_view.py` → `worker/contacto.js`): POST → Cloudflare Worker → Resend. User-Agent `IngePresupuestos/X.Y.Z` obligatorio. El payload lleva `Email` (remitente) y el Worker lo pone en `reply_to` — validado ANTES de usarlo como cabecera (llega de fuera, y un valor basura hace que Resend responda 422 y se pierda el mensaje). Es opcional: sin él se avisa una vez y se envía anónimo. **El Worker se despliega A MANO** (pegar en el editor de Cloudflare + Deploy): si no se redespliega, `Email` se ignora en silencio.
@@ -563,6 +670,19 @@ no todo clon es un concepto.
   la llamaba nadie. Se eliminó. El dueño de usuarios/sesión es `utils/auth.py`;
   lo que queda en la sección «HELPERS DE USUARIOS» de `database.py` está
   marcado como vestigial y también está muerto.
+
+**Marco de los catálogos: `_catalogo_base.armar_marco_catalogo(vista, icono,
+título, subtítulo)`** (8 sep 2026). Devuelve `(layout_contenido, top, pie)` y
+deja `vista.lbl_subt`. `top` es la barra oscura de 44 px de Configuración,
+Nuevo proyecto y Cronograma (icono, título, conteo, botones con `_mk_btn(…,
+on_dark=True)` → `BTN_ON_DARK_SS`); `pie` es la franja de 36 px pegada al
+borde inferior, como el pie de la pestaña Insumos del proyecto, donde van los
+KPI como «Etiqueta: valor» (`crear_kpi_pie`, que expone `lbl_valor` igual que
+`theme.crear_kpi_card`, así el refresco no cambió). Historia: el título era
+grande sobre fondo claro y los KPI una fila de tarjetas entre título y
+filtros; Marco: «toda esa fila es informativa, debe estar abajo». La tabla
+gana esa altura. `IndicesINEIView` no hereda el mixin: llama a la función y
+tiene su propio `_mk_btn`/`_mk_kpi` con la misma forma.
 
 **Card KPI: una sola definición.** `utils/theme.crear_kpi_card()` construye la
 card que antes copiaban `recursos_view`, `biblioteca_view` **e**

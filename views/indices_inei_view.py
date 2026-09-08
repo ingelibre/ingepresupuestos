@@ -41,7 +41,7 @@ from core.indices_inei import (
     descargar_desde_url, importar_desde_texto,
     buscar_ultimo_excel_inei, descargar_ultimo_inei,
 )
-from views._catalogo_base import EditorPlenoDelegate
+from views._catalogo_base import EditorPlenoDelegate, BTN_ON_DARK_SS, armar_marco_catalogo, crear_kpi_pie
 from utils.icons import icon
 from utils.formatting import parse_num, parse_num_opt
 
@@ -166,32 +166,10 @@ class IndicesINEIView(QWidget):
         un menú «Importar ▾» —como en Insumos— y los selectores bajan a la
         barra de filtros, que es donde el programa pone los filtros.
         """
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 16)
-        root.setSpacing(12)
-
-        # ── Cabecera ──
-        top = QHBoxLayout()
-        top.setSpacing(10)
-
-        ico_t = QLabel()
-        ico_t.setPixmap(icon("rep-resumen").pixmap(28, 28))
-        ico_t.setFixedSize(28, 28)
-        top.addWidget(ico_t)
-
-        title = QLabel("Índices Unificados de Precios INEI")
-        f = QFont(); f.setPointSize(15); f.setWeight(QFont.DemiBold)
-        title.setFont(f)
-        title.setStyleSheet(f"color:{SLATE_700};")
-        top.addWidget(title)
-
-        self.lbl_subt = QLabel("")
-        self.lbl_subt.setStyleSheet(f"color:{SLATE_300}; padding-left:6px;")
-        top.addWidget(self.lbl_subt)
-        top.addStretch(1)
+        root, top, pie = armar_marco_catalogo(self, "rep-resumen", "Índices Unificados de Precios INEI")
 
         self.btn_auto = self._mk_btn("Sincronizar con INEI",
-                                      icon_name="importar", primary=True)
+                                      icon_name="importar", primary=True, on_dark=True)
         self.btn_auto.setToolTip(
             "Detecta y descarga el último archivo oficial del INEI"
             " automáticamente")
@@ -199,7 +177,7 @@ class IndicesINEIView(QWidget):
         top.addWidget(self.btn_auto)
 
         # Todo lo que es traer datos, en un solo menú.
-        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar")
+        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar", on_dark=True)
         menu = QMenu(self.btn_import)
         self.btn_imp_excel = menu.addAction(icon("folder"),
                                             "Archivo del INEI (.xlsx)")
@@ -218,24 +196,21 @@ class IndicesINEIView(QWidget):
         self.btn_import.setMenu(menu)
         top.addWidget(self.btn_import)
 
-        self.btn_exp_json = self._mk_btn("Exportar", icon_name="exportar")
+        self.btn_exp_json = self._mk_btn("Exportar", icon_name="exportar", on_dark=True)
         self.btn_exp_json.setToolTip("Exportar el histórico a JSON")
         self.btn_exp_json.clicked.connect(self._exportar_json)
         top.addWidget(self.btn_exp_json)
 
         self.btn_diccionario = self._mk_btn("Diccionario",
-                                            icon_name="rep-insumos")
+                                            icon_name="rep-insumos", on_dark=True)
         self.btn_diccionario.setToolTip(
             "Qué índice unificado le corresponde a cada insumo — es lo que usa "
             "la fórmula polinómica para agrupar el costo")
         self.btn_diccionario.clicked.connect(self._abrir_diccionario)
         top.addWidget(self.btn_diccionario)
 
-        root.addLayout(top)
 
         # ── KPIs ──
-        kpis = QHBoxLayout()
-        kpis.setSpacing(10)
         self.kpi_indices = self._mk_kpi("Índices catálogo", "0", SLATE_500)
         self.kpi_con_datos = self._mk_kpi("Con valores cargados", "0", GREEN_700)
         self.kpi_valores = self._mk_kpi("Valores totales", "0", BLUE_700)
@@ -243,8 +218,8 @@ class IndicesINEIView(QWidget):
         self.kpi_ultimo = self._mk_kpi("Último período cargado", "—", _acc())
         for k in (self.kpi_indices, self.kpi_con_datos,
                   self.kpi_valores, self.kpi_ultimo):
-            kpis.addWidget(k, 1)
-        root.addLayout(kpis)
+            pie.addWidget(k)
+        pie.addStretch(1)
 
         # ── Filtros ──
         filtros = QFrame()
@@ -429,16 +404,18 @@ class IndicesINEIView(QWidget):
         return fr
 
     def _mk_btn(self, text: str, icon_name: str | None = None,
-                primary: bool = False) -> QPushButton:
+                primary: bool = False, on_dark: bool = False) -> QPushButton:
         b = QPushButton(text)
         b.setCursor(Qt.PointingHandCursor)
-        b.setMinimumHeight(32)
+        b.setMinimumHeight(32 if not on_dark else 30)
         if icon_name:
             b.setIcon(icon(icon_name))
             b.setIconSize(QSize(16, 16))
         if primary:
             from utils.theme import BTN_PRIMARY_SS
             b.setStyleSheet(BTN_PRIMARY_SS)
+        elif on_dark:
+            b.setStyleSheet(BTN_ON_DARK_SS)
         else:
             b.setStyleSheet(
                 f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
@@ -449,12 +426,9 @@ class IndicesINEIView(QWidget):
             )
         return b
 
-    def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QFrame:
-        """Card KPI del sistema de diseño, un punto más apretada que la de
-        los catálogos: esta fila lleva cuatro KPIs y una barra de filtros."""
-        from utils.theme import crear_kpi_card
-        return crear_kpi_card(etiqueta, valor, color,
-                              margenes=(14, 8, 14, 8), espaciado=0)
+    def _mk_kpi(self, etiqueta: str, valor: str, color: str):
+        """KPI de la franja inferior, el mismo de los otros catálogos."""
+        return crear_kpi_pie(etiqueta, valor, color)
 
     # ── Carga inicial ───────────────────────────────────────────────────────
     def _cargar_todo(self):

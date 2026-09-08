@@ -41,6 +41,7 @@ from core.database import (
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
     precios_inconsistentes, unificar_precio_recurso, precio_recurso_en_proyecto,
+    precios_desactualizados,
     partidas_pu_inconsistente, partida_usa_acero,
     # Regla crítica del ACU (cant = cuadrilla/rendimiento × jornada): una sola
     # definición, en core.database. Los nombres locales se conservan por los
@@ -55,7 +56,7 @@ from utils.icons import icon as load_icon, icon_colored
 from utils import partidas_clipboard as _pclip
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
-from utils.theme import C as _C
+from utils.theme import C as _C, nivel_fg as _nivel_fg
 
 BLUE_500  = _C.brand            # naranja marca (legacy name)
 BLUE_700  = _C.brand_hover
@@ -90,12 +91,15 @@ def _norm_lead_zero(t: str) -> str:
 
 # ── Colores jerárquicos del presupuesto ──────────────────────────────────────
 # Cada nivel: (color_texto, color_fondo_tinte, tamaño_pt)
-# Los títulos usan texto coloreado + tinte de fondo muy suave
+# Los títulos usan texto coloreado + tinte de fondo muy suave. El COLOR sale de
+# `utils.theme.nivel_fg`, que es su único dueño: el Gantt y el cronograma
+# valorizado pintan con el mismo, y así no vuelven a divergir.
 NIVEL_ESTILO = {
-    1: ("#B71C1C", "#FFF5F5", 9),   # Rojo oscuro       — capítulos principales
-    2: (_C.info,   "#F5F8FF", 9),   # Arándano (Blueberry) — sub-capítulos
-    3: ("#6A1B9A", "#F9F5FF", 9),   # Morado            — secciones
-    4: ("#AD1457", "#FFF5FA", 9),   # Rosa oscuro       — sub-secciones
+    1: (_nivel_fg(1), "#FFF5F5", 9),   # Rojo oscuro       — capítulos principales
+    2: (_nivel_fg(2), "#F5F8FF", 9),   # Arándano (Blueberry) — sub-capítulos
+    3: (_nivel_fg(3), "#F9F5FF", 9),   # Morado            — secciones
+    4: (_nivel_fg(4), "#FFF5FA", 9),   # Rosa oscuro       — sub-secciones
+    5: (_nivel_fg(5), "#FFFBF5", 9),   # Ámbar oscuro      — sub-sub-secciones
 }
 BG_PARTIDA = _C.surface
 
@@ -2379,6 +2383,7 @@ class ProyectoView(QWidget):
         self._chat_splitter.addWidget(self.tabs)
         self._chat_acu = _ChatACU()
         self._chat_acu.set_proyecto(self.pid)
+        self._chat_acu.ir_a_ia.connect(self.ir_a_ia.emit)
         # Botón minimizar del chat: vuelve al estado plegado (Tuxia bubble)
         self._chat_acu.btn_minimizar.clicked.connect(
             lambda: self._abrir_asistente_ia()
@@ -2480,6 +2485,11 @@ class ProyectoView(QWidget):
 
         self.inp_rend = QLineEdit("1.00")
         self.inp_rend.setFixedSize(56, 24)
+        self.inp_rend.setPlaceholderText("—")
+        self.inp_rend.setToolTip(
+            "Producción por día de la partida. Déjalo VACÍO cuando no aplique "
+            "—subcontratos, servicios, partidas globales—: así no sale en el "
+            "reporte ni deriva cantidades.")
         self.inp_rend.setStyleSheet(
             f"background:white; border:1px solid {SILVER_300}; border-radius:4px;"
             f" padding:0 6px; font-size:11px; color:{SLATE_700};"
@@ -2692,6 +2702,7 @@ class ProyectoView(QWidget):
         self.btn_ins_pu_acu.setVisible(False)
         self.btn_ins_pu_acu.clicked.connect(self._verificar_pu_acu)
         hl.addWidget(self.btn_ins_pu_acu)
+
         self.inp_buscar_ins = QLineEdit()
         self.inp_buscar_ins.setPlaceholderText(tr("Buscar") + "…")
         self.inp_buscar_ins.setFixedSize(160, 24)
@@ -2748,6 +2759,29 @@ class ProyectoView(QWidget):
         hl2 = QHBoxLayout(pie)
         hl2.setContentsMargins(10, 0, 10, 0)
         hl2.setSpacing(0)
+        # Botón «Precios del catálogo» — trae al proyecto los precios que
+        # cambiaron en el catálogo, con vista previa. Es la puerta EXPLÍCITA:
+        # editar el catálogo nunca toca un presupuesto ya armado (pedido de
+        # David Ramos, 5 sep 2026). Siempre visible con el proyecto editable
+        # —una función que solo aparece cuando hace falta no la encuentra
+        # nadie—; el contador dice si hay algo que traer. Va en el pie, a la
+        # izquierda de los subtotales MO/MAT/EQ (Marco, 8 sep 2026: arriba
+        # estorbaba entre las alertas).
+        self.btn_ins_catalogo = QPushButton("↻ Precios del catálogo")
+        self.btn_ins_catalogo.setFixedHeight(22)
+        self.btn_ins_catalogo.setCursor(Qt.PointingHandCursor)
+        self.btn_ins_catalogo.setToolTip(
+            "Traer al proyecto los precios que cambiaron en el catálogo de "
+            "insumos, eligiendo cuáles.")
+        self.btn_ins_catalogo.setStyleSheet(
+            f"QPushButton {{ background:white; color:{SLATE_700}; border:1px solid {SILVER_300};"
+            f" border-radius:4px; padding:0 8px; font-size:10px; font-weight:700; }}"
+            f"QPushButton:hover {{ background:{_C.brand_soft}; border-color:{_C.brand};"
+            f" color:{_C.brand_dark}; }}"
+        )
+        self.btn_ins_catalogo.setVisible(False)
+        self.btn_ins_catalogo.clicked.connect(self._actualizar_precios_catalogo)
+        hl2.addWidget(self.btn_ins_catalogo)
         hl2.addStretch()
         # Subtotales por tipo — solo en modo proyecto total
         self._ins_tipo_labels: dict[str, QLabel] = {}
@@ -4984,7 +5018,12 @@ class ProyectoView(QWidget):
                 # negrita. El fondo distingue solo los TÍTULOS (nivel 1) con una
                 # banda neutra; los SUBTÍTULOS (nivel ≥2) no se tintan: siguen la
                 # zebra como una partida más y se distinguen solo por el texto.
-                txt_col, _bg_tinte_ignored, pt = NIVEL_ESTILO.get(niv, ("#273445", "#F8F9FA", 10))
+                # El árbol anida sin tope (`_procesar_nivel` recursiona con
+                # nivel+1), así que el nivel se ACOTA al más profundo definido.
+                # Con un `.get(niv, default)` un título de nivel 5 caía a un
+                # fallback negro de 10 pt — más grande que su propio padre de
+                # nivel 4 (reporte de David Ramos, 5 sep 2026).
+                txt_col, _bg_tinte_ignored, pt = NIVEL_ESTILO[min(max(niv, 1), 5)]
                 fg = QBrush(QColor(txt_col))
                 font = QFont()
                 font.setBold(True)
@@ -5105,12 +5144,16 @@ class ProyectoView(QWidget):
 
         self._acu_partida_global = _partida_global(partida['unidad'])
 
-        rend = partida['rendimiento'] or 1.0
-        self.inp_rend.setText(f"{rend:.4f}".rstrip('0').rstrip('.') or "0")
+        # Rendimiento 0 (o NULL) = «sin rendimiento»: el campo va vacío y la
+        # unidad «/día» tampoco se muestra, porque no hay nada por día.
+        rend = partida['rendimiento'] or 0
+        self.inp_rend.setText(
+            f"{rend:.4f}".rstrip('0').rstrip('.') if rend > 0 else "")
 
         # Unidad del rendimiento = unidad de la partida por día (ej. m²/día)
         und_part = (partida['unidad'] or '').strip()
-        self.lbl_rend_unidad.setText(f"{und_part}/día" if und_part else "")
+        self.lbl_rend_unidad.setText(
+            f"{und_part}/día" if (und_part and rend > 0) else "")
 
         jornada = self._proy.get('jornada_laboral') or 8
         self.lbl_jornada.setText(f"Jornada: {jornada} h/día")
@@ -5282,6 +5325,13 @@ class ProyectoView(QWidget):
         except Exception:
             self._pu_incon = []
 
+        # Insumos cuyo precio quedó distinto del catálogo (solo el contador;
+        # el detalle lo arma el diálogo al abrirse).
+        try:
+            self._ins_catalogo = len(precios_desactualizados(conn, self.pid))
+        except Exception:
+            self._ins_catalogo = 0
+
         conn.close()
 
         if hasattr(self, 'lbl_ins_titulo'):
@@ -5371,6 +5421,12 @@ class ProyectoView(QWidget):
             self.btn_ins_pu_acu.setVisible(n_pu > 0 and self._ed_presupuesto)
             if n_pu > 0:
                 self.btn_ins_pu_acu.setText(f"⚠ PU ≠ ACU ({n_pu})")
+
+        if hasattr(self, 'btn_ins_catalogo'):
+            n_cat = int(getattr(self, '_ins_catalogo', 0) or 0)
+            self.btn_ins_catalogo.setVisible(bool(self._ed_presupuesto))
+            self.btn_ins_catalogo.setText(
+                f"↻ Precios del catálogo ({n_cat})" if n_cat else "↻ Precios del catálogo")
 
         if hasattr(self, '_ins_tipo_labels'):
             for tipo, lv in self._ins_tipo_labels.items():
@@ -5609,6 +5665,21 @@ class ProyectoView(QWidget):
             print(f"[unificar_precios] ERROR: {e}")
         finally:
             conn.close()
+        self.recargar_partidas()
+        self.actualizar_total()
+        self.cargar_insumos(self._ins_estado)
+        if self._partida_actual_id:
+            self.cargar_acu(self._partida_actual_id)
+
+    def _actualizar_precios_catalogo(self):
+        """Abre la vista previa de precios que cambiaron en el catálogo y, si
+        el usuario aplica, recarga lo que depende de los PU."""
+        if not self._require_editable('actualizar precios desde el catálogo'):
+            return
+        from views.actualizar_precios_dialog import ActualizarPreciosDialog
+        dlg = ActualizarPreciosDialog(self.pid, self._moneda, self)
+        if dlg.exec() != QDialog.Accepted or not dlg.n_aplicados:
+            return
         self.recargar_partidas()
         self.actualizar_total()
         self.cargar_insumos(self._ins_estado)
@@ -6849,10 +6920,10 @@ class ProyectoView(QWidget):
                precio_unitario, nivel, es_titulo, especificaciones, rendimiento, grupo,
                sub_presupuesto_id)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (self.pid, orig['item']+'.x', orig['descripcion'], orig['unidad'] or '',
+            (self.pid, orig['item']+'x', orig['descripcion'], orig['unidad'] or '',
              orig['metrado'] or 0, orig['precio_unitario'] or 0, orig['nivel'] or 1,
              orig['es_titulo'] or 0, orig['especificaciones'] or '',
-             orig['rendimiento'] or 1, orig['grupo'] or '',
+             orig['rendimiento'] or 0, orig['grupo'] or '',
              self._sub_ppto_id)
         )
         new_id = cur.lastrowid
@@ -6865,6 +6936,30 @@ class ProyectoView(QWidget):
         conn.commit()
         conn.close()
         self.recargar_partidas()
+
+        # El duplicado se coloca como HERMANO justo debajo del original y toma
+        # el correlativo que le toca; después se abre su ficha para renombrarlo.
+        #
+        # Antes se grababa con el ítem del original + «.x», que por el punto lo
+        # convertía en HIJO del original al reconstruir el árbol (el padre se
+        # busca por prefijo del ítem), y el «.x» se quedaba a la vista hasta que
+        # el usuario entrase a editar con clic derecho (reporte de David Ramos,
+        # 5 sep 2026). El ítem temporal ya no lleva punto —así nace hermano— y
+        # `_renumerar` le pone el número real, igual que en mover/anidar.
+        nodo_orig = self._id_to_item.get(part_id)
+        nodo_nuevo = self._id_to_item.get(new_id)
+        if nodo_orig is not None and nodo_nuevo is not None:
+            padre_o = nodo_orig.parent() or self.tree.invisibleRootItem()
+            padre_n = nodo_nuevo.parent() or self.tree.invisibleRootItem()
+            padre_n.takeChild(padre_n.indexOfChild(nodo_nuevo))
+            padre_o.insertChild(padre_o.indexOfChild(nodo_orig) + 1, nodo_nuevo)
+        # Renumera TODO el sub-presupuesto y reconstruye el árbol (la señal
+        # `partidas_reordenadas`), así que `_id_to_item` se rehace acá abajo.
+        self.tree._renumerar()
+        nodo_nuevo = self._id_to_item.get(new_id)
+        if nodo_nuevo is not None:
+            self.tree.setCurrentItem(nodo_nuevo)
+        self._editar_partida(new_id)
 
     # ── Wrappers para atajos de teclado ──────────────────────────────────────
 
@@ -7775,15 +7870,22 @@ class ProyectoView(QWidget):
             return
         if not self._ed_presupuesto:
             return
+        # Campo vacío ⇒ 0 = «sin rendimiento». Antes se forzaba a 1.0, así que
+        # una partida de subcontrato o global no tenía forma de decir «acá no
+        # aplica» y el reporte estampaba «1.00 glb/día» (pedido de David
+        # Ramos, 5 sep 2026). El 0 ya era el centinela que usaba
+        # `_tuxia_recalcular_mo`, y todo lo que divide hace `rend or 1`.
         rend = parse_num(self.inp_rend.text())
-        if rend <= 0:
-            rend = 1.0
+        if rend < 0:
+            rend = 0.0
         conn = get_db()
         conn.execute("UPDATE partidas SET rendimiento=? WHERE id=?",
                      (rend, self._partida_actual_id))
         # En partidas globales (glb/est/serv) la cantidad es directa:
-        # no recalcular al cambiar el rendimiento.
-        if not getattr(self, '_acu_partida_global', False):
+        # no recalcular al cambiar el rendimiento. Y SIN rendimiento (0) no
+        # hay de dónde derivar nada: las cantidades ya cargadas se conservan
+        # tal cual — además `cuad / rend` sería una división por cero.
+        if rend > 0 and not getattr(self, '_acu_partida_global', False):
             proy = conn.execute("SELECT jornada_laboral FROM proyectos WHERE id=?", (self.pid,)).fetchone()
             jornada = (proy['jornada_laboral'] if proy else None) or 8
             # La cantidad derivada de la cuadrilla abarca MO y equipo por hora
@@ -9902,11 +10004,12 @@ class ProyectoView(QWidget):
             for it in acu_items:
                 cuad = it['cuadrilla'] or 0
                 cant = it['cantidad'] or 0
-                unidad_l = (it['unidad'] or '').lower()
+                # La regla vive en core.database — este validador tenía su
+                # propia copia del vocabulario de unidades, que ya no incluía
+                # `he` y habría dejado de revisar justo los insumos que sí
+                # derivan. Es la cuarta copia que aparece; no hacer una quinta.
                 por_dia = _recurso_por_dia(it['tipo'], it['unidad'])
-                es_hora = (por_dia or it['tipo'] == 'MO'
-                           or unidad_l in ('hh', 'hm', 'h-h', 'h-m', 'jph', 'jh')
-                           or 'hora' in unidad_l)
+                es_hora = por_dia or _recurso_por_hora(it['tipo'], it['unidad'])
                 if cuad > 0 and es_hora:
                     esperado = (cuad / rend) * (1 if por_dia else jornada)
                     # Tolerancia 5% para evitar falsos positivos
@@ -10030,12 +10133,8 @@ class ProyectoView(QWidget):
                 cuad = it['cuadrilla'] or 0
                 if cuad <= 0:
                     continue
-                unidad_l = (it['unidad'] or '').lower()
                 por_dia = _recurso_por_dia(it['tipo'], it['unidad'])
-                es_hora = (por_dia or it['tipo'] == 'MO'
-                           or unidad_l in ('hh', 'hm', 'h-h', 'h-m', 'jph', 'jh')
-                           or 'hora' in unidad_l)
-                if not es_hora:
+                if not (por_dia or _recurso_por_hora(it['tipo'], it['unidad'])):
                     continue
                 nueva = (cuad / rend) * (1 if por_dia else jornada)
                 conn.execute(
@@ -11972,8 +12071,9 @@ class _DialogSugerirPartidas(QDialog):
         if err:
             QMessageBox.warning(self, "Sugerir con IA",
                 f"No se pudo obtener la sugerencia:\n\n{err}\n\n"
-                "Verifica tu clave API en Configuración → IA, o usa una "
-                "plantilla local mientras tanto.")
+                "Revisa Configuración → Inteligencia artificial: elige un "
+                "proveedor (Groq, Gemini y OpenRouter son gratuitos), pega tu clave y "
+                "pulsa «Probar conexión». O usa una plantilla local mientras tanto.")
             return
         if not ps:
             QMessageBox.information(self, "Sugerir con IA",
@@ -12315,6 +12415,10 @@ class _ChatACU(QWidget):
         'Cronograma':       "Pregunta sobre dependencias FS/SS/FF/SF, ruta crítica, plazos… o calcula: 850/30",
     }
 
+    # Pide a la ventana principal abrir Configuración → Inteligencia
+    # artificial (comando /ia del chat).
+    ir_a_ia = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._partida_id: int | None = None
@@ -12352,7 +12456,9 @@ class _ChatACU(QWidget):
                 ).fetchone()
                 conn.close()
                 nombre = row['nombre'] if row else ''
-            self._agregar_burbuja("asistente", bienvenida(nombre))
+            from core.database import get_config as _gc
+            _hay_ia = bool(_gc('api_key', '')) or _gc('ia_proveedor', '') == 'ollama'
+            self._agregar_burbuja("asistente", bienvenida(nombre, hay_ia=_hay_ia))
         except Exception:
             pass
 
@@ -12383,6 +12489,9 @@ class _ChatACU(QWidget):
         hl_hdr.addWidget(ico)
 
         self.lbl_titulo = QLabel("tuxia@proyecto: ~/acu")
+        # Que la ruta larga no imponga ancho mínimo a la cabecera.
+        from PySide6.QtWidgets import QSizePolicy as _QSP
+        self.lbl_titulo.setSizePolicy(_QSP.Ignored, _QSP.Preferred)
         self.lbl_titulo.setStyleSheet(
             f"color:{self._TERM_HDR_FG}; font-size:11px; font-weight:600;"
             f" border:none; font-family:{self._FONT_MONO};"
@@ -12503,14 +12612,16 @@ class _ChatACU(QWidget):
 
         # ── Botones rápidos (paleta terminal) ─────────────────────────
         bar_quick = QFrame()
-        bar_quick.setFixedHeight(34)
         bar_quick.setStyleSheet(
             f"background:{self._TERM_BG};"
             f" border-top:1px solid {self._TERM_BORDER};"
         )
-        hl_q = QHBoxLayout(bar_quick)
-        hl_q.setContentsMargins(10, 0, 10, 0)
-        hl_q.setSpacing(6)
+        # Flow, no HBox: con cinco botones en una sola fila el panel no
+        # podía bajar de 587 px y el chat salía cortado por la derecha hasta
+        # redimensionar la ventana (Marco, 8 sep 2026). Ahora los botones
+        # pasan a una segunda fila cuando el panel es angosto.
+        from widgets.flow_layout import FlowLayout as _FlowLayout
+        hl_q = _FlowLayout(bar_quick, margin_h=10, margin_v=4, h_spacing=6, v_spacing=4)
 
         self._bar_quick = bar_quick
         self._hl_q = hl_q
@@ -12647,7 +12758,6 @@ class _ChatACU(QWidget):
             btn.setStyleSheet(self._BTN_Q)
             btn.clicked.connect(lambda _ch, p=pregunta: self._enviar(p, eco=False))
             self._hl_q.addWidget(btn)
-        self._hl_q.addStretch()
 
     def set_partida(self, partida_id: int | None):
         """Llamar cuando cambia la partida seleccionada.
@@ -12814,6 +12924,13 @@ class _ChatACU(QWidget):
             return
         if cmd in ('/help', '/ayuda', '/comandos'):
             _resp(ayuda_completa())
+            return
+        if cmd in ('/ia', '/configurar', '/apikey', '/config'):
+            from core.asistente_local import guia_configurar_ia
+            _resp(("La IA ya está configurada. " if _hay_ia else "")
+                  + guia_configurar_ia()
+                  + "\n\nAbriendo Configuración →\nInteligencia artificial…")
+            self.ir_a_ia.emit()
             return
         if cmd in ('/calc', '/calculadora', '/calcular'):
             from core.asistente_local import ayuda_calculadora
@@ -13039,6 +13156,14 @@ class _ChatACU(QWidget):
 
         lbl_texto = QLabel(texto)
         lbl_texto.setWordWrap(True)
+        # Con wordWrap, una línea larga sin espacios (o un párrafo con
+        # saltos de línea) le daba al QLabel un ancho MÍNIMO mayor que el
+        # panel: el contenedor del scroll quedaba más ancho que la vista y
+        # el texto salía cortado por la derecha hasta redimensionar la
+        # ventana (Marco, 8 sep 2026). «Ignored» en horizontal deja que el
+        # panel mande el ancho y el alto se recalcula con heightForWidth.
+        from PySide6.QtWidgets import QSizePolicy as _QSP
+        lbl_texto.setSizePolicy(_QSP.Ignored, _QSP.Preferred)
         lbl_texto.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lbl_texto.setStyleSheet(
             f"color:{text_color}; background:transparent; border:none;"

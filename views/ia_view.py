@@ -113,6 +113,72 @@ class _WorkerModelos(QThread):
             self.terminado.emit([], str(e))
 
 
+class _WorkerModelosGemini(QThread):
+    """Pregunta a Google qué modelos puede usar la clave (hilo aparte: es red)."""
+    terminado = Signal(list, str)
+
+    def __init__(self, api_key: str):
+        super().__init__()
+        self.api_key = api_key
+
+    def run(self):
+        from core.ai_specs import listar_modelos_gemini
+        modelos, err = listar_modelos_gemini(self.api_key)
+        self.terminado.emit(modelos, err)
+
+
+# Modelos de Gemini que vale la pena ofrecer sin preguntarle a Google: pocos y
+# con una nota de para qué sirve cada uno. La lista completa de Google trae
+# quince entradas entre versiones viejas, imagen y audio, y eso sí confunde
+# (Marco, 8 sep 2026). «Ver modelos de mi cuenta» trae los reales.
+GEMINI_MODELOS = (
+    ('gemini-2.5-flash',      'recomendado · gratuito y rápido'),
+    ('gemini-2.5-flash-lite', 'más rápido, menos preciso · gratuito'),
+    ('gemini-2.5-pro',        'mejor razonamiento · cuota gratuita baja'),
+    ('gemini-2.0-flash',      'generación anterior, estable · gratuito'),
+)
+GEMINI_MODELO_DEFECTO = 'gemini-2.5-flash'
+
+
+class _ModeloCombo(QComboBox):
+    """Desplegable EDITABLE de modelos: cada ítem muestra «id — nota» pero
+    `text()` devuelve solo el id, y quien tenga un modelo nuevo puede
+    escribirlo a mano. Conserva la API `text()`/`setText()` del QLineEdit
+    al que reemplaza, así el guardado y la carga no cambian."""
+
+    def __init__(self, modelos, defecto: str):
+        super().__init__()
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self.setFixedHeight(32)
+        self._defecto = defecto
+        self.poner(modelos)
+
+    def poner(self, modelos, conservar: str | None = None):
+        actual = conservar if conservar is not None else self.text()
+        self.blockSignals(True)
+        self.clear()
+        for mid, nota in modelos:
+            self.addItem(f"{mid}  —  {nota}" if nota else mid, mid)
+        self.blockSignals(False)
+        self.setText(actual or self._defecto)
+
+    def text(self) -> str:
+        i = self.currentIndex()
+        if i >= 0 and self.currentText() == self.itemText(i):
+            return str(self.itemData(i) or '').strip()
+        return self.currentText().split('—')[0].strip()
+
+    def setText(self, mid: str):
+        mid = (mid or '').strip()
+        i = self.findData(mid)
+        if i >= 0:
+            self.setCurrentIndex(i)
+        else:
+            self.setCurrentIndex(-1)
+            self.setEditText(mid)
+
+
 # ── Worker para probar conexión IA ────────────────────────────────────────
 
 class _WorkerProbar(QThread):
@@ -176,7 +242,7 @@ class IAView(QWidget):
         root.setContentsMargins(32, 24, 32, 32)
         root.setSpacing(20)
 
-        lbl_t = QLabel("IA / API Key")
+        lbl_t = QLabel("Inteligencia artificial")
         lbl_t.setStyleSheet(
             f"color:{SLATE_700}; font-size:18px; font-weight:700; "
             f"background:transparent; border:none;"
@@ -226,9 +292,16 @@ class IAView(QWidget):
         vl.addWidget(sep)
 
         nota = QLabel(
-            "Selecciona el proveedor de IA para generar especificaciones "
-            "técnicas, rendimientos y usar el Asistente de ACU."
+            "La IA es opcional y funciona con la cuenta que tú elijas: sirve "
+            "para conversar con Tuxia, revisar el proyecto, sugerir partidas y "
+            "redactar especificaciones técnicas.<br><br>"
+            "<b>Cómo empezar:</b> 1) elige un proveedor — <b>Groq</b>, <b>Gemini</b> y "
+            "<b>OpenRouter</b> tienen plan gratuito; <b>Ollama</b> corre en tu "
+            "PC sin internet ni clave — · 2) crea tu clave en el enlace que "
+            "muestra el panel y pégala · 3) pulsa «Probar conexión» y luego "
+            "Guardar. La clave se guarda solo en este equipo."
         )
+        nota.setTextFormat(Qt.RichText)
         nota.setWordWrap(True)
         nota.setStyleSheet(_NOTE_SS)
         vl.addWidget(nota)
@@ -241,7 +314,7 @@ class IAView(QWidget):
 
         self.rb_groq        = QRadioButton("Groq  (gratuito)")
         self.rb_openrouter  = QRadioButton("OpenRouter  (gratuito)")
-        self.rb_gemini      = QRadioButton("Google Gemini")
+        self.rb_gemini      = QRadioButton("Google Gemini  (gratuito)")
         self.rb_openai      = QRadioButton("OpenAI  (GPT-4o)")
         self.rb_anthropic   = QRadioButton("Anthropic Claude")
         self.rb_ollama      = QRadioButton("Ollama  (local, sin internet)")
@@ -564,7 +637,9 @@ class IAView(QWidget):
         vl.setSpacing(8)
 
         nota = QLabel(
-            "Google Gemini 2.5 Flash es gratuito con límites generosos.<br>"
+            "Google Gemini 2.5 Flash es gratuito con límites generosos. Si te quedas "
+            "corto, activa facturación en Google AI Studio: la misma clave pasa al "
+            "plan de pago, sin cambiar nada aquí.<br>"
             "Obtén tu clave en  <a href='https://aistudio.google.com/app/apikey'>aistudio.google.com/app/apikey</a>"
         )
         nota.setWordWrap(True)
@@ -587,25 +662,57 @@ class IAView(QWidget):
 
         form = QFormLayout()
         form.setSpacing(6)
-        self.inp_gemini_modelo = QLineEdit()
-        self.inp_gemini_modelo.setPlaceholderText("gemini-2.5-flash")
-        self.inp_gemini_modelo.setFixedHeight(32)
+        fila_m = QHBoxLayout()
+        fila_m.setSpacing(6)
+        self.inp_gemini_modelo = _ModeloCombo(GEMINI_MODELOS, GEMINI_MODELO_DEFECTO)
         self.inp_gemini_modelo.setStyleSheet(
-            f"QLineEdit {{ border:1px solid {SILVER_300}; border-radius:6px;"
+            f"QComboBox {{ border:1px solid {SILVER_300}; border-radius:6px;"
             f" padding:0 10px; font-size:11px; }}"
         )
-        form.addRow("Modelo:", self.inp_gemini_modelo)
+        fila_m.addWidget(self.inp_gemini_modelo, 1)
+        self.btn_gemini_modelos = QPushButton("Ver modelos de mi cuenta")
+        self.btn_gemini_modelos.setCursor(Qt.PointingHandCursor)
+        self.btn_gemini_modelos.setFixedHeight(32)
+        self.btn_gemini_modelos.setToolTip(
+            "Pregunta a Google qué modelos puede usar tu clave y los pone en la lista.")
+        self.btn_gemini_modelos.clicked.connect(self._gemini_ver_modelos)
+        fila_m.addWidget(self.btn_gemini_modelos)
+        form.addRow("Modelo:", fila_m)
         vl.addLayout(form)
 
-        modelos_nota = QLabel(
-            "Modelos: gemini-2.5-flash (recomendado, gratis) · gemini-2.5-pro · gemini-2.0-flash"
+        self.lbl_gemini_modelos = QLabel(
+            "Con «gemini-2.5-flash» basta para casi todo. Puedes escribir otro "
+            "modelo a mano, o pulsar «Ver modelos de mi cuenta» tras pegar la clave."
         )
-        modelos_nota.setStyleSheet(
+        self.lbl_gemini_modelos.setWordWrap(True)
+        self.lbl_gemini_modelos.setStyleSheet(
             f"font-size:10px; color:{SLATE_300}; "
             f"background:transparent; border:none;"
         )
-        vl.addWidget(modelos_nota)
+        vl.addWidget(self.lbl_gemini_modelos)
         return w
+
+    def _gemini_ver_modelos(self):
+        api_key = self.inp_gemini.text().strip()
+        if not api_key:
+            self.lbl_gemini_modelos.setText("Primero pega tu clave de Gemini.")
+            return
+        self.btn_gemini_modelos.setEnabled(False)
+        self.lbl_gemini_modelos.setText("Consultando a Google…")
+        self._worker_gemini = _WorkerModelosGemini(api_key)
+        self._worker_gemini.terminado.connect(self._on_gemini_modelos)
+        self._worker_gemini.start()
+
+    def _on_gemini_modelos(self, modelos: list, err: str):
+        self.btn_gemini_modelos.setEnabled(True)
+        if err or not modelos:
+            self.lbl_gemini_modelos.setText(
+                f"No se pudo obtener la lista: {err or 'la cuenta no devolvió modelos'}")
+            return
+        notas = dict(GEMINI_MODELOS)
+        self.inp_gemini_modelo.poner([(m, notas.get(m, '')) for m in modelos])
+        self.lbl_gemini_modelos.setText(
+            f"{len(modelos)} modelos disponibles con tu clave. Los «flash» estables van primero.")
 
     def _panel_openrouter(self) -> QWidget:
         w = QWidget()
@@ -867,7 +974,7 @@ class IAView(QWidget):
             ollama_url       = self.inp_ollama_url.text().strip()    or 'http://localhost:11434',
             ollama_modelo    = self.inp_ollama_modelo.text().strip()  or 'llama3.2',
             openai_modelo    = self.inp_openai_modelo.text().strip()  or 'gpt-4o-mini',
-            gemini_modelo    = self.inp_gemini_modelo.text().strip()  or 'gemini-2.0-flash',
+            gemini_modelo    = self.inp_gemini_modelo.text().strip()  or GEMINI_MODELO_DEFECTO,
             openrouter_modelo= self._openrouter_modelo_id(),
             deepseek_modelo  = self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash',
             qwen_modelo      = self.inp_qwen_modelo.text().strip()     or 'qwen3.6-flash',
@@ -959,7 +1066,7 @@ class IAView(QWidget):
         set_config('ollama_url',      self.inp_ollama_url.text().strip()    or 'http://localhost:11434')
         set_config('ollama_modelo',   self.inp_ollama_modelo.text().strip() or 'llama3.2')
         set_config('openai_modelo',     self.inp_openai_modelo.text().strip()     or 'gpt-4o-mini')
-        set_config('gemini_modelo',     self.inp_gemini_modelo.text().strip()     or 'gemini-2.0-flash')
+        set_config('gemini_modelo',     self.inp_gemini_modelo.text().strip()     or GEMINI_MODELO_DEFECTO)
         set_config('openrouter_modelo', self._openrouter_modelo_id())
         set_config('deepseek_modelo',   self.inp_deepseek_modelo.text().strip() or 'deepseek-v4-flash')
         set_config('qwen_modelo',       self.inp_qwen_modelo.text().strip()     or 'qwen3.6-flash')

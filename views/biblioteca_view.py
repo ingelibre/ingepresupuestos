@@ -196,38 +196,15 @@ class BibliotecaView(CatalogoTablaMixin, QWidget):
 
     # ── construcción UI ─────────────────────────────────────────────────────
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
-        layout.setSpacing(12)
+        layout, top, pie = self._armar_marco_catalogo("biblioteca", "Biblioteca de Costos Unitarios", "0 CU")
 
-        # ── Topbar ──
-        top = QHBoxLayout()
-        top.setSpacing(10)
-
-        ico_t = QLabel()
-        ico_t.setPixmap(icon("biblioteca").pixmap(28, 28))
-        top.addWidget(ico_t)
-
-        title = QLabel("Biblioteca de Costos Unitarios")
-        f = QFont()
-        f.setPointSize(15)
-        f.setWeight(QFont.DemiBold)
-        title.setFont(f)
-        title.setStyleSheet(f"color:{SLATE_700};")
-        top.addWidget(title)
-
-        self.lbl_subt = QLabel("0 CU")
-        self.lbl_subt.setStyleSheet(f"color:{SLATE_300}; padding-left:6px;")
-        top.addWidget(self.lbl_subt)
-        top.addStretch(1)
-
-        self.btn_nuevo = self._mk_btn("Nuevo CU", primary=True, icon_name="add")
+        self.btn_nuevo = self._mk_btn("Nuevo CU", primary=True, icon_name="add", on_dark=True)
         self.btn_nuevo.clicked.connect(self._nuevo)
         top.addWidget(self.btn_nuevo)
 
         # Import / Export JSON (Diccionario de Elementos)
         from PySide6.QtWidgets import QMenu as _QMenu
-        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar")
+        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar", on_dark=True)
         self.btn_import.setToolTip("Importar Biblioteca CU")
         menu_imp = _QMenu(self.btn_import)
         a_json = menu_imp.addAction(icon("rep-presupuesto"),
@@ -239,25 +216,21 @@ class BibliotecaView(CatalogoTablaMixin, QWidget):
         self.btn_import.setMenu(menu_imp)
         top.addWidget(self.btn_import)
 
-        self.btn_export_json = self._mk_btn("Exportar JSON", icon_name="exportar")
+        self.btn_export_json = self._mk_btn("Exportar JSON", icon_name="exportar", on_dark=True)
         self.btn_export_json.setToolTip(
             "Exportar toda la Biblioteca CU a archivo JSON"
         )
         self.btn_export_json.clicked.connect(self._exportar_json)
         top.addWidget(self.btn_export_json)
-        layout.addLayout(top)
-
         # ── KPIs ──
-        kpis = QHBoxLayout()
-        kpis.setSpacing(10)
         self.kpi_total = self._mk_kpi("Total CU", "0", SLATE_500)
         self.kpi_grupos = self._mk_kpi("Grupos", "0", TIPO_TEXTO['MAT'])
         self.kpi_con_acu = self._mk_kpi("Con ACU detallado", "0", TIPO_TEXTO['MO'])
         from utils.theme import accent_color as _acc
         self.kpi_usados = self._mk_kpi("Más reutilizado (usos)", "0", _acc())
         for k in (self.kpi_total, self.kpi_grupos, self.kpi_con_acu, self.kpi_usados):
-            kpis.addWidget(k, 1)
-        layout.addLayout(kpis)
+            pie.addWidget(k)
+        pie.addStretch(1)
 
         # ── Filtros ──
         filt = QFrame()

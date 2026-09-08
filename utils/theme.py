@@ -76,6 +76,34 @@ TIPO_SC_BG  = "#EFE6FB"; TIPO_SC_FG  = "#6A36B1"   # Morado (Sub-contratos/Servi
 
 PURPLE_500 = "#7A36B1"   # Grape (Elementary)
 
+# ── Color de título por nivel jerárquico ────────────────────────────────────
+# Único dueño del color de los títulos del presupuesto. Lo comparten la vista
+# del presupuesto (`NIVEL_ESTILO` le agrega tinte de fondo y tamaño en pt), el
+# diagrama Gantt y el cronograma valorizado, que hasta la 3.0.6 pintaban TODO
+# subtítulo de nivel ≥2 del mismo arándano — el presupuesto usaba cuatro
+# colores y el cronograma uno (reporte de David Ramos, 5 sep 2026).
+#
+# El nivel se ACOTA al más profundo definido: el árbol anida sin tope
+# (`_procesar_nivel` recursiona con nivel+1) y un nivel 6 debe verse como el 5,
+# no caer a un color por defecto que además era más grande que su padre.
+NIVEL_FG = {
+    1: "#B71C1C",   # rojo oscuro   — capítulos principales
+    2: BLUE_700,    # arándano      — sub-capítulos
+    3: "#6A1B9A",   # morado        — secciones
+    4: "#AD1457",   # rosa oscuro   — sub-secciones
+    5: "#92400E",   # ámbar oscuro  — sub-sub-secciones
+}
+NIVEL_MAX = max(NIVEL_FG)
+
+
+def nivel_fg(nivel) -> str:
+    """Color del título de ese nivel jerárquico, acotado a los definidos."""
+    try:
+        n = int(nivel or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return NIVEL_FG[min(max(n, 1), NIVEL_MAX)]
+
 # Blanco
 WHITE = "#FFFFFF"
 

@@ -803,12 +803,12 @@ class MainWindow(QMainWindow):
                 from views.importar_view import ImportarView
                 v = ImportarView()
                 v.proyecto_importado.connect(self._abrir_proyecto)
-                v.volver.connect(lambda: self._cargar_vista("dashboard"))
+                v.volver.connect(self._ir_a_dashboard)
                 return v
             case "exportar":
                 from views.exportar_view import ExportarView
                 v = ExportarView()
-                v.volver.connect(lambda: self._cargar_vista("dashboard"))
+                v.volver.connect(self._ir_a_dashboard)
                 return v
             case "indices_inei":
                 from views.indices_inei_view import IndicesINEIView
@@ -898,6 +898,22 @@ class MainWindow(QMainWindow):
                 return int(current.pid)
             except Exception:
                 return None
+        return None
+
+    def _pid_volver_vigente(self) -> int | None:
+        """El proyecto del banner, SI su pestaña sigue abierta.
+
+        La vista es la fuente de verdad: `_cerrar_proyecto_tab` la saca del
+        stack, así que un proyecto cerrado deja de tener camino de vuelta sin
+        que haya que acordarse de limpiar `_volver_a_pid`.
+        """
+        pid = self._volver_a_pid
+        if pid is None:
+            return None
+        nombre_vista = f"proyecto_{pid}"
+        for i in range(self.stack.count()):
+            if self.stack.widget(i).property("vista_nombre") == nombre_vista:
+                return pid
         return None
 
     def _abrir_proyecto(self, proyecto_id: int):
@@ -1094,8 +1110,15 @@ class MainWindow(QMainWindow):
         el proyecto y pulsar Inicio o Catálogos para perder el camino de
         vuelta (reporte de David Ramos, 2 sep 2026). La decisión se toma ANTES
         de cambiar de vista, que es cuando todavía se sabe de dónde se viene.
+
+        Salir del proyecto no es el único momento en que hay camino de vuelta:
+        si YA estábamos en una vista global con banner, encadenar otro destino
+        lo conserva. Sin esto, Proyecto → Catálogo de insumos → Importar (o
+        cancelar Importar, que vuelve a Inicio) dejaba `pid_actual` en None y
+        borraba el banner a mitad de camino: el proyecto seguía abierto pero
+        ya no se veía cómo volver (reporte de David Ramos, 5 sep 2026).
         """
-        pid_actual = self._pid_proyecto_activo()
+        pid_actual = self._pid_proyecto_activo() or self._pid_volver_vigente()
         self._expandir_sidebar()
         if nav is not None:
             self._activar_nav(nav)

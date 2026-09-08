@@ -740,11 +740,11 @@ def exportar_presupuesto(proyecto_id):
     C_ALT_BG      = 'FBFBFC'
     # Colores de fuente por nivel = espejo del programa (NIVEL_ESTILO en
     # proyecto_view.py): N1 rojo, N2 arándano, N3 morado, N4 rosa.
-    C_TITULO1     = 'B71C1C'   # rojo (capítulos principales)
-    C_TITULO2     = '0D52BF'   # arándano (sub-capítulos)
-    C_TITULO3     = '6A1B9A'   # morado
-    C_TITULO4     = 'AD1457'   # rosa
-    C_TITULO5     = '92400E'   # marrón (sin equivalente en programa)
+    # Del esquema activo (pdf_reports.colores_titulos): el mismo del PDF.
+    from core.pdf_reports import colores_titulos as _colores_titulos
+    _ct = {k: v.lstrip('#').upper() for k, v in _colores_titulos().items()}
+    C_TITULO1, C_TITULO2, C_TITULO3, C_TITULO4, C_TITULO5 = (
+        _ct[1], _ct[2], _ct[3], _ct[4], _ct[5])
 
     side_orange_md = Side(style='medium', color=C_ORANGE)
     side_slate_md  = Side(style='medium', color=C_SLATE_700)
@@ -883,8 +883,10 @@ def exportar_presupuesto(proyecto_id):
                 _nom_sub, sum((e['total'] or 0) for e in _its
                               if not e['partida'].get('es_titulo'))
             )
+    # Color de la cabecera de sub-presupuesto: del esquema, igual que el PDF
+    # (antes era C_ORANGE_DARK fijo y el PDF lo sacaba en slate-800).
     _font_sub = Font(name='Inter', bold=True, size=12,
-                     color=C_ORANGE_DARK, underline='single')
+                     color=_ct[0], underline='single')
 
     for idx, entry in enumerate(items):
         p     = entry['partida']
@@ -1190,21 +1192,20 @@ def exportar_acus(proyecto_id):
         # Uso CellRichText para mezclar regular+bold en una sola celda.
         from openpyxl.cell.rich_text import CellRichText, TextBlock
         from openpyxl.cell.text import InlineFont
-        rendimiento = partida['rendimiento'] or 0
+        from utils.formatting import texto_rendimiento
         unidad = partida['unidad'] or '—'
         cu = partida['precio_unitario'] or 0
-        rend_txt = (f"{rendimiento:.2f} {unidad}/día"
-                    if rendimiento else "—")
+        rend_txt = texto_rendimiento(partida['rendimiento'], partida['unidad'])
         f_reg  = InlineFont(rFont='Inter', sz=9, color=C_SLATE_500)
         f_bold = InlineFont(rFont='Inter', sz=9, color=C_SLATE_500, b=True)
-        meta_rich = CellRichText(
-            TextBlock(f_reg,  'Unidad: '),
-            TextBlock(f_bold, unidad),
-            TextBlock(f_reg,  '   ·   Rendimiento: '),
-            TextBlock(f_bold, rend_txt),
-            TextBlock(f_reg,  '   ·   Costo Unit.: '),
-            TextBlock(f_bold, f'{sym} {cu:,.2f}'),
-        )
+        bloques = [TextBlock(f_reg, 'Unidad: '), TextBlock(f_bold, unidad)]
+        # Sin rendimiento el segmento no se imprime — espejo del PDF.
+        if rend_txt:
+            bloques += [TextBlock(f_reg, '   ·   Rendimiento: '),
+                        TextBlock(f_bold, rend_txt)]
+        bloques += [TextBlock(f_reg, '   ·   Costo Unit.: '),
+                    TextBlock(f_bold, f'{sym} {cu:,.2f}')]
+        meta_rich = CellRichText(*bloques)
         # PRE-aplicar mismo fill que la fila del item (acu-head card) en todas
         # las cols antes de mergear — sin esto el bg solo queda en col 1 y se
         # ve un cuadro desigual.
@@ -1453,6 +1454,9 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
         # ── Título h2 ───────────────────────────────────────────────────────────
         from utils.theme import accent_reportes
         _h2_color = accent_reportes()[1].lstrip('#').upper()
+        if _nom_sub:
+            from core.pdf_reports import colores_titulos as _colores_titulos
+            _h2_color = _colores_titulos()[0].lstrip('#').upper()
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
         # Nombre del sub-presupuesto subrayado (mismo criterio que el PDF y
         # que los títulos N1 del Presupuesto); sin él, título normal.
@@ -1746,8 +1750,10 @@ def _hoja_metrados(wb, proyecto_id):
     except Exception:
         _sub_de_part = {}
     _sub_emitido = None
+    from core.pdf_reports import colores_titulos as _colores_titulos
     _font_sub_m = Font(name='Inter', bold=True, size=12,
-                       color=_h2_color, underline='single')
+                       color=_colores_titulos()[0].lstrip('#').upper(),
+                       underline='single')
 
     for partida in partidas:
         detalles = conn.execute(
@@ -2181,8 +2187,9 @@ def _hoja_gastos_generales(wb, proyecto_id):
 
         # Tipo 'rubro': encabezado de sección — título en rojo (espejo del PDF)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
-        ws.cell(r, 1, rub['nombre'].upper()).font = Font(name='Inter', bold=True,
-                                                         size=11, color='B71C1C')
+        from core.pdf_reports import colores_titulos as _colores_titulos
+        ws.cell(r, 1, rub['nombre'].upper()).font = Font(
+            name='Inter', bold=True, size=11, color=_colores_titulos()[1].lstrip('#'))
         ws.cell(r, 1).alignment = Alignment(horizontal='left', indent=1)
         # Sin borde en el título de rubro (espejo del PDF: solo texto rojo).
         r += 1
@@ -2282,7 +2289,8 @@ def exportar_valorizacion(val_id):
     filas, resumen = _val.get_valorizacion_detalle(val_id)
     dm = get_decimales_metrado(); dp = get_decimales_ppto()
     C_SLATE_700 = '2E3C52'; C_HEAD = '273445'; C_TOTAL = 'F0F1F2'
-    C_TIT = {1: 'B71C1C', 2: '0D52BF', 3: '6A1B9A', 4: 'AD1457'}
+    from core.pdf_reports import colores_titulos as _colores_titulos
+    C_TIT = {k: v.lstrip('#') for k, v in _colores_titulos().items()}
 
     def _m(v):
         return round(v, dm) if v is not None else None
@@ -2577,7 +2585,10 @@ def exportar_reporte_completo(proyecto_id):
         ws_a.cell(ra, 1, f"Partida   {partida['item']}").font = Font(name='Inter', bold=True, size=11)
         ws_a.merge_cells(start_row=ra, start_column=2, end_row=ra, end_column=7)
         ws_a.cell(ra, 2, partida['descripcion']).font = Font(name='Inter', bold=True, size=11)
-        rend_txt = f"Rend:  {(partida['rendimiento'] or 0):.4f}  {partida['unidad'] or ''}/DÍA"
+        from utils.formatting import texto_rendimiento
+        _rt = texto_rendimiento(partida['rendimiento'], partida['unidad'],
+                                decimales=4, sufijo='/DÍA')
+        rend_txt = f"Rend:  {_rt}" if _rt else ''
         ws_a.merge_cells(start_row=ra, start_column=8, end_row=ra, end_column=Na)
         ws_a.cell(ra, 8, rend_txt).font = Font(name='Inter',italic=True, size=11)
         ws_a.cell(ra, 8).alignment = Alignment(horizontal='right')
@@ -3029,7 +3040,10 @@ def exportar_pdf(proyecto_id):
             continue
 
         acu_data = []
-        rend_txt = f"Rend:  {(partida['rendimiento'] or 0):.4f}  {partida['unidad'] or ''}/DÍA"
+        from utils.formatting import texto_rendimiento
+        _rt = texto_rendimiento(partida['rendimiento'], partida['unidad'],
+                                decimales=4, sufijo='/DÍA')
+        rend_txt = f"Rend:  {_rt}" if _rt else ''
         acu_data.append([
             f"Partida   {partida['item']}",
             partida['descripcion'], '', '', '', rend_txt, ''

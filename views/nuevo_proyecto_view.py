@@ -8,7 +8,7 @@ Patrón Elementary OS: el contenido reemplaza el área principal,
 con botón ← para volver y botón primario "Crear proyecto →".
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QPlainTextEdit,
     QLabel, QLineEdit, QPushButton, QComboBox, QDoubleSpinBox,
     QSpinBox, QFrame, QSizePolicy, QTextEdit, QDialog, QMessageBox
 )
@@ -32,6 +32,41 @@ SILVER_300 = "#D4D4D4"
 RED_500   = "#C6262E"
 GREEN_500 = "#68B723"
 PAGE_BG   = "#EEF2F7"   # canvas slate-100 detrás de las cards (mismo patrón)
+
+
+class _NombreEdit(QPlainTextEdit):
+    """Campo de nombre de varias líneas con la API de un QLineEdit (`text`,
+    `setText`, `clear`). El texto se ajusta a la caja, así un nombre de obra
+    largo se lee entero. Enter no inserta salto: el nombre es una sola
+    cadena; Tab pasa al siguiente campo."""
+
+    def __init__(self, placeholder: str = "", lineas: int = 2):
+        super().__init__()
+        self.setPlaceholderText(placeholder)
+        self.setTabChangesFocus(True)
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        # Un nombre que pase de dos líneas muestra su barrita: nunca queda
+        # texto escondido sin aviso.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        fm = self.fontMetrics()
+        self.setFixedHeight(int(fm.lineSpacing() * lineas) + 14)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.focusNextChild()
+            return
+        super().keyPressEvent(e)
+
+    def text(self) -> str:
+        return ' '.join(self.toPlainText().split())
+
+    def setText(self, t: str):
+        self.setPlainText(t or '')
+
+    def insertFromMimeData(self, source):
+        # Pegar un nombre con saltos de línea lo deja en una sola cadena.
+        self.insertPlainText(' '.join((source.text() or '').split()))
 
 
 def _inp(placeholder: str = "", min_h: int = 30) -> QLineEdit:
@@ -399,7 +434,12 @@ class NuevoProyectoView(QWidget):
 
         root.addWidget(self._make_topbar())
 
-        # Área scrolleable
+        # Área scrolleable — solo por si la ventana es muy baja: a un tamaño
+        # normal todo entra sin scroll. Dos columnas (Marco, 8 sep 2026:
+        # «optimiza ese espacio para no hacer scroll»): a la izquierda los
+        # datos generales y la configuración, a la derecha las notas, que
+        # crecen con el alto disponible. El pie con Cancelar/Crear va FUERA
+        # del scroll, siempre a la vista.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -407,32 +447,42 @@ class NuevoProyectoView(QWidget):
 
         contenido = QWidget()
         contenido.setStyleSheet(f"background:{PAGE_BG};")
-        # Columna central con ancho máximo: en ventana maximizada los campos
-        # ya no se estiran a todo el ancho; se expanden hasta ~940px y el resto
-        # del espacio queda repartido a los lados (formulario centrado).
+        # Columna central con ancho máximo: en un monitor muy ancho los campos
+        # no se estiran sin fin; el resto queda repartido a los lados.
         outer = QHBoxLayout(contenido)
-        outer.setContentsMargins(32, 24, 32, 32)
+        outer.setContentsMargins(32, 20, 32, 16)
         outer.setSpacing(0)
 
         col_w = QWidget()
-        col_w.setMaximumWidth(940)
-        vl = QVBoxLayout(col_w)
-        vl.setContentsMargins(0, 0, 0, 0)
-        vl.setSpacing(12)
-        vl.addWidget(self._seccion_general())
-        vl.addWidget(self._seccion_financiero())
-        vl.addWidget(self._seccion_descripcion())
-        # Footer (botones) justo debajo de las tarjetas — sin stretch previo,
-        # que los empujaba al fondo de la ventana.
-        vl.addWidget(self._make_footer())
-        vl.addStretch()
+        col_w.setMaximumWidth(1400)
+        col_v = QVBoxLayout(col_w)
+        col_v.setContentsMargins(0, 0, 0, 0)
+        col_v.setSpacing(12)
+        cols = QHBoxLayout()
+        cols.setContentsMargins(0, 0, 0, 0)
+        cols.setSpacing(16)
+        col_v.addLayout(cols, 1)
+
+        izq = QVBoxLayout()
+        izq.setContentsMargins(0, 0, 0, 0)
+        izq.setSpacing(12)
+        izq.addWidget(self._seccion_general())
+        izq.addWidget(self._seccion_financiero())
+        izq.addStretch()
+        cols.addLayout(izq, 11)
+
+        der = QVBoxLayout()
+        der.setContentsMargins(0, 0, 0, 0)
+        der.addWidget(self._seccion_descripcion(), 1)
+        cols.addLayout(der, 9)
 
         outer.addStretch(1)
-        outer.addWidget(col_w, stretch=8)
+        outer.addWidget(col_w, stretch=20)
         outer.addStretch(1)
 
         scroll.setWidget(contenido)
         root.addWidget(scroll, stretch=1)
+        root.addWidget(self._make_footer())
 
     # ── Topbar ────────────────────────────────────────────────────────────────
 
@@ -514,26 +564,34 @@ class NuevoProyectoView(QWidget):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
 
-        # Fila 0: Nombre (ancho completo)
-        grid.addWidget(_label(tr("Nombre del proyecto"), required=True), 0, 0)
-        self.inp_nombre = _inp(tr("Nombre del proyecto"))
-        self.inp_nombre.setMinimumHeight(32)
-        self.inp_nombre.setStyleSheet(
-            f"QLineEdit {{ border:1.5px solid {SILVER_300}; border-radius:6px;"
-            f" padding:0 10px; font-size:13px; }}"
-            f"QLineEdit:focus {{ border-color:{BLUE_500}; }}"
-        )
+        # Fila 0: Nombre (ancho completo, TRES líneas: los nombres de obra son
+        # largos y en una sola línea no se leían enteros — Marco, 8 sep 2026).
+        grid.addWidget(_label(tr("Nombre del proyecto"), required=True), 0, 0,
+                       Qt.AlignTop)
+        # Borde, radio y relleno vienen de la regla global de main.qss, la
+        # misma para QLineEdit y QPlainTextEdit — así se ve igual que Cliente,
+        # Ubicación y los demás (Marco pidió uniformidad, 8 sep 2026).
+        self.inp_nombre = _NombreEdit(tr("Nombre del proyecto"), lineas=3)
+        # Los QLineEdit de esta vista heredan el fondo PAGE_BG del
+        # `setStyleSheet("background:…")` sin selector de la vista; un
+        # QPlainTextEdit pinta su viewport con la paleta y se quedaba blanco.
+        # Se le da el mismo fondo por selector de tipo, que sí llega al viewport.
+        self.inp_nombre.setStyleSheet(f"QPlainTextEdit {{ background:{PAGE_BG}; }}")
         grid.addWidget(self.inp_nombre, 0, 1, 1, 3)
 
-        # Fila 1: Cliente | Ubicación
-        grid.addWidget(_label(tr("Cliente")), 1, 0)
-        self.inp_cliente = _inp(tr("Cliente"))
-        grid.addWidget(self.inp_cliente, 1, 1)
-        grid.addWidget(_label(tr("Ubicación")), 1, 2)
+        # Fila 1: Ubicación a todo el ancho, bajo el nombre (Marco, 8 sep
+        # 2026: el distrito con provincia y departamento no cabía en media
+        # fila). Fila 2: Cliente | Sub-presupuesto.
+        grid.addWidget(_label(tr("Ubicación")), 1, 0)
         self._latitud = None
         self._longitud = None
         self._altitud = None
         _ubic_cont = QWidget()
+        # El `background:` sin selector de la vista teñía también este
+        # contenedor: se veía un rectángulo gris saliendo del campo, hasta
+        # el botón (Marco, 8 sep 2026). Selector por nombre = solo él.
+        _ubic_cont.setObjectName("ubicCont")
+        _ubic_cont.setStyleSheet("QWidget#ubicCont { background: transparent; }")
         _uh = QHBoxLayout(_ubic_cont)
         _uh.setContentsMargins(0, 0, 0, 0)
         _uh.setSpacing(4)
@@ -551,16 +609,22 @@ class NuevoProyectoView(QWidget):
             "QPushButton:hover { background:#F0F1F2; border-radius:6px; }")
         self.btn_mapa.clicked.connect(self._abrir_mapa)
         _uh.addWidget(self.btn_mapa)
-        grid.addWidget(_ubic_cont, 1, 3)
+        grid.addWidget(_ubic_cont, 1, 1, 1, 3)
         self._setup_ubigeo_completer()
 
-        # Fila 2: Sub-presupuesto | Costo al
-        grid.addWidget(_label(tr("Sub-presupuesto")), 2, 0)
+        grid.addWidget(_label(tr("Cliente")), 2, 0)
+        self.inp_cliente = _inp(tr("Cliente"))
+        grid.addWidget(self.inp_cliente, 2, 1)
+        grid.addWidget(_label(tr("Sub-presupuesto")), 2, 2)
         self.inp_sub = _inp(tr("Sub-presupuesto"))
-        grid.addWidget(self.inp_sub, 2, 1)
-        grid.addWidget(_label(tr("Costo al")), 2, 2)
+        grid.addWidget(self.inp_sub, 2, 3)
+
+        # Fila 3: Costo al | Moneda
+        grid.addWidget(_label(tr("Costo al")), 3, 0)
         # Texto libre (escribir la fecha a mano) + botón de calendario.
         _costo_cont = QWidget()
+        _costo_cont.setObjectName("costoCont")
+        _costo_cont.setStyleSheet("QWidget#costoCont { background: transparent; }")
         _costo_hl = QHBoxLayout(_costo_cont)
         _costo_hl.setContentsMargins(0, 0, 0, 0)
         _costo_hl.setSpacing(4)
@@ -578,34 +642,33 @@ class NuevoProyectoView(QWidget):
             "QPushButton:hover { background:#F0F1F2; border-radius:6px; }")
         self._btn_cal_costo.clicked.connect(self._popup_calendario_costo)
         _costo_hl.addWidget(self._btn_cal_costo)
-        grid.addWidget(_costo_cont, 2, 3)
+        grid.addWidget(_costo_cont, 3, 1)
 
-        # Fila 3: Moneda | Estado
-        grid.addWidget(_label(tr("Moneda")), 3, 0)
+        grid.addWidget(_label(tr("Moneda")), 3, 2)
         self.cmb_moneda = _cmb([(m, m) for m in MONEDAS])
         _moneda_def = get_config('moneda_defecto', 'Soles')
         _idx_mon = self.cmb_moneda.findData(_moneda_def)
         if _idx_mon >= 0:
             self.cmb_moneda.setCurrentIndex(_idx_mon)
-        grid.addWidget(self.cmb_moneda, 3, 1)
-        grid.addWidget(_label(tr("Estado")), 3, 2)
+        grid.addWidget(self.cmb_moneda, 3, 3)
+
+        # Fila 4: Estado | Modalidad
+        grid.addWidget(_label(tr("Estado")), 4, 0)
         self.cmb_estado = _cmb([
             ("En elaboración", "elaboracion"),
             ("En revisión",    "revision"),
             ("Aprobado",       "aprobado"),
             ("En ejecución",   "ejecutado"),
         ])
-        grid.addWidget(self.cmb_estado, 3, 3)
-
-        # Fila 4: Modalidad
-        grid.addWidget(_label(tr("Modalidad")), 4, 0)
+        grid.addWidget(self.cmb_estado, 4, 1)
+        grid.addWidget(_label(tr("Modalidad")), 4, 2)
         self.cmb_modalidad = _cmb([
             ("Contrata",               "Contrata"),
             ("Administración directa", "Administración directa"),
             ("Concurso oferta",        "Concurso oferta"),
             ("Llave en mano",          "Llave en mano"),
         ])
-        grid.addWidget(self.cmb_modalidad, 4, 1)
+        grid.addWidget(self.cmb_modalidad, 4, 3)
 
         vl.addLayout(grid)
         return card
@@ -717,6 +780,20 @@ class NuevoProyectoView(QWidget):
         comp.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
         comp.setCaseSensitivity(Qt.CaseInsensitive)
         comp.setMaxVisibleItems(12)
+        # La lista sale del ancho del campo, y con el formulario a dos
+        # columnas el campo es angosto: «Distrito, Provincia, Departamento»
+        # se cortaba (Marco, 8 sep 2026). Ancho propio y estilo explícito —
+        # el popup hereda el `background:` sin selector de la vista.
+        popup = comp.popup()
+        popup.setMinimumWidth(420)
+        popup.setStyleSheet(
+            f"QListView {{ background:white; color:{SLATE_700};"
+            f" border:1px solid {SILVER_300}; border-radius:6px;"
+            f" padding:4px; font-size:12px; outline:none; }}"
+            f"QListView::item {{ padding:5px 8px; border-radius:4px; }}"
+            f"QListView::item:hover {{ background:#FEF5EB; }}"
+            f"QListView::item:selected {{ background:#FEF5EB; color:#C0621A; }}"
+        )
         self.inp_ubic.setCompleter(comp)
 
         def _on_text(t):
@@ -837,8 +914,7 @@ class NuevoProyectoView(QWidget):
         # el usuario lo lee y al hacer clic para escribir se borra solo.
         self.txt_notas = _GhostTextEdit(_EJEMPLO_NOTAS)
         self.txt_notas.setMinimumHeight(140)
-        self.txt_notas.setMaximumHeight(220)
-        vl.addWidget(self.txt_notas)
+        vl.addWidget(self.txt_notas, 1)
 
         return card
 
@@ -846,9 +922,13 @@ class NuevoProyectoView(QWidget):
 
     def _make_footer(self) -> QFrame:
         footer = QFrame()
-        footer.setStyleSheet("background:transparent; border:none;")
+        footer.setObjectName("footerNuevo")
+        footer.setAttribute(Qt.WA_StyledBackground, True)
+        footer.setStyleSheet(
+            f"QFrame#footerNuevo {{ background:white; border:none;"
+            f" border-top:1px solid {SILVER_300}; }}")
         hl = QHBoxLayout(footer)
-        hl.setContentsMargins(0, 8, 0, 0)
+        hl.setContentsMargins(32, 8, 32, 8)
         hl.setSpacing(10)
 
         hl.addStretch()

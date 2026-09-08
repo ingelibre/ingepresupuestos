@@ -84,13 +84,29 @@ class ConfiguracionView(QWidget):
         self.setStyleSheet(f"background:{SILVER_100};")
         self._build_ui()
 
-    _TAB_INDEX = {
-        'general':       0,
-        'ia':            1,
-        'accesibilidad': 2,
-        'idioma':        3,
-        'usuarios':      4,
-    }
+    # Secciones del menú lateral: clave → (título, grupo). El orden es el del
+    # menú. Antes eran cuatro pestañas y la de «General» apilaba siete
+    # tarjetas en un solo scroll (Marco, 8 sep 2026: «hago mucho scroll»);
+    # ahora cada tarjeta es una sección, igual que «Editar formato».
+    _SECCIONES = (
+        ('empresa',     "Empresa",                 "General"),
+        ('jornada',     "Jornada y moneda",        "General"),
+        ('decimales',   "Decimales",               "General"),
+        ('backups',     "Copias de seguridad",     "Sistema"),
+        ('exportacion', "Carpeta de exportación",  "Sistema"),
+        ('barra',       "Barra de título",         "Sistema"),
+        ('ia',          "Inteligencia artificial", "Sistema"),
+        ('tuxia',       "Asistente Tuxia",         "Sistema"),
+        ('apariencia',  "Apariencia",              "Interfaz"),
+        ('atajos',      "Atajos de teclado",       "Interfaz"),
+        ('idioma',      "Idioma",                  "Interfaz"),
+        ('usuarios',    "Usuarios",                "Cuenta"),
+    )
+    # Nombres viejos de pestaña que siguen llegando por `set_tab`.
+    _ALIAS = {'general': 'empresa', 'accesibilidad': 'apariencia'}
+    # Última sección abierta en la sesión (atributo de clase: la vista se
+    # recrea al volver a entrar).
+    _ultima_seccion = 'empresa'
 
     def _build_ui(self):
         from utils.i18n import tr
@@ -98,73 +114,116 @@ class ConfiguracionView(QWidget):
         main.setContentsMargins(0, 0, 0, 0)
         main.setSpacing(0)
 
-        # Topbar oscuro con título + pestañas integradas
+        # Topbar oscuro con el título
         hdr = QFrame()
         hdr.setFixedHeight(44)
         hdr.setStyleSheet(f"background:{SLATE_700};")
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(0)
-
         lbl_t = QLabel(tr("Configuración"))
         lbl_t.setStyleSheet(
             "color:white; font-size:13px; font-weight:700; letter-spacing:0.5px;"
             " background:transparent; border:none;"
         )
         hl.addWidget(lbl_t)
-        hl.addSpacing(20)
-
-        # Pestañas como botones pill en el topbar
-        self._tab_btns: list[QPushButton] = []
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet(
-            f"QTabWidget::pane {{ border:none; background:{SILVER_100}; }}"
-            f"QTabBar {{ background:transparent; }}"
-            f"QTabBar::tab {{ width:0; height:0; margin:0; padding:0; border:none; }}"
-        )
-        self._tabs.tabBar().setVisible(False)
-
-        u = usuario_actual()
-        es_admin = u and u.es_admin
-        _TAB_NAMES = [tr("General"), tr("IA"), tr("Accesibilidad"), tr("Idioma")]
-        if es_admin:
-            _TAB_NAMES.append(tr("Usuarios"))
-        for i, name in enumerate(_TAB_NAMES):
-            b = QPushButton(name)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setStyleSheet(
-                f"QPushButton {{ color:rgba(255,255,255,0.55); background:transparent;"
-                f" border:none; border-radius:6px;"
-                f" padding:4px 14px; font-size:11px; font-weight:600; }}"
-                f"QPushButton:hover {{ background:rgba(255,255,255,0.12); color:white; }}"
-            )
-            b.clicked.connect(lambda _, idx=i: self._switch_tab(idx))
-            hl.addWidget(b)
-            self._tab_btns.append(b)
-
         hl.addStretch()
         main.addWidget(hdr)
 
-        # Contenido con márgenes
-        content = QWidget()
-        content.setStyleSheet(f"background:{SILVER_100};")
-        cv = QVBoxLayout(content)
-        cv.setContentsMargins(20, 14, 20, 16)
-        cv.setSpacing(0)
+        # Cuerpo: menú lateral + página de la sección elegida
+        cuerpo = QWidget()
+        cuerpo.setStyleSheet(f"background:{SILVER_100};")
+        cl = QHBoxLayout(cuerpo)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
 
-        self._tabs.addTab(self._make_tab_general(),       "General")
-        self._tabs.addTab(self._make_tab_ia(),            "IA")
-        self._tabs.addTab(self._make_tab_accesibilidad(), "Accesibilidad")
-        self._tabs.addTab(self._make_tab_idioma(),        "Idioma")
-        if es_admin:
-            self._tabs.addTab(self._make_tab_usuarios(), "Usuarios")
-        cv.addWidget(self._tabs, stretch=1)
-        main.addWidget(content, stretch=1)
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStackedWidget
+        from PySide6.QtCore import QSize
+        self._menu = QListWidget()
+        self._menu.setFixedWidth(200)
+        self._menu.setFocusPolicy(Qt.NoFocus)
+        self._menu.setCursor(Qt.PointingHandCursor)
+        self._menu.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._menu.setStyleSheet(
+            f"QListWidget {{ background:white; border:none;"
+            f" border-right:1px solid #E3E6E9; outline:none; padding:6px 0;"
+            f" font-size:12px; color:{SLATE_700}; }}"
+            f"QListWidget::item {{ padding:0 16px; border-left:3px solid transparent; }}"
+            f"QListWidget::item:hover {{ background:{SILVER_100}; }}"
+            f"QListWidget::item:selected {{ background:#FEF5EB; color:{ORANGE_DRK};"
+            f" font-weight:700; border-left:3px solid {ORANGE}; }}"
+            f"QListWidget::item:disabled {{ color:{SLATE_300}; font-size:10px;"
+            f" font-weight:700; letter-spacing:1px; padding-top:10px; }}"
+        )
+        cl.addWidget(self._menu)
 
-        self._switch_tab(0)
+        self._paginas = QStackedWidget()
+        self._paginas.setStyleSheet(f"background:{SILVER_100};")
+        cl.addWidget(self._paginas, 1)
+        main.addWidget(cuerpo, stretch=1)
+
+        u = usuario_actual()
+        es_admin = bool(u and u.es_admin)
+        builders = {
+            'empresa':     lambda: self._pagina(self._card_empresa()),
+            'jornada':     lambda: self._pagina(self._card_jornada(), self._card_moneda()),
+            'decimales':   lambda: self._pagina(self._card_decimales()),
+            'backups':     lambda: self._pagina(self._card_backups()),
+            'exportacion': lambda: self._pagina(self._card_ruta_exportacion()),
+            'barra':       lambda: self._pagina(self._card_barra_titulo()),
+            'ia':          self._make_tab_ia,
+            'tuxia':       lambda: self._pagina(self._card_tuxia()),
+            'apariencia':  lambda: self._pagina(self._card_apariencia()),
+            'atajos':      lambda: self._pagina(self._card_atajos()),
+            'idioma':      lambda: self._pagina(self._make_tab_idioma(), top=0),
+            'usuarios':    lambda: self._pagina(self._make_tab_usuarios(), top=0),
+        }
+        self._indice: dict[str, int] = {}     # clave → índice en el stack
+        grupo_actual = None
+        for clave, titulo, grupo in self._SECCIONES:
+            if clave == 'usuarios' and not es_admin:
+                continue
+            if grupo != grupo_actual:
+                cab = QListWidgetItem(tr(grupo).upper())
+                cab.setFlags(Qt.NoItemFlags)
+                cab.setSizeHint(QSize(180, 30))
+                # La negrita va en la fuente del ítem: el QSS de `:disabled`
+                # no la aplica a un ítem deshabilitado.
+                from PySide6.QtGui import QFont, QColor
+                f_cab = QFont(); f_cab.setPointSize(9); f_cab.setBold(True)
+                f_cab.setLetterSpacing(QFont.AbsoluteSpacing, 1)
+                cab.setFont(f_cab)
+                cab.setForeground(QColor(SLATE_500))
+                self._menu.addItem(cab)
+                grupo_actual = grupo
+            item = QListWidgetItem(tr(titulo))
+            item.setData(Qt.UserRole, clave)
+            item.setSizeHint(QSize(180, 34))
+            self._menu.addItem(item)
+            self._indice[clave] = self._paginas.addWidget(builders[clave]())
+
+        self._menu.currentItemChanged.connect(self._on_menu)
+        self.set_tab(ConfiguracionView._ultima_seccion)
         # Fix Qt: los labels auto-creados por QFormLayout pintan palette-Window
         # (#f8f9fa) como fondo pese al QSS global transparente → cajita gris.
         self._fix_form_label_bg()
+
+    def _pagina(self, *widgets, top: int = 18) -> QWidget:
+        """Una sección: sus tarjetas apiladas dentro de un scroll propio."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea {{ background:{SILVER_100}; border:none; }}")
+        inner = QWidget()
+        inner.setStyleSheet(f"background:{SILVER_100};")
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(24, top, 24, 24)
+        root.setSpacing(20)
+        for w in widgets:
+            root.addWidget(w)
+        root.addStretch()
+        scroll.setWidget(inner)
+        return scroll
 
     def _fix_form_label_bg(self):
         """Quita el fondo gris (#f8f9fa) que Qt pinta en los labels de
@@ -178,80 +237,32 @@ class ConfiguracionView(QWidget):
                 if isinstance(w, QLabel) and not w.styleSheet():
                     w.setStyleSheet("background: transparent; border: none;")
 
-    def _switch_tab(self, idx: int):
-        self._tabs.setCurrentIndex(idx)
-        for i, b in enumerate(self._tab_btns):
-            if i == idx:
-                b.setStyleSheet(
-                    f"QPushButton {{ color:white; background:rgba(255,255,255,0.15);"
-                    f" border:none; border-radius:6px;"
-                    f" padding:4px 14px; font-size:11px; font-weight:700; }}"
-                    f"QPushButton:hover {{ background:rgba(255,255,255,0.22); }}"
-                )
-            else:
-                b.setStyleSheet(
-                    f"QPushButton {{ color:rgba(255,255,255,0.55); background:transparent;"
-                    f" border:none; border-radius:6px;"
-                    f" padding:4px 14px; font-size:11px; font-weight:600; }}"
-                    f"QPushButton:hover {{ background:rgba(255,255,255,0.12); color:white; }}"
-                )
+    def _on_menu(self, actual, _anterior=None):
+        if actual is None:
+            return
+        clave = actual.data(Qt.UserRole)
+        if clave in self._indice:
+            self._paginas.setCurrentIndex(self._indice[clave])
+            ConfiguracionView._ultima_seccion = clave
 
     def set_tab(self, nombre: str):
-        """Selecciona la tab por nombre (general|ia|accesibilidad|idioma)."""
-        idx = self._TAB_INDEX.get(nombre.lower())
-        if idx is not None:
-            self._switch_tab(idx)
+        """Selecciona una sección por clave. Acepta los nombres viejos de
+        pestaña (general | ia | accesibilidad | idioma | usuarios)."""
+        clave = self._ALIAS.get((nombre or '').lower(), (nombre or '').lower())
+        if clave not in self._indice:
+            clave = next(iter(self._indice))
+        for i in range(self._menu.count()):
+            if self._menu.item(i).data(Qt.UserRole) == clave:
+                self._menu.setCurrentRow(i)
+                return
 
-    # ── Tab General (Decimales + Apariencia) ──────────────────────────────
-
-    def _make_tab_general(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"background:{SILVER_100};")
-        inner = QWidget()
-        inner.setStyleSheet(f"background:{SILVER_100};")
-        root = QVBoxLayout(inner)
-        root.setContentsMargins(0, 18, 0, 24)
-        root.setSpacing(20)
-        root.addWidget(self._card_empresa())
-        root.addWidget(self._card_jornada())
-        root.addWidget(self._card_moneda())
-        root.addWidget(self._card_backups())
-        root.addWidget(self._card_ruta_exportacion())
-        root.addWidget(self._card_decimales())
-        root.addWidget(self._card_barra_titulo())
-        root.addStretch()
-        scroll.setWidget(inner)
-        return scroll
-
-    # ── Tab IA (embebe IAView) ────────────────────────────────────────────
+    # ── Sección IA (embebe IAView) ────────────────────────────────────────
 
     def _make_tab_ia(self) -> QWidget:
         from views.ia_view import IAView
-        ia = IAView()
-        # Asistente Tuxia es funcionalidad IA — anexamos la card a esta tab
-        # para mantener todo lo relacionado con IA en un solo lugar.
-        ia.agregar_seccion(self._card_tuxia())
-        return ia
-
-    # ── Tab Accesibilidad ────────────────────────────────────────────────
-
-    def _make_tab_accesibilidad(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"background:{SILVER_100};")
-        inner = QWidget()
-        inner.setStyleSheet(f"background:{SILVER_100};")
-        root = QVBoxLayout(inner)
-        root.setContentsMargins(0, 18, 0, 24)
-        root.setSpacing(20)
-        root.addWidget(self._card_apariencia())
-        root.addWidget(self._card_atajos())
-        root.addStretch()
-        scroll.setWidget(inner)
-        return scroll
+        # El Asistente Tuxia tiene su propia sección justo debajo: las dos
+        # tarjetas juntas no cabían sin scroll.
+        return IAView()
 
     # ── Tab Idioma ────────────────────────────────────────────────────────
 
@@ -1341,10 +1352,16 @@ class ConfiguracionView(QWidget):
         self._usr_table.setAlternatingRowColors(True)
         self._usr_table.verticalHeader().setVisible(False)
         hh = self._usr_table.horizontalHeader()
-        hh.setStretchLastSection(True)
-        hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2, 3, 4, 5):
+        # Nombre y Email se reparten el ancho sobrante y se cortan con «…»;
+        # las demás van al contenido. Con Email «al contenido» un correo
+        # largo obligaba a un scroll horizontal (Marco, 8 sep 2026).
+        hh.setStretchLastSection(False)
+        for c in (0, 2):
+            hh.setSectionResizeMode(c, QHeaderView.Stretch)
+        for c in (1, 3, 4, 5):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        self._usr_table.setTextElideMode(Qt.ElideRight)
+        self._usr_table.setWordWrap(False)
         self._usr_table.setStyleSheet(
             f"QTableWidget {{ border:none; background:white; gridline-color:#E8EAED;"
             f" font-size:12px; color:{SLATE_700}; }}"

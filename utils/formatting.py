@@ -105,6 +105,31 @@ def parse_num_opt(val) -> 'float | None':
     return parse_num(s)
 
 
+def texto_rendimiento(rendimiento, unidad='', *, decimales=2,
+                      sufijo='/día') -> str:
+    """Rendimiento de una partida listo para imprimir; cadena VACÍA si no tiene.
+
+    «Sin rendimiento» no es lo mismo que 1.00: un subcontrato, un servicio o
+    una partida global no dependen del rendimiento, y estampar «1.00 glb/día»
+    inventa un dato que el usuario nunca puso (pedido de David Ramos, 5 sep
+    2026). El cero es el centinela de «sin rendimiento» — es el que ya usaba
+    `_tuxia_recalcular_mo` para negarse a recalcular.
+
+    Único formateador del dato: lo comparten el ACU en PDF y las tres hojas de
+    Excel que lo imprimen, que antes ponían «—» o «0.0000 /DÍA» cada una por
+    su cuenta.
+    """
+    try:
+        r = float(rendimiento or 0)
+    except (TypeError, ValueError):
+        return ''
+    if r <= 0:
+        return ''
+    cifra = f"{r:,.{decimales}f}"
+    u = (unidad or '').strip()
+    return f"{cifra} {u}{sufijo}" if u else f"{cifra}{sufijo}"
+
+
 def pad_codigo(codigo: str) -> str:
     """Normaliza código de recurso a 7 dígitos (right-pad ceros)."""
     return str(codigo).ljust(7, '0')[:7]

@@ -677,8 +677,10 @@ def test_unidades_que_derivan_la_cantidad_de_la_cuadrilla():
     """Fija el vocabulario de unidades de la regla, que es lo que de verdad
     decide si un insumo deriva su cantidad o la lleva directa."""
     # por HORA: toda la MO, y el equipo con unidad de hora
+    # `he` = hora-equipo, y el punto final no cambia la unidad («hh.» == «hh»)
     for t, u in (('MO', 'kg'), ('MO', None), ('EQ', 'hh'), ('EQ', 'hm'),
-                 ('EQ', 'h-h'), ('EQ', 'jph'), ('MAT', 'hora'), ('EQ', 'HORA')):
+                 ('EQ', 'h-h'), ('EQ', 'jph'), ('MAT', 'hora'), ('EQ', 'HORA'),
+                 ('EQ', 'he'), ('EQ', 'HE'), ('EQ', 'h-e'), ('EQ', 'hh.')):
         assert d.recurso_por_hora(t, u), (t, u)
     for t, u in (('MAT', 'kg'), ('EQ', 'und'), ('SC', 'glb'), ('MAT', None)):
         assert not d.recurso_por_hora(t, u), (t, u)
@@ -695,6 +697,125 @@ def test_unidades_que_derivan_la_cantidad_de_la_cuadrilla():
         assert d.partida_global(u), u
     for u in ('m3', 'und', 'día', '', None):
         assert not d.partida_global(u), u
+
+
+def test_rendimiento_vacio_no_se_imprime():
+    """«Sin rendimiento» (0/NULL) sale como cadena vacía, no como «1.00» ni «—».
+
+    Un subcontrato o una partida global no dependen del rendimiento; imprimir
+    «1.00 glb/día» inventa un dato (pedido de David Ramos, 5 sep 2026).
+    """
+    from utils.formatting import texto_rendimiento as tr
+    for vacio in (0, 0.0, None, '', -1):
+        assert tr(vacio, 'glb') == '', vacio
+    assert tr(1.0, 'm²') == '1.00 m²/día'
+    assert tr(400, 'm') == '400.00 m/día'
+    assert tr(1200, 'kg') == '1,200.00 kg/día'      # separador de miles
+    assert tr(0.7, '') == '0.70/día'                # sin unidad, sin espacio
+    assert tr(1.5, 'm2', decimales=4, sufijo='/DÍA') == '1.5000 m2/DÍA'
+
+
+def test_rendimiento_cero_no_divide_por_cero():
+    """Con rendimiento 0 nada deriva cantidades: se conservan las cargadas.
+
+    Es el camino que abrió el rendimiento vacío — `cuad / rend` reventaría.
+    Se comprueba sobre la regla, que es lo que deciden todos los llamadores.
+    """
+    conn = _db_seed()
+    # Una partida real con MO y cuadrilla, para no probar sobre un caso irreal
+    fila = conn.execute(
+        """SELECT ai.id, ai.partida_id pid, ai.cantidad ca
+           FROM acu_items ai JOIN recursos r ON r.id = ai.recurso_id
+           WHERE r.tipo = 'MO' AND ai.cuadrilla > 0 LIMIT 1""").fetchone()
+    assert fila is not None, "el seed debería tener MO con cuadrilla"
+
+    conn.execute("UPDATE partidas SET rendimiento=0 WHERE id=?", (fila['pid'],))
+    conn.commit()
+
+    # El PU se sigue calculando (suma cantidad × precio; no divide)
+    pu = d._recalcular_pu(conn, fila['pid'])
+    assert pu >= 0, pu
+    # y la cantidad del insumo NO se tocó — por id, que es la única clave
+    ahora = conn.execute("SELECT cantidad FROM acu_items WHERE id=?",
+                         (fila['id'],)).fetchone()
+    assert abs((ahora['cantidad'] or 0) - fila['ca']) < 1e-9, (ahora['cantidad'], fila['ca'])
+
+    # El cronograma tampoco: sin rendimiento no hay duración estimada
+    from core.cronograma import calcular_duraciones_desde_metrado
+    p = conn.execute("SELECT id, es_titulo, metrado, rendimiento FROM partidas WHERE id=?",
+                     (fila['pid'],)).fetchone()
+    assert calcular_duraciones_desde_metrado([p]) == {}
+
+    conn.execute("UPDATE partidas SET rendimiento=1 WHERE id=?", (fila['pid'],))
+    conn.commit()
+    conn.close()
+
+
+def test_actualizar_precios_desde_catalogo():
+    """El precio del catálogo NO se propaga solo (regla «un insumo = un precio
+    por proyecto»); la puerta explícita es `precios_desactualizados` +
+    `actualizar_precios_desde_catalogo`, con vista previa (David Ramos,
+    5 sep 2026: «si se modifica un recurso que se actualice en todos»)."""
+    conn = _db_seed()
+    try:
+        # Un recurso normal (no overhead, precio > 0) usado en ≥2 partidas de
+        # un mismo proyecto.
+        row = conn.execute(
+            """SELECT p.proyecto_id pid, ai.recurso_id rid, COUNT(DISTINCT ai.partida_id) n
+               FROM acu_items ai JOIN partidas p ON p.id = ai.partida_id
+               JOIN recursos r ON r.id = ai.recurso_id
+               WHERE SUBSTR(COALESCE(r.unidad,''),1,1) != '%' AND COALESCE(r.precio,0) > 0
+               GROUP BY p.proyecto_id, ai.recurso_id HAVING n >= 2
+               ORDER BY n DESC LIMIT 1""").fetchone()
+        pid, rid = row['pid'], row['rid']
+        cat = float(conn.execute("SELECT precio FROM recursos WHERE id=?", (rid,)).fetchone()[0])
+
+        # 1) Primero dejo el proyecto alineado con el catálogo para ese recurso.
+        d.unificar_precio_recurso(conn, pid, rid, cat)
+        conn.commit()
+        assert all(i['recurso_id'] != rid for i in d.precios_desactualizados(conn, pid))
+
+        # 2) Editar el catálogo NO toca el proyecto…
+        nuevo = round(cat * 1.5 + 1, 2)
+        conn.execute("UPDATE recursos SET precio=? WHERE id=?", (nuevo, rid))
+        conn.commit()
+        en_proy = {float(x[0]) for x in conn.execute(
+            """SELECT COALESCE(ai.precio, r.precio) FROM acu_items ai
+               JOIN partidas p ON p.id = ai.partida_id JOIN recursos r ON r.id = ai.recurso_id
+               WHERE ai.recurso_id=? AND p.proyecto_id=?""", (rid, pid))}
+        assert en_proy == {cat}, en_proy
+        # …pero sí aparece en la vista previa, con los dos precios.
+        pend = [i for i in d.precios_desactualizados(conn, pid) if i['recurso_id'] == rid]
+        assert len(pend) == 1, pend
+        assert pend[0]['precio_proyecto'] == cat and pend[0]['precio_catalogo'] == nuevo, pend
+        assert pend[0]['n_partidas'] >= 2, pend
+
+        # 3) Aplicar: todas las líneas al precio nuevo y el PU recalculado.
+        pu_antes = {r[0]: r[1] for r in conn.execute(
+            """SELECT id, precio_unitario FROM partidas WHERE proyecto_id=? AND id IN
+               (SELECT partida_id FROM acu_items WHERE recurso_id=?)""", (pid, rid))}
+        afectadas = d.actualizar_precios_desde_catalogo(conn, pid, [rid])
+        conn.commit()
+        assert set(afectadas) == set(pu_antes), (afectadas, pu_antes)
+        en_proy = {float(x[0]) for x in conn.execute(
+            """SELECT ai.precio FROM acu_items ai JOIN partidas p ON p.id = ai.partida_id
+               WHERE ai.recurso_id=? AND p.proyecto_id=?""", (rid, pid))}
+        assert en_proy == {nuevo}, en_proy
+        # El PU quedó recalculado: ninguna de las afectadas sale en el detector PU≠ACU.
+        incons = {x['id'] if isinstance(x, dict) or hasattr(x, 'keys') else x
+                  for x in d.partidas_pu_inconsistente(conn, pid)}
+        assert not (set(afectadas) & incons), set(afectadas) & incons
+        assert all(i['recurso_id'] != rid for i in d.precios_desactualizados(conn, pid))
+
+        # 4) Catálogo en 0 = «sin precio»: ni se lista ni se aplica.
+        conn.execute("UPDATE recursos SET precio=0 WHERE id=?", (rid,))
+        conn.commit()
+        assert all(i['recurso_id'] != rid for i in d.precios_desactualizados(conn, pid))
+        assert d.actualizar_precios_desde_catalogo(conn, pid, [rid]) == []
+        conn.execute("UPDATE recursos SET precio=? WHERE id=?", (cat, rid))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_el_dialogo_de_recursos_graba_cuadrilla_solo_donde_aplica():

@@ -107,6 +107,44 @@ def test_el_banner_vuelve_al_proyecto_que_seguia_abierto():
     assert mw._volver_a_pid is None
 
 
+def test_encadenar_vistas_globales_conserva_el_banner():
+    """El banner no se pierde por saltar de una vista global a otra.
+
+    La regla miraba solo «¿la vista actual es un proyecto?», así que el
+    segundo salto lo borraba: el proyecto seguía abierto y el usuario se
+    quedaba sin camino de vuelta (reporte de David Ramos, 5 sep 2026).
+    Recorre la cadena entera que él describe, y de yapa todos los destinos.
+    """
+    mw = _ventana()
+    proy = _proyecto_falso(mw, 7)
+    mw.stack.setCurrentWidget(proy)
+
+    mw._ir_a_recursos()                 # Proyecto → Catálogo de insumos
+    assert _banner_visible(mw)
+
+    for nombre in DESTINOS:             # y de ahí a cualquier otro destino
+        getattr(mw, nombre)()
+        assert _banner_visible(mw), f"{nombre}: el banner se perdió al encadenar"
+        assert mw._volver_a_pid == 7, nombre
+
+    mw._click_banner_volver()           # el camino de vuelta sigue sirviendo
+    assert mw.stack.currentWidget() is proy
+
+
+def test_cerrar_el_proyecto_quita_el_camino_de_vuelta():
+    """Con la pestaña cerrada no hay a dónde volver, aunque quede el pid."""
+    mw = _ventana()
+    proy = _proyecto_falso(mw, 7)
+    mw.stack.setCurrentWidget(proy)
+    mw._ir_a_recursos()
+    assert _banner_visible(mw)
+
+    mw.stack.removeWidget(proy)         # lo que hace _cerrar_proyecto_tab
+    mw._ir_a_importar()
+    assert not _banner_visible(mw)
+    assert mw._volver_a_pid is None
+
+
 def test_la_regla_del_banner_tiene_un_solo_dueno():
     """Ningún `_ir_a_*` decide por su cuenta el banner ni carga la vista: todos
     pasan por `_ir_a_vista_global`. Así un destino nuevo no puede nacer sin

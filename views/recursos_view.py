@@ -179,7 +179,15 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         self.inp_codigo.setReadOnly(True)
         self._codigo_lock_style(True)
         self.btn_codigo_manual = QPushButton("Editar")
-        self.btn_codigo_manual.setFixedWidth(56)
+        # Ancho al contenido y alto del campo de al lado: con 56 px fijos el
+        # texto salía cortado («dita») y el botón sobresalía 8 px por abajo.
+        self.btn_codigo_manual.setMinimumWidth(72)
+        # El QSS global pone min-height 28 + padding 4 al botón (38 px) y el
+        # campo mide 27: se iguala rebajando esas dos medidas, sin tocar
+        # colores ni borde, que siguen viniendo del QSS.
+        self.btn_codigo_manual.setStyleSheet(
+            "QPushButton { min-height:19px; padding:3px 12px; }")
+        self.btn_codigo_manual.setCursor(Qt.PointingHandCursor)
         self.btn_codigo_manual.setToolTip("Editar manualmente")
         self.btn_codigo_manual.clicked.connect(self._toggle_codigo_manual)
         cod_row.addWidget(self.inp_codigo, 1)
@@ -366,38 +374,15 @@ class RecursosView(CatalogoTablaMixin, QWidget):
 
     # -- construcción UI -------------------------------------------------------
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
-        layout.setSpacing(12)
+        layout, top, pie = self._armar_marco_catalogo("paquete", "Catálogo de Insumos", "0 insumos")
 
-        # ── Topbar ──
-        top = QHBoxLayout()
-        top.setSpacing(10)
-        ico_title = QLabel()
-        ico_title.setPixmap(icon("paquete").pixmap(28, 28))
-        ico_title.setFixedSize(28, 28)
-        top.addWidget(ico_title)
-
-        title = QLabel("Catálogo de Insumos")
-        f = QFont()
-        f.setPointSize(15)
-        f.setWeight(QFont.DemiBold)
-        title.setFont(f)
-        title.setStyleSheet(f"color:{SLATE_700};")
-        top.addWidget(title)
-
-        self.lbl_subt = QLabel("0 insumos")
-        self.lbl_subt.setStyleSheet(f"color:{SLATE_300}; padding-left:6px;")
-        top.addWidget(self.lbl_subt)
-        top.addStretch(1)
-
-        self.btn_nuevo = self._mk_btn("Nuevo insumo", primary=True, icon_name="add")
+        self.btn_nuevo = self._mk_btn("Nuevo insumo", primary=True, icon_name="add", on_dark=True)
         self.btn_nuevo.clicked.connect(self._nuevo)
         top.addWidget(self.btn_nuevo)
 
         # Menú Importar (Excel / JSON)
         from PySide6.QtWidgets import QMenu as _QMenu
-        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar")
+        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar", on_dark=True)
         menu_imp = _QMenu(self.btn_import)
         a_xlsx_i = menu_imp.addAction(icon("xlsx"), "Desde Excel (.xlsx)")
         a_xlsx_i.triggered.connect(self._importar_excel)
@@ -407,7 +392,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         top.addWidget(self.btn_import)
 
         # Menú Exportar (Excel / JSON)
-        self.btn_export = self._mk_btn("Exportar ▾", icon_name="exportar")
+        self.btn_export = self._mk_btn("Exportar ▾", icon_name="exportar", on_dark=True)
         menu_exp = _QMenu(self.btn_export)
         a_xlsx_e = menu_exp.addAction(icon("xlsx"), "A Excel (.xlsx) — vista filtrada")
         a_xlsx_e.triggered.connect(self._exportar_excel)
@@ -416,11 +401,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.btn_export.setMenu(menu_exp)
         top.addWidget(self.btn_export)
 
-        layout.addLayout(top)
-
         # ── Tarjetas KPI ──
-        kpis = QHBoxLayout()
-        kpis.setSpacing(10)
         self.kpi_total = self._mk_kpi("Insumos", "0", SLATE_500)
         self.kpi_mo = self._mk_kpi("Mano de Obra", "0", TIPO_TEXTO['MO'])
         self.kpi_mat = self._mk_kpi("Materiales", "0", TIPO_TEXTO['MAT'])
@@ -430,8 +411,8 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.kpi_valor = self._mk_kpi("Valor catálogo", fmt(0), _acc())
         for k in (self.kpi_total, self.kpi_mo, self.kpi_mat,
                   self.kpi_eq, self.kpi_sc, self.kpi_valor):
-            kpis.addWidget(k, 1)
-        layout.addLayout(kpis)
+            pie.addWidget(k)
+        pie.addStretch(1)
 
         # ── Filtros ──
         filt_card = QFrame()

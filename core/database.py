@@ -71,10 +71,21 @@ def set_decimales_cant_acu(n: int):
 
 def recurso_por_hora(tipo, unidad) -> bool:
     """True si la cantidad se deriva de la cuadrilla: MO y equipo por hora
-    (hh/hm). Fórmula: cant = cuadrilla / rendimiento × jornada."""
-    u = (unidad or '').strip().lower()
+    (hh/hm/he). Fórmula: cant = cuadrilla / rendimiento × jornada.
+
+    `he` (hora-equipo) faltaba en el vocabulario y NO es teórica: son 12
+    equipos de la biblioteca del seed, que quedaban con la cantidad directa
+    mientras el mismo equipo en `hm` la derivaba (reporte de David Ramos,
+    5 sep 2026). Se le quita el punto final por la misma razón que a
+    `recurso_por_dia`: «hh.» y «hh» son la misma unidad.
+
+    La unidad manda por sí sola, sin mirar el tipo — igual que ya pasaba con
+    `hh`/`hm`: un insumo medido en horas es mano de obra o equipo, esté como
+    esté clasificado.
+    """
+    u = (unidad or '').strip().rstrip('.').lower()
     return (tipo == 'MO'
-            or u in ('hh', 'hm', 'h-h', 'h-m', 'jph', 'jh')
+            or u in ('hh', 'hm', 'he', 'h-h', 'h-m', 'h-e', 'jph', 'jh')
             or 'hora' in u)
 
 
@@ -1558,6 +1569,83 @@ def unificar_precio_recurso(conn, pid: int, recurso_id: int, precio: float) -> l
     for pa in afectadas:
         _recalcular_pu(conn, pa)
     return afectadas
+
+
+def precios_desactualizados(conn, pid: int) -> list[dict]:
+    """Insumos del proyecto cuyo precio difiere del que hoy tiene el catálogo.
+
+    El precio de `acu_items` es una FOTO por proyecto a propósito: editar el
+    catálogo no toca presupuestos ya armados (regla «un insumo = un precio por
+    proyecto»). Esta es la puerta explícita para traer el catálogo al
+    proyecto cuando el usuario lo pide — «si se modifica un recurso que se
+    actualice en todos», David Ramos, 5 sep 2026 — con vista previa.
+
+    Devuelve una lista ordenada por descripción, un dict por recurso::
+
+        {'recurso_id', 'descripcion', 'unidad', 'tipo',
+         'precio_proyecto',   # el más usado en el proyecto (modal)
+         'precio_catalogo',
+         'n_lineas', 'n_partidas'}
+
+    Se excluyen el overhead (`%…`, precio derivado) y los recursos cuyo
+    precio de catálogo es 0 o nulo: «sin precio» en el catálogo no es una
+    orden de poner a cero el proyecto.
+    """
+    rows = conn.execute(
+        """SELECT ai.recurso_id rid, r.descripcion d, r.unidad u, r.tipo t,
+                  r.precio cat, ai.partida_id pa,
+                  ROUND(COALESCE(ai.precio, r.precio, 0), 2) eff
+           FROM acu_items ai
+             JOIN partidas p ON p.id = ai.partida_id
+             JOIN recursos r ON r.id = ai.recurso_id
+           WHERE p.proyecto_id = ?
+             AND SUBSTR(COALESCE(r.unidad, ''), 1, 1) != '%'
+             AND COALESCE(r.precio, 0) > 0""",
+        (pid,)
+    ).fetchall()
+    agg: dict[int, dict] = {}
+    for x in rows:
+        info = agg.setdefault(x['rid'], {
+            'recurso_id': x['rid'], 'descripcion': x['d'] or '',
+            'unidad': x['u'] or '', 'tipo': x['t'] or '',
+            'precio_catalogo': _r2(x['cat']), '_cnt': {}, '_partidas': set()})
+        eff = x['eff'] or 0.0
+        info['_cnt'][eff] = info['_cnt'].get(eff, 0) + 1
+        info['_partidas'].add(x['pa'])
+    out = []
+    for info in agg.values():
+        cnt = info.pop('_cnt')
+        partidas = info.pop('_partidas')
+        # Modal; en empate, el más cercano al catálogo.
+        modal = max(cnt.items(),
+                    key=lambda kv: (kv[1], -abs(kv[0] - info['precio_catalogo'])))[0]
+        if abs(modal - info['precio_catalogo']) < 0.005:
+            continue
+        info['precio_proyecto'] = modal
+        info['n_lineas'] = sum(cnt.values())
+        info['n_partidas'] = len(partidas)
+        out.append(info)
+    out.sort(key=lambda i: (i['tipo'], i['descripcion'].upper()))
+    return out
+
+
+def actualizar_precios_desde_catalogo(conn, pid: int, recurso_ids) -> list[int]:
+    """Trae al proyecto el precio de catálogo de los recursos dados, en TODAS
+    sus líneas de ACU, y recalcula el PU de las partidas afectadas (sin
+    commit). Devuelve los `partida_id` afectados, sin repetir.
+
+    Es `unificar_precio_recurso` con el catálogo como origen: el mismo
+    mecanismo que la edición de precio en el panel ACU, así que sigue
+    valiendo «un insumo = un precio por proyecto».
+    """
+    afectadas: set[int] = set()
+    for rid in recurso_ids:
+        row = conn.execute("SELECT precio FROM recursos WHERE id=?", (rid,)).fetchone()
+        if row is None or not row['precio'] or float(row['precio']) <= 0:
+            continue
+        afectadas.update(
+            unificar_precio_recurso(conn, pid, int(rid), float(row['precio'])))
+    return sorted(afectadas)
 
 
 def precio_recurso_en_proyecto(conn, pid: int, recurso_id: int):

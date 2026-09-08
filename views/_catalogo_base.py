@@ -27,11 +27,123 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QFrame, QMenu, QPushButton,
+from PySide6.QtWidgets import (QWidget, QFrame, QMenu, QPushButton,
                                QStyledItemDelegate)
 
 from utils.icons import icon
-from utils.theme import BTN_PRIMARY_SS, crear_kpi_card
+from utils.theme import SLATE_700, SILVER_300, BTN_PRIMARY_SS
+
+
+
+# Botón secundario sobre la barra oscura: el mismo que usan «← Inicio» en
+# Nuevo proyecto y «← Presupuesto» en el Cronograma.
+BTN_ON_DARK_SS = (
+    "QPushButton { background:rgba(255,255,255,0.12); color:white;"
+    " border:1px solid rgba(255,255,255,0.25); border-radius:6px;"
+    " font-size:11px; font-weight:600; padding:4px 12px; }"
+    "QPushButton:hover { background:rgba(255,255,255,0.22); }"
+    "QPushButton:disabled { color:rgba(255,255,255,0.4);"
+    " border-color:rgba(255,255,255,0.12); }"
+    "QPushButton::menu-indicator { width:0; }"
+)
+
+
+def armar_marco_catalogo(vista, icono: str, titulo: str, subtitulo: str = ""):
+    """El marco común de un catálogo: barra oscura arriba, contenido, y una
+    franja informativa abajo. Devuelve ``(layout_contenido, top, pie)``.
+
+    * ``top`` — la barra oscura de 44 px de Configuración, Nuevo proyecto y
+      Cronograma: icono, título, un rótulo secundario (`vista.lbl_subt`) y
+      el stretch; la vista agrega ahí sus botones de acción con
+      `_mk_btn(…, on_dark=True)`.
+    * ``pie`` — la franja de 36 px pegada al borde inferior de la ventana,
+      como el pie de la pestaña Insumos del proyecto; la vista agrega ahí
+      sus KPI con `crear_kpi_pie` y cierra con `pie.addStretch(1)`.
+
+    Historia (8 sep 2026): los KPI eran una fila de tarjetas grandes entre el
+    título y los filtros. Marco: «toda esa fila es informativa, debe estar
+    abajo». La tabla gana esa altura.
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget
+    outer = QVBoxLayout(vista)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+
+    bar = QFrame()
+    bar.setObjectName("topbarCatalogo")
+    bar.setAttribute(Qt.WA_StyledBackground, True)
+    bar.setFixedHeight(44)
+    bar.setStyleSheet(
+        f"QFrame#topbarCatalogo {{ background:{SLATE_700}; border:none; }}")
+    top = QHBoxLayout(bar)
+    top.setContentsMargins(16, 0, 16, 0)
+    top.setSpacing(10)
+    ico = QLabel()
+    ico.setPixmap(icon(icono).pixmap(20, 20))
+    ico.setFixedSize(20, 20)
+    ico.setStyleSheet("background:transparent; border:none;")
+    top.addWidget(ico)
+    lbl = QLabel(titulo)
+    lbl.setStyleSheet(
+        "color:white; font-size:13px; font-weight:700; letter-spacing:0.5px;"
+        " background:transparent; border:none;")
+    top.addWidget(lbl)
+    vista.lbl_subt = QLabel(subtitulo)
+    vista.lbl_subt.setStyleSheet(
+        "color:rgba(255,255,255,0.6); font-size:11px; padding-left:6px;"
+        " background:transparent; border:none;")
+    top.addWidget(vista.lbl_subt)
+    top.addStretch(1)
+    outer.addWidget(bar)
+
+    contenido = QWidget()
+    layout = QVBoxLayout(contenido)
+    layout.setContentsMargins(20, 14, 20, 12)
+    layout.setSpacing(12)
+    outer.addWidget(contenido, 1)
+
+    pie_frame = QFrame()
+    pie_frame.setObjectName("pieCatalogo")
+    pie_frame.setAttribute(Qt.WA_StyledBackground, True)
+    pie_frame.setFixedHeight(36)
+    pie_frame.setStyleSheet(
+        f"QFrame#pieCatalogo {{ background:#EEF1F5;"
+        f" border-top:2px solid {SILVER_300}; }}")
+    pie = QHBoxLayout(pie_frame)
+    pie.setContentsMargins(6, 0, 12, 0)
+    pie.setSpacing(0)
+    outer.addWidget(pie_frame)
+    return layout, top, pie
+
+
+def crear_kpi_pie(etiqueta: str, valor: str, color: str) -> QWidget:
+    """Un KPI de la franja inferior: «Etiqueta: valor», con separador a la
+    izquierda. Expone ``lbl_etiqueta`` y ``lbl_valor`` igual que
+    `theme.crear_kpi_card`, así las vistas refrescan el número sin cambiar
+    una línea. Es la misma forma que los subtotales MO/MAT/EQ del pie de la
+    pestaña Insumos del proyecto."""
+    from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+    w = QWidget()
+    w.setStyleSheet("background:transparent;")
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(0)
+    sep = QFrame()
+    sep.setFrameShape(QFrame.VLine)
+    sep.setStyleSheet(f"border:none; border-left:1px solid {SILVER_300}; margin:6px 8px;")
+    sep.setFixedWidth(17)
+    h.addWidget(sep)
+    w.lbl_etiqueta = QLabel(f"{etiqueta}:")
+    w.lbl_etiqueta.setStyleSheet(
+        f"color:{color}; font-size:10px; font-weight:700; border:none;"
+        " background:transparent; padding:0 4px 0 2px;")
+    h.addWidget(w.lbl_etiqueta)
+    w.lbl_valor = QLabel(valor)
+    w.lbl_valor.setStyleSheet(
+        f"color:{SLATE_700}; font-size:11px; font-weight:700; border:none;"
+        " background:transparent; padding:0 4px 0 0;")
+    h.addWidget(w.lbl_valor)
+    return w
 
 
 class EditorPlenoDelegate(QStyledItemDelegate):
@@ -56,25 +168,32 @@ class CatalogoTablaMixin:
 
     # ── construcción de widgets ─────────────────────────────────────────────
     def _mk_btn(self, text: str, primary: bool = False,
-                icon_name: str | None = None) -> QPushButton:
+                icon_name: str | None = None, on_dark: bool = False) -> QPushButton:
         """Botón de la barra de acciones del catálogo.
 
-        Sin ``primary`` se deja sin stylesheet: hereda el QSS global de
-        `main.py`, que es lo que da el aspecto de botón secundario.
+        Sin ``primary`` ni ``on_dark`` se deja sin stylesheet: hereda el QSS
+        global de `main.py`, que es lo que da el aspecto de botón secundario.
+        ``on_dark`` es el secundario para la barra oscura del título.
         """
         b = QPushButton(text)
         b.setCursor(Qt.PointingHandCursor)
-        b.setMinimumHeight(32)
+        b.setMinimumHeight(32 if not on_dark else 30)
         if icon_name:
             b.setIcon(icon(icon_name))
             b.setIconSize(QSize(18, 18))
         if primary:
             b.setStyleSheet(BTN_PRIMARY_SS)
+        elif on_dark:
+            b.setStyleSheet(BTN_ON_DARK_SS)
         return b
 
-    def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QFrame:
-        """Card KPI de la fila superior. La construye el sistema de diseño."""
-        return crear_kpi_card(etiqueta, valor, color)
+    def _armar_marco_catalogo(self, icono: str, titulo: str, subtitulo: str = ""):
+        """Ver `armar_marco_catalogo`."""
+        return armar_marco_catalogo(self, icono, titulo, subtitulo)
+
+    def _mk_kpi(self, etiqueta: str, valor: str, color: str) -> QWidget:
+        """KPI de la franja inferior (antes, tarjeta de la fila superior)."""
+        return crear_kpi_pie(etiqueta, valor, color)
 
     # ── lectura de la tabla ─────────────────────────────────────────────────
     def _rid_at(self, row: int) -> int | None:

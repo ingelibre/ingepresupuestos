@@ -232,7 +232,7 @@ CAPACIDADES_TUXIA = [
     ('motiv', "🌟 Cuando estés cansado, escríbeme «ánimo» o «/animo» — tengo frases para recargar pilas."),
     ('chiste', "😄 ¿Necesitas reír un rato? Pídeme «chiste» o «/chiste»."),
     ('tip', "🇵🇪 Tengo +60 tips de presupuestos peruanos (CAPECO, RNE, NTP). Escríbeme «/tip» para uno al azar."),
-    ('ia', "🧠 Si configuras una API de IA en Configuración → IA, puedo razonar y generar especificaciones técnicas."),
+    ('ia', "🧠 Si configuras una IA en Configuración → Inteligencia artificial (Groq, Gemini y OpenRouter son gratis), puedo razonar y generar especificaciones técnicas. Escribe /ia."),
     ('detalle', "🔢 ¿Quieres el resumen ejecutivo con CD, GG, utilidad, IGV y total? Escribe «totales»."),
 ]
 
@@ -279,7 +279,7 @@ def lista_comandos_corta() -> str:
         "  /partidas  → top partidas por costo\n"
         "  /pendientes→ partidas sin metrado / ACU / specs\n"
         "  /total     → totales del proyecto al detalle\n"
-        "  /notas     → notas del proyecto (privadas)\n"
+        "  /notas     → notas del proyecto (privadas)\n"        "  /ia        → cómo activar la IA (abre la configuración)\n"
         "  /memoria   → memoria global (la IA la usa)\n"
         "  /calc      → cómo usarme de calculadora\n"
         "  /help      → lista completa\n\n"
@@ -289,10 +289,46 @@ def lista_comandos_corta() -> str:
     )
 
 
-def bienvenida(proyecto_nombre: str = '') -> str:
+def guia_configurar_ia() -> str:
+    """Cómo activar la IA, en tres pasos. Es EL texto que ve quien abre el
+    chat sin clave, así que dice qué proveedores son gratis y dónde se saca
+    la clave (Marco, 8 sep 2026: «cuando no hay IA debería explicarse mejor
+    cómo configurarla»)."""
+    # Líneas de ≤ 46 caracteres: el chat es un panel lateral angosto y en
+    # monoespaciada de 13 px eso son ~360 px, para que no se parta feo.
+    return (
+        "Para activar la IA (unos dos minutos):\n"
+        "  1. Configuración → Inteligencia artificial\n"
+        "     (o escribe /ia aquí y te llevo).\n"
+        "  2. Elige un proveedor. Groq, Gemini y\n"
+        "     OpenRouter tienen plan gratuito;\n"
+        "     Ollama corre en tu PC, sin internet\n"
+        "     ni clave.\n"
+        "  3. Crea tu clave en la web del proveedor\n"
+        "     (el panel muestra el enlace), pégala,\n"
+        "     pulsa «Probar conexión» y Guardar.\n"
+        "Desde entonces converso contigo, reviso el\n"
+        "proyecto y redacto especificaciones. Mientras\n"
+        "tanto sigo con los comandos locales."
+    )
+
+
+def bienvenida(proyecto_nombre: str = '', hay_ia: bool = True) -> str:
     """Bienvenida breve con ASCII tux + identidad + frase motivadora +
-    capacidades + hint /help."""
+    capacidades + hint /help. Sin IA configurada lo dice claro y explica
+    cómo activarla, en vez de saludar como si todo estuviera listo."""
     motiv = mensaje_motivacional()
+    if not hay_ia:
+        return (
+            f"{TUX_NORMAL}\n\n"
+            "tuxia en modo local: todavía no hay una IA configurada.\n\n"
+            "Ahora mismo puedo:\n"
+            "  • Analizar el proyecto y pendientes (/analizar)\n"
+            "  • Totales, top insumos y partidas (/total)\n"
+            "  • 🧮 Calcular: escribe 12.5*8+450\n\n"
+            f"{guia_configurar_ia()}\n\n"
+            "Escribe /help para ver todos los comandos."
+        )
     return (
         f"{TUX_NORMAL}\n\n"
         "tuxia listo y operativo. Soy tu asistente virtual.\n\n"
@@ -1741,11 +1777,13 @@ def respuesta_offline(mensaje: str, proyecto_id: int | None = None) -> str:
     if any(k in m for k in ('motivame', 'anima', 'cansado', 'aburrido')):
         return f"{TUX_FELIZ}\n\n✦ {mensaje_motivacional()}"
     if any(k in m for k in ('hola', 'buenas', 'hey', 'ayuda', 'help', 'comando', 'menu')):
-        return bienvenida()
+        # Esta función solo corre SIN IA: el saludo debe decirlo, no
+        # anunciar «listo y operativo».
+        return bienvenida(hay_ia=False)
     # Default: invitar a usar comandos o configurar IA
     return (
         f"{TUX_NORMAL}\n\n"
-        "Estoy en modo offline (sin IA configurada).\n\n"
-        f"{lista_comandos_corta()}\n\n"
-        "Para conversar con la IA: Configuración → IA → agrega tu API key."
+        "Eso lo respondo mejor con una IA, y todavía no hay una configurada.\n\n"
+        f"{guia_configurar_ia()}\n\n"
+        f"{lista_comandos_corta()}"
     )

@@ -40,8 +40,10 @@ ORANGE_BG_T1 = "#FFE8CC"   # fondo título nivel 1
 ORANGE_BG_T  = "#FFF3E8"   # fondo título nivel 2+
 ORANGE_BORDER = "#F5C490"
 # Colores de título por nivel — espejo de NIVEL_ESTILO del Presupuesto.
-NIVEL_COL = {1: "#B71C1C", 2: "#0D52BF", 3: "#6A1B9A", 4: "#AD1457"}
-NIVEL_BG  = {1: "#FFF5F5", 2: "#F5F8FF", 3: "#F9F5FF", 4: "#FFF5FA"}
+NIVEL_COL = {1: "#B71C1C", 2: "#0D52BF", 3: "#6A1B9A", 4: "#AD1457",
+             5: "#92400E"}
+NIVEL_BG  = {1: "#FFF5F5", 2: "#F5F8FF", 3: "#F9F5FF", 4: "#FFF5FA",
+             5: "#FFFBF5"}
 SLATE_700    = "#273445"
 SLATE_500    = "#485A6C"
 SLATE_300    = "#667885"

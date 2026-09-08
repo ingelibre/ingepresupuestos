@@ -44,6 +44,7 @@ from core.pdf_reports import (
     _rect_logo,
 )
 from utils.formatting import fmt, parse_num
+from utils.theme import nivel_fg as _nivel_fg
 
 
 # ── Paleta consistente con proyecto_view.py ────────────────────────────────
@@ -2400,7 +2401,10 @@ class GanttWidget(QWidget):
         ZEBRA_BG = QColor("#F6F8FB")
         TITLE_FG = QColor("#B71C1C")   # rojo títulos (igual que Presupuesto)
         HEADER_FG = QColor("#1F2A38")  # oscuro: resumen del proyecto y sub-ppto
-        SUBT_FG  = QColor("#0D52BF")   # arándano (Blueberry 700)
+        # Los subtítulos toman el color de SU nivel (arándano · morado · rosa ·
+        # ámbar), el mismo que el presupuesto. Antes TODO nivel ≥2 iba de
+        # arándano y el Gantt perdía la jerarquía que el árbol sí mostraba
+        # (reporte de David Ramos, 5 sep 2026).
         zebra_i = 0
         for p in filas:
             r = self.tbl.rowCount()
@@ -2506,7 +2510,7 @@ class GanttWidget(QWidget):
                         it.setBackground(QBrush(row_bg))
                     if es_subt:
                         f = QFont(); f.setBold(True); it.setFont(f)
-                        it.setForeground(QBrush(SUBT_FG))
+                        it.setForeground(QBrush(QColor(_nivel_fg(nivel_p))))
                 # Ruta crítica: solo resaltar la columna "Ítem" (c==1) en rojo
                 # bold; el resto de la fila mantiene el color por defecto.
                 if not es_titulo and not virtual and t.get('critical') and c == 1:
@@ -7288,7 +7292,7 @@ class ValorizadoWidget(QWidget):
         TITLE_BG = QColor("#E2E8F0")
         TITLE_FG = QColor("#B71C1C")   # rojo títulos (igual que Presupuesto)
         HEADER_FG = QColor("#1F2A38")  # oscuro: cabeceras de sub-presupuesto
-        SUBT_FG  = QColor("#0D52BF")   # arándano (Blueberry 700)
+        # Subtítulos por nivel — mismo criterio que el Gantt y el presupuesto.
         zebra_i  = 0
         # Word-wrap en descripción para no perder texto largo
         self.tbl_l.setWordWrap(True)
@@ -7335,7 +7339,7 @@ class ValorizadoWidget(QWidget):
                 # Cabecera (nivel 1): banda oscura + rojo. Subtítulo: zebra +
                 # arándano. Solo se ve Ítem+Descripción en el panel izquierdo.
                 bg_t = TITLE_BG if es_header else row_bg
-                fg_t = TITLE_FG if es_header else SUBT_FG
+                fg_t = TITLE_FG if es_header else QColor(_nivel_fg(nivel_p))
                 for c in range(len(left_headers)):
                     txt = p['item'] if c == 0 else (p['descripcion'] if c == 1 else '')
                     it = QTableWidgetItem(txt)

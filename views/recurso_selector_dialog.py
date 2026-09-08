@@ -7,10 +7,11 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QComboBox, QHeaderView, QAbstractItemView, QTabWidget,
-    QWidget, QMessageBox, QFrame, QCompleter
+    QWidget, QMessageBox, QFrame, QCompleter, QMenu
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt, QTimer, QRegularExpression
+from PySide6.QtGui import (QColor, QFont, QRegularExpressionValidator,
+                          QAction)
 
 from core.config import DB_PATH, TIPOS_RECURSO
 from core.database import (get_db, _rn, _recalcular_pu, _siguiente_codigo_inei,
@@ -21,6 +22,19 @@ from core.database import (get_db, _rn, _recalcular_pu, _siguiente_codigo_inei,
                            recurso_por_dia as _es_por_dia,
                            partida_global as _es_partida_global)
 from utils.formatting import parse_num
+
+# Precio, cuadrilla y cantidad solo aceptan un número. Sin esto el campo
+# tragaba texto y `parse_num` lo convertía en 0.0 SIN avisar: el recurso
+# entraba al ACU con precio cero (reporte de David Ramos, 5 sep 2026). Se
+# admiten las dos comas decimales que entiende `parse_num` ('1.5' y '1,5').
+_RE_NUMERO = QRegularExpression(r'^\d*(?:[.,]\d*)?$')
+
+
+def _solo_numero(campo: QLineEdit) -> QLineEdit:
+    """Deja el QLineEdit aceptando únicamente un decimal sin signo."""
+    campo.setValidator(QRegularExpressionValidator(_RE_NUMERO, campo))
+    return campo
+
 
 _TIPO_BG  = {'MO': '#FFF3CD', 'MAT': '#D1E7DD', 'EQ':  '#CCE5FF',
              'SC': '#E5D6F8'}
@@ -145,22 +159,25 @@ class RecursoSelectorDialog(QDialog):
         self.cmb_tipo.currentIndexChanged.connect(self._buscar)
         hl.addWidget(self.cmb_tipo)
 
+        # Sin ancho fijo: con 70/80 px y el padding del QSS global el texto
+        # salía entrecortado (Marco, 8 sep 2026). Alto del combo de al lado.
         btn_all = QPushButton("☑ Todos")
-        btn_all.setFixedSize(70, 32)
-        btn_all.setStyleSheet("font-size:11px;")
+        btn_all.setFixedHeight(32)
+        btn_all.setStyleSheet("QPushButton { font-size:11px; padding:0 10px; min-height:0; }")
         btn_all.clicked.connect(self._marcar_todos)
         hl.addWidget(btn_all)
 
         btn_none = QPushButton("☐ Ninguno")
-        btn_none.setFixedSize(80, 32)
-        btn_none.setStyleSheet("font-size:11px;")
+        btn_none.setFixedHeight(32)
+        btn_none.setStyleSheet("QPushButton { font-size:11px; padding:0 10px; min-height:0; }")
         btn_none.clicked.connect(self._desmarcar_todos)
         hl.addWidget(btn_none)
         vl.addLayout(hl)
 
         hint = QLabel(
             "Los recursos ya usados en este proyecto aparecen primero y resaltados "
-            "en verde — reutilízalos para no duplicar insumos."
+            "en verde — reutilízalos para no duplicar insumos.  ·  Clic derecho "
+            "sobre un insumo: editarlo o duplicarlo sin salir de acá."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(
@@ -184,6 +201,8 @@ class RecursoSelectorDialog(QDialog):
         self.tbl.setShowGrid(True)
         self.tbl.setAlternatingRowColors(False)
         self.tbl.itemClicked.connect(self._toggle_check)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._menu_recurso)
         self.tbl.setStyleSheet("""
             QTableWidget { font-size:11px; border:1px solid #DEE2E6; }
             QTableWidget::item { padding:2px 4px; }
@@ -367,19 +386,19 @@ class RecursoSelectorDialog(QDialog):
         self.inp_n_unidad.textChanged.connect(self._sync_cuadrilla_nuevo)
         form.addRow("Unidad:", self.inp_n_unidad)
 
-        self.inp_n_precio = QLineEdit("0.00")
+        self.inp_n_precio = _solo_numero(QLineEdit("0.00"))
         form.addRow("Precio:", self.inp_n_precio)
 
         # Cuadrilla O cantidad, nunca las dos: la misma regla que decide qué
         # celda se edita en la tabla del ACU (ver _sync_cuadrilla_nuevo).
-        self.inp_n_cuad = QLineEdit("1.000")
+        self.inp_n_cuad = _solo_numero(QLineEdit("1.000"))
         self.inp_n_cuad.setMaximumWidth(80)
         self.inp_n_cuad.setToolTip(
             "Solo mano de obra y equipo por hora o por día: la cantidad se "
             "calcula como cuadrilla / rendimiento × jornada.")
         form.addRow("Cuadrilla:", self.inp_n_cuad)
 
-        self.inp_n_cant = QLineEdit("0.0000")
+        self.inp_n_cant = _solo_numero(QLineEdit("0.0000"))
         self.inp_n_cant.setMaximumWidth(80)
         self.inp_n_cant.setToolTip(
             "Cantidad directa por unidad de partida: materiales, subcontratos "
@@ -707,6 +726,97 @@ class RecursoSelectorDialog(QDialog):
         if val == 'OTRO':
             return self.inp_n_inei.text().strip() if hasattr(self, 'inp_n_inei') else ''
         return val or ''
+
+    # ── Editar / duplicar el insumo sin salir del diálogo ──────────────────
+
+    def _menu_recurso(self, pos):
+        """Clic derecho sobre un insumo del catálogo: editarlo o duplicarlo.
+
+        Corregir la unidad o el tipo de un insumo obligaba a cerrar el ACU, ir
+        al Catálogo de Insumos, arreglarlo y volver a entrar (pedido de David
+        Ramos, 5 sep 2026). El formulario es el MISMO del catálogo, así que no
+        hay una segunda forma de editar un insumo que pueda divergir.
+        """
+        idx = self.tbl.indexAt(pos)
+        if not idx.isValid() or idx.row() >= len(self._recurso_ids):
+            return
+        rid = self._recurso_ids[idx.row()]
+
+        m = QMenu(self)
+        a_edit = QAction("Editar insumo…", self)
+        a_edit.triggered.connect(lambda: self._editar_recurso(rid))
+        m.addAction(a_edit)
+        a_dup = QAction("Duplicar y editar…", self)
+        a_dup.setToolTip("Copia tipo, índice INEI, unidad y precio; solo cambias el nombre.")
+        a_dup.triggered.connect(lambda: self._duplicar_recurso(rid))
+        m.addAction(a_dup)
+        m.exec(self.tbl.viewport().mapToGlobal(pos))
+
+    def _form_recurso(self, rid: int) -> bool:
+        """Abre el formulario del catálogo sobre ese insumo. True si guardó."""
+        from views.recursos_view import RecursoFormDialog
+        conn = get_db()
+        r = conn.execute(
+            "SELECT id, codigo, descripcion, tipo, unidad, precio, indice_inei "
+            "FROM recursos WHERE id=?", (rid,)
+        ).fetchone()
+        conn.close()
+        if not r:
+            return False
+        dlg = RecursoFormDialog(self, recurso=dict(r))
+        return dlg.exec() == QDialog.Accepted
+
+    def _editar_recurso(self, rid: int):
+        """Editar el insumo del catálogo. El cambio se ve en todo el programa:
+        descripción, tipo, unidad e índice viven SOLO en `recursos`. El precio
+        no se propaga a los ACU ya armados — cada proyecto guarda el suyo en
+        `acu_items.precio` (regla «un insumo = un precio por proyecto»)."""
+        if self._form_recurso(rid):
+            self._buscar()
+
+    def _duplicar_recurso(self, rid: int):
+        """Copia el insumo conservando tipo, índice INEI, unidad y precio, y
+        abre la copia para renombrarla. Misma mecánica que «Duplicar» del
+        Catálogo de Insumos, incluido el código correlativo del índice."""
+        conn = get_db()
+        r = conn.execute(
+            "SELECT codigo, descripcion, tipo, unidad, precio, indice_inei "
+            "FROM recursos WHERE id=?", (rid,)
+        ).fetchone()
+        if not r:
+            conn.close()
+            return
+        inei = r['indice_inei'] or (r['codigo'][:2] if r['codigo'] else '39')
+        cur = conn.execute(
+            "INSERT INTO recursos (codigo, descripcion, tipo, unidad, precio, indice_inei) "
+            "VALUES (?,?,?,?,?,?)",
+            (_siguiente_codigo_inei(conn, inei), r['descripcion'] + " (copia)",
+             r['tipo'], r['unidad'], r['precio'], inei)
+        )
+        nuevo_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        if not self._form_recurso(nuevo_id):
+            # Cancelar el formulario deshace la copia: si no, quedaría un
+            # «(copia)» huérfano en el catálogo por cada clic derecho.
+            conn = get_db()
+            conn.execute("DELETE FROM recursos WHERE id=?", (nuevo_id,))
+            conn.commit()
+            conn.close()
+            return
+
+        # La copia queda marcada y a la vista: se busca por su descripción
+        # final, que el usuario acaba de escribir.
+        conn = get_db()
+        desc = conn.execute("SELECT descripcion FROM recursos WHERE id=?",
+                            (nuevo_id,)).fetchone()
+        conn.close()
+        self._checked_ids.add(nuevo_id)
+        self.inp_buscar.blockSignals(True)
+        self.inp_buscar.setText((desc['descripcion'] if desc else '') or '')
+        self.inp_buscar.blockSignals(False)
+        self._buscar()          # refresca la tabla y el contador
 
     def _cuadrilla_aplica(self, tipo, unidad) -> bool:
         """¿La cantidad de este insumo se deriva de la cuadrilla? Regla del ACU
