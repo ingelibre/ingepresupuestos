@@ -12,8 +12,7 @@ Copyright (C) 2026 Marco Sumari
 **Web:** https://ingepresupuestos.com · **Manual:** https://docs.ingepresupuestos.com
 
 > **Software libre.** Todo el código está bajo GPL-3.0-or-later: puedes usarlo,
-> estudiarlo, modificarlo y redistribuirlo, también con fines comerciales y sin
-> límite de equipos.
+> estudiarlo, modificarlo y redistribuirlo.
 
 ---
 
