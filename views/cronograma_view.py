@@ -1783,6 +1783,17 @@ class GanttWidget(QWidget):
                               "calendario, hitos, ruta crítica y notas con color")
         tb_hl.addWidget(btn_mpp)
 
+        # Vuelta desde Project: lee el XML que Project guardó, empareja por
+        # IngeID y muestra qué cambiaría antes de aplicar.
+        btn_sync = QPushButton("🔄 Sincronizar")
+        btn_sync.setCursor(Qt.PointingHandCursor)
+        btn_sync.setStyleSheet(btn_mpp.styleSheet())
+        btn_sync.clicked.connect(self._sincronizar_project)
+        set_tooltip(btn_sync, "Traer duraciones y predecesoras desde el XML que "
+                               "guardaste en Microsoft Project (Archivo → Guardar "
+                               "como → XML). Muestra los cambios antes de aplicar.")
+        tb_hl.addWidget(btn_sync)
+
         tb_hl.addStretch()
 
         lbl_leg = QLabel(
@@ -4676,6 +4687,45 @@ class GanttWidget(QWidget):
                 cur_x += lw + gap
         p.restore()
 
+    def _sincronizar_project(self):
+        """Lee un XML guardado por Microsoft Project y aplica, con vista
+        previa, las duraciones y predecesoras que cambiaron. Empareja por el
+        IngeID (Text29) que escribió «MPP»; ver core/msproject_importer."""
+        import os
+        from PySide6.QtCore import QSettings as _QSx
+        from PySide6.QtWidgets import QMessageBox as _QMB
+        from core.msproject_importer import aplicar, leer_project_xml, planificar
+        from views.sincronizar_project_dialog import SincronizarProjectDialog
+        s = _QSx("ingePresupuestos", "exports")
+        ultimo = s.value(f"mpp_path/{self._cv.pid}", "") or ""
+        inicio = ultimo if ultimo and os.path.exists(ultimo) else self._dir_descargas_gantt()
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Sincronizar con Microsoft Project — elige el XML guardado por Project",
+            inicio, "MS Project XML (*.xml)")
+        if not path:
+            return
+        try:
+            datos = leer_project_xml(path)
+        except Exception as e:
+            _QMB.warning(self, "Sincronizar con Project",
+                         f"No se pudo leer el archivo como XML de Microsoft Project.\n\n{e}")
+            return
+        plan = planificar(datos, self._cv._partidas, self._cv._cron_map)
+        dlg = SincronizarProjectDialog(plan, path, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._push_undo_dep()          # las predecesoras se pueden deshacer con Ctrl+Z
+        n = aplicar(self._cv._cron_map, plan,
+                    duraciones=dlg.aplicar_duraciones,
+                    predecesoras=dlg.aplicar_predecesoras)
+        self._cv._calcular_cpm()
+        self._cv._guardar_a_db()
+        self._llenar_tabla()
+        self._render_gantt()
+        s.setValue(f"mpp_path/{self._cv.pid}", path)
+        _QMB.information(self, "Sincronizar con Project",
+                         f"Se actualizaron {n} partida(s) desde Project.")
+
     def _exportar_mpp(self):
         """Exporta el cronograma a XML compatible con Microsoft Project (MSPDI).
         Incluye: metadata del proyecto, calendario con domingos no laborables
@@ -4690,9 +4740,16 @@ class GanttWidget(QWidget):
         )
         if not path:
             return
+        # «Sincronizar» propone este mismo archivo (o el que Project guardó al lado).
+        try:
+            from PySide6.QtCore import QSettings as _QSx
+            _QSx("ingePresupuestos", "exports").setValue(f"mpp_path/{self._cv.pid}", path)
+        except Exception:
+            pass
         try:
             import xml.etree.ElementTree as ET
             import re as _re
+            from core.cronograma import INICIO_PID, FIN_PID
             partidas = self._cv._partidas
             tasks = self._cv._tasks
             cmap = self._cv._cron_map
@@ -4833,14 +4890,20 @@ class GanttWidget(QWidget):
                     txt = txt[:max_len].rstrip() + '…'
                 return txt
 
-            def _emit_hito(nombre, dia, pred_uids):
-                """Emite un Task hito (Milestone, 0 días) y devuelve su UID."""
+            def _emit_hito(nombre, dia, pred_uids, inge_id=None):
+                """Emite un Task hito (Milestone, 0 días) y devuelve su UID.
+                `inge_id` (INICIO_PID/FIN_PID) va en Text29 para que la
+                sincronización reconozca el hito aunque lo renombren."""
                 nonlocal uid, row_n
                 row_n += 1
                 el = ET.SubElement(tasks_el, f"{{{ns}}}Task")
                 ET.SubElement(el, f"{{{ns}}}UID").text = str(uid)
                 ET.SubElement(el, f"{{{ns}}}ID").text = str(row_n)
                 ET.SubElement(el, f"{{{ns}}}Name").text = nombre
+                if inge_id is not None:
+                    ea_h = ET.SubElement(el, f"{{{ns}}}ExtendedAttribute")
+                    ET.SubElement(ea_h, f"{{{ns}}}FieldID").text = MSPDI_TEXT29
+                    ET.SubElement(ea_h, f"{{{ns}}}Value").text = str(inge_id)
                 ET.SubElement(el, f"{{{ns}}}OutlineLevel").text = "2"  # bajo el resumen
                 f_h = f_ini + timedelta(days=max(0, (dia or 1) - 1))
                 fh_str = f_h.strftime("%Y-%m-%dT08:00:00")
@@ -4876,7 +4939,7 @@ class GanttWidget(QWidget):
             uid += 1
 
             # Hito «Inicio de Obra» (#2) — sin predecesoras.
-            inicio_uid = (_emit_hito(hito_ini['descripcion'], 1, [])
+            inicio_uid = (_emit_hito(hito_ini['descripcion'], 1, [], inge_id=INICIO_PID)
                           if hito_ini else None)
             # Mapear el id centinela del hito para que las predecesoras
             # explícitas "1" (que parse_predecesoras resuelve a INICIO_PID)
@@ -5057,7 +5120,7 @@ class GanttWidget(QWidget):
                     max_ef = max(_ef(pid) for pid in cand)
                     cand = [pid for pid in cand if _ef(pid) == max_ef]
                 term_uids = [uid_map[pid] for pid in cand]
-                _emit_hito(hito_fin['descripcion'], self._cv._proj_end(), term_uids)
+                _emit_hito(hito_fin['descripcion'], self._cv._proj_end(), term_uids, inge_id=FIN_PID)
 
             # Indentar y guardar
             try:
