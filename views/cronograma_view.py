@@ -68,6 +68,12 @@ GANTT_HITO = "#7A36B1"
 GANTT_GRID = "#E8EAED"
 
 
+# FieldID de los campos personalizados de tarea en el XML de Project
+# (enumeración PjCustomField: pjCustomTaskText29 / Text30). Los usa el export
+# «MPP» y los usará el lector de sincronización.
+MSPDI_TEXT29 = "188744015"
+MSPDI_TEXT30 = "188744016"
+
 class CronogramaView(QWidget):
     """Vista completa de Cronograma — usada como page 2 del root_stack del proyecto."""
 
@@ -4790,15 +4796,19 @@ class GanttWidget(QWidget):
             # ── Extended Attributes (campos personalizados) ───────────────
             ext_attrs = ET.SubElement(root, f"{{{ns}}}ExtendedAttributes")
             # Text30 = color personalizado de barra.
+            # FieldID = enumeración PjCustomField de Project (pjCustomTaskText29
+            # = 188744015, Text30 = 188744016). Hasta el 8 sep 2026 se escribía
+            # 188744028/29, que no es ningún campo: ProjectLibre lo toleraba
+            # pero Project de verdad mostraba Text29 VACÍO (prueba de Marco).
             ea = ET.SubElement(ext_attrs, f"{{{ns}}}ExtendedAttribute")
-            ET.SubElement(ea, f"{{{ns}}}FieldID").text = "188744029"
+            ET.SubElement(ea, f"{{{ns}}}FieldID").text = MSPDI_TEXT30
             ET.SubElement(ea, f"{{{ns}}}FieldName").text = "Text30"
             ET.SubElement(ea, f"{{{ns}}}Alias").text = "ColorBarra"
             # Text29 = ID interno de la partida en ingePresupuestos. Permite
             # reimportar el XML editado en Project mapeando cada tarea a su
             # partida sin ambigüedad (el importador futuro lee este campo).
             ea_id = ET.SubElement(ext_attrs, f"{{{ns}}}ExtendedAttribute")
-            ET.SubElement(ea_id, f"{{{ns}}}FieldID").text = "188744028"
+            ET.SubElement(ea_id, f"{{{ns}}}FieldID").text = MSPDI_TEXT29
             ET.SubElement(ea_id, f"{{{ns}}}FieldName").text = "Text29"
             ET.SubElement(ea_id, f"{{{ns}}}Alias").text = "IngeID"
 
@@ -4908,7 +4918,7 @@ class GanttWidget(QWidget):
                 ET.SubElement(t_el, f"{{{ns}}}WBS").text = p.get('item', '')
                 # ID interno de la partida (Text29 / «IngeID») para reimportar.
                 ea_pid = ET.SubElement(t_el, f"{{{ns}}}ExtendedAttribute")
-                ET.SubElement(ea_pid, f"{{{ns}}}FieldID").text = "188744028"
+                ET.SubElement(ea_pid, f"{{{ns}}}FieldID").text = MSPDI_TEXT29
                 ET.SubElement(ea_pid, f"{{{ns}}}Value").text = str(p['id'])
 
                 cd_full = cmap.get(p['id'], {})
@@ -5030,7 +5040,7 @@ class GanttWidget(QWidget):
                 # Extended attribute: ColorBarra (Text30)
                 if color_custom:
                     ev = ET.SubElement(t_el, f"{{{ns}}}ExtendedAttribute")
-                    ET.SubElement(ev, f"{{{ns}}}FieldID").text = "188744029"
+                    ET.SubElement(ev, f"{{{ns}}}FieldID").text = MSPDI_TEXT30
                     ET.SubElement(ev, f"{{{ns}}}Value").text = color_custom
 
                 uid_map[p['id']] = uid

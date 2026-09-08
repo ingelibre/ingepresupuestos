@@ -130,6 +130,17 @@ def test_pad_codigo():
     assert pad_codigo("47") == "4700000"
     assert pad_codigo("4700023") == "4700023"
 
+def test_mspdi_text29_y_text30_son_los_ids_oficiales_de_project():
+    """El export «MPP» escribe el id de la partida en Text29 («IngeID») para
+    poder sincronizar de vuelta. El FieldID tiene que ser el de la
+    enumeración PjCustomField de Microsoft Project; con otro número Project
+    abre el archivo pero deja la columna vacía (pasó el 8 sep 2026 con
+    188744028)."""
+    from views import cronograma_view as cv
+    assert cv.MSPDI_TEXT29 == "188744015"
+    assert cv.MSPDI_TEXT30 == "188744016"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
