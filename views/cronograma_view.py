@@ -1770,7 +1770,7 @@ class GanttWidget(QWidget):
                               "de papel, paginación y vista previa")
         tb_hl.addWidget(btn_pdf)
 
-        btn_mpp = QPushButton("📊 MPP")
+        btn_mpp = QPushButton("📊 MS Project")
         btn_mpp.setCursor(Qt.PointingHandCursor)
         btn_mpp.setStyleSheet(
             f"QPushButton {{ background:white; border:1px solid {SILVER_300};"
@@ -1779,19 +1779,21 @@ class GanttWidget(QWidget):
             f"QPushButton:hover {{ background:{SILVER_100}; color:{SLATE_700}; }}"
         )
         btn_mpp.clicked.connect(self._exportar_mpp)
-        set_tooltip(btn_mpp, "Exportar a Microsoft Project (XML) — incluye "
-                              "calendario, hitos, ruta crítica y notas con color")
+        set_tooltip(btn_mpp, "Exportar el cronograma como XML para abrirlo en "
+                              "Microsoft Project (también ProjectLibre): calendario, "
+                              "hitos, ruta crítica y notas con color. Luego "
+                              "«Desde Project» trae de vuelta lo que cambies allá.")
         tb_hl.addWidget(btn_mpp)
 
         # Vuelta desde Project: lee el XML que Project guardó, empareja por
         # IngeID y muestra qué cambiaría antes de aplicar.
-        btn_sync = QPushButton("🔄 Sincronizar")
+        btn_sync = QPushButton("🔄 Desde Project")
         btn_sync.setCursor(Qt.PointingHandCursor)
         btn_sync.setStyleSheet(btn_mpp.styleSheet())
         btn_sync.clicked.connect(self._sincronizar_project)
         set_tooltip(btn_sync, "Traer duraciones y predecesoras desde el XML que "
                                "guardaste en Microsoft Project (Archivo → Guardar "
-                               "como → XML). Muestra los cambios antes de aplicar.")
+                               "como → tipo XML). Muestra los cambios antes de aplicar.")
         tb_hl.addWidget(btn_sync)
 
         tb_hl.addStretch()
