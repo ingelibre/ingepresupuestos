@@ -42,6 +42,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="3.0.8" date="2026-09-08">
+      <description>
+        <p>Versión dedicada a las sugerencias de David Ramos López: doce de sus trece observaciones. Se corrigen el color y tamaño del título de nivel 5, los campos numéricos que aceptaban texto, la franja «Volver al proyecto» que se perdía al encadenar vistas y el diálogo de formato que desbordaba una laptop. En el ACU: cuadrilla para horas-equipo, rendimiento vacío en subcontratos, clic derecho para editar o duplicar un insumo sin salir, duplicar partida como hermana con correlativo, y el botón «Precios del catálogo» para traer al proyecto los precios que cambiaron. Cronograma con colores por nivel y sincronización de duraciones y predecesoras con Microsoft Project por archivo XML, con vista previa. Reportes: «Editar formato» con menú lateral, márgenes configurables, esquemas de colores de títulos de fábrica y propios (PDF y Excel), y encabezado y pie que se apagan por completo. Configuración, Nuevo proyecto y los catálogos rediseñados sin scroll; el chat explica cómo activar la IA y Gemini trae desplegable de modelos.</p>
+      </description>
+    </release>
     <release version="3.0.6" date="2026-09-03">
       <description>
         <p>Tres sugerencias de un usuario: al crear un recurso desde el ACU, la cuadrilla solo se habilita para mano de obra y equipo por hora o por día, y materiales y subcontratos usan solo la cantidad; al salir de un presupuesto abierto hacia Inicio o los catálogos queda la franja «Volver al proyecto» desde cualquier destino; y los reportes PDF ganan un ajuste de tamaño del texto con tres pasos (100, 90 y 80 %) para que entren más filas por hoja, sin tocar encabezado, pie ni portada. Histórico de índices unificados del INEI al 30 de agosto de 2026.</p>
