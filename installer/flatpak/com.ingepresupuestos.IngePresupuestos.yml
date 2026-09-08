@@ -102,9 +102,13 @@ modules:
         sed -e 's|<icon name="\([^"]*\)"/>|<icon name="'"${FLATPAK_ID}"'.\1"/>|' \
           resources/mime/ingepresupuestos.xml > "${FLATPAK_DEST}/share/mime/packages/${FLATPAK_ID}.xml"
         grep -q "${FLATPAK_ID}.application-x-ingepresupuestos-db" "${FLATPAK_DEST}/share/mime/packages/${FLATPAK_ID}.xml"
+        # Solo los PNG: el validador de iconos de flatpak-builder en el runner
+        # rechazó el SVG («Format not recognized») y tumbó el Flatpak de la
+        # 3.0.8. Los PNG cubren de 16 a 256 px, que es lo que usa el escritorio.
         for d in resources/icons/hicolor/*/mimetypes; do
           size=$(basename "$(dirname "$d")")
-          for f in "$d"/*.png "$d"/*.svg; do
+          [ "$size" = "scalable" ] && continue
+          for f in "$d"/*.png; do
             [ -f "$f" ] || continue
             install -Dm644 "$f" "${FLATPAK_DEST}/share/icons/hicolor/${size}/mimetypes/${FLATPAK_ID}.$(basename "$f")"
           done

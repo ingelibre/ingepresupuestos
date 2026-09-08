@@ -32,6 +32,11 @@ on:
         description: Tag a publicar (vX.Y.Z)
         required: true
         type: string
+      ref:
+        description: Commit o rama a construir (por defecto, el tag). Sirve para republicar un tag con un arreglo del manifiesto sin mover el tag.
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   # El repo OSTree es un destino único: dos publicaciones a la vez lo
@@ -46,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.ref != '' && inputs.ref || inputs.tag }}
 
       - name: Comprobar secrets
         env:
