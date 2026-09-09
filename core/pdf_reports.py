@@ -74,6 +74,9 @@ FORMATO_CLAVES = {
     # El pie entero (línea + tres textos). Marco, 8 sep 2026: «debería haber
     # una opción para desactivar todo el pie así como con el encabezado».
     'rep_pie_oculto': '0',
+    # Leyenda del Gantt (Tarea / Crítica / Hito / Dependencia / Hoy / Fin
+    # plazo) bajo el pie del PDF del Gantt. '1' = no imprimirla.
+    'rep_gantt_leyenda_oculta': '0',
     # Márgenes del papel en milímetros. Los valores por defecto son los que
     # el PDF tuvo siempre (0.6″ laterales, 0.7″ abajo, 0.6″ arriba sin
     # encabezado): con ellos sale idéntico. El superior mueve juntos el
@@ -223,6 +226,35 @@ def set_formato(formato: dict):
     for k in FORMATO_CLAVES:
         if k in formato:
             set_config(k, formato[k] or '')
+
+
+def gantt_flags_desde_formato(formato: dict | None = None) -> dict:
+    """Qué imprime el PDF del Gantt según el formato de reportes: el
+    encabezado y el pie obedecen a las mismas casillas que el resto de
+    reportes («Encabezado y pie»); el número de página es la ranura derecha
+    del pie; la leyenda tiene su propia casilla. Hasta el 9 sep 2026 el
+    Gantt las ignoraba: el Centro de reportes y Ctrl+P le pasaban siempre
+    True (Marco: «desactivé el encabezado y el pie y en el Gantt siguen»)."""
+    f = formato if formato is not None else get_formato()
+    pie = not _oculto(f, 'rep_pie_oculto')
+    return {
+        'incluir_header': not _oculto(f, 'rep_encabezado_oculto'),
+        'incluir_footer': pie,
+        'incluir_page':   pie and not _oculto(f, 'rep_pie_der_oculto'),
+        'incluir_legend': not _oculto(f, 'rep_gantt_leyenda_oculta'),
+    }
+
+
+def encabezado_oculto(formato: dict | None = None) -> bool:
+    """¿El usuario apagó «Imprimir el encabezado en cada página»? Lo miran
+    el PDF, el Gantt y los editables (Excel/ODS/Word/ODT), que hasta el 9 sep
+    2026 lo ignoraban (Marco: «exporto un editable y sigue el encabezado»)."""
+    return _oculto(formato if formato is not None else get_formato(), 'rep_encabezado_oculto')
+
+
+def pie_oculto(formato: dict | None = None) -> bool:
+    """¿El usuario apagó «Imprimir el pie en cada página»? (ver `encabezado_oculto`)."""
+    return _oculto(formato if formato is not None else get_formato(), 'rep_pie_oculto')
 
 
 def _oculto(formato: dict, clave: str) -> bool:

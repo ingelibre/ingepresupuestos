@@ -78,6 +78,15 @@ MSPDI_TEXT30 = "188744016"
 class CronogramaView(QWidget):
     """Vista completa de Cronograma — usada como page 2 del root_stack del proyecto."""
 
+    # Pestaña → tipo de reporte del Centro (el mismo PDF que allí).
+    _TIPO_POR_TAB = ('cronograma', 'cronograma_valorizado',
+                     'cronograma_adquisiciones', 'cronograma_curva_s')
+
+    def tipo_reporte_actual(self) -> str:
+        """Ctrl+P: el reporte que corresponde a la pestaña a la vista."""
+        idx = max(0, min(self._stack.currentIndex(), len(self._TIPO_POR_TAB) - 1))
+        return self._TIPO_POR_TAB[idx]
+
     def __init__(self, pid: int, proyecto: dict, on_back, parent=None,
                  on_editar=None):
         super().__init__(parent)
@@ -769,23 +778,27 @@ class _DialogExportarGanttPdf(QDialog):
 
         # Encabezado / Pie de página (compartidos con Centro de Reportes)
         vl.addWidget(QLabel("Elementos del reporte:"))
+        # Arrancan como diga el formato de reportes (Encabezado y pie); aquí
+        # se pueden cambiar solo para esta exportación.
+        from core.pdf_reports import gantt_flags_desde_formato as _gff
+        _flags = _gff()
         self.chk_header = QCheckBox("Incluir encabezado (logo, empresa, datos del proyecto)")
-        self.chk_header.setChecked(True)
+        self.chk_header.setChecked(_flags['incluir_header'])
         self.chk_header.setStyleSheet("color:#273445; font-size:12px;")
         vl.addWidget(self.chk_header)
 
         self.chk_footer = QCheckBox("Incluir pie de página (textos del formato: izq / centro / der)")
-        self.chk_footer.setChecked(True)
+        self.chk_footer.setChecked(_flags['incluir_footer'])
         self.chk_footer.setStyleSheet("color:#273445; font-size:12px;")
         vl.addWidget(self.chk_footer)
 
         self.chk_legend = QCheckBox("Incluir leyenda (Tarea / Crítica / Hito / Dependencia / Hoy / Fin plazo)")
-        self.chk_legend.setChecked(True)
+        self.chk_legend.setChecked(_flags['incluir_legend'])
         self.chk_legend.setStyleSheet("color:#273445; font-size:12px;")
         vl.addWidget(self.chk_legend)
 
         self.chk_page = QCheckBox("Incluir número de página (N de N)")
-        self.chk_page.setChecked(True)
+        self.chk_page.setChecked(_flags['incluir_page'])
         self.chk_page.setStyleSheet("color:#273445; font-size:12px;")
         vl.addWidget(self.chk_page)
 
@@ -3094,10 +3107,20 @@ class GanttWidget(QWidget):
 
     def _render_pdf_completo(self, path, modo, orient, incluir_pred, escala='auto',
                                 hojas_x=0, papel='A3',
-                                incluir_header=True, incluir_footer=True,
-                                incluir_legend=True, incluir_page=True,
+                                incluir_header=None, incluir_footer=None,
+                                incluir_legend=None, incluir_page=None,
                                 pie_offset: int = 0,
                                 pie_total: int | None = None):
+        # `None` en cualquiera de los cuatro = lo que diga el formato de
+        # reportes (Encabezado y pie + leyenda del Gantt): así el Centro de
+        # reportes y Ctrl+P imprimen el Gantt como el resto de reportes. El
+        # diálogo de exportar del cronograma sigue pudiendo forzar cada uno.
+        from core.pdf_reports import gantt_flags_desde_formato as _gff
+        _flags = _gff()
+        if incluir_header is None: incluir_header = _flags['incluir_header']
+        if incluir_footer is None: incluir_footer = _flags['incluir_footer']
+        if incluir_legend is None: incluir_legend = _flags['incluir_legend']
+        if incluir_page   is None: incluir_page   = _flags['incluir_page']
         printer = QPrinter(QPrinter.HighResolution)
         printer.setOutputFormat(QPrinter.PdfFormat)
         printer.setOutputFileName(path)
@@ -8706,9 +8729,11 @@ class ValorizadoWidget(QWidget):
         # los dígitos del texto como un solo tamaño (p.ej. &701 → 701pt). Con
         # `&K` al final lee exactamente 6 hex y el dígito siguiente ya es texto.
         prefix  = '&7&K485A6C'  # 7pt + slate-500
-        ws.oddFooter.left.text   = f"{prefix}Cliente: {cliente}" if cliente else f"{prefix} "
-        ws.oddFooter.center.text = f"{prefix}{fecha}"
-        ws.oddFooter.right.text  = f"{prefix}Página &P de &N"
+        from core.pdf_reports import pie_oculto as _pie_oc
+        if not _pie_oc():       # «Imprimir el pie» apagado → sin pie
+            ws.oddFooter.left.text   = f"{prefix}Cliente: {cliente}" if cliente else f"{prefix} "
+            ws.oddFooter.center.text = f"{prefix}{fecha}"
+            ws.oddFooter.right.text  = f"{prefix}Página &P de &N"
 
         wb.save(path)
 
@@ -9554,6 +9579,9 @@ class CurvaSWidget(QWidget):
             dec = get_decimales_ppto()
             unidad = data.get('unidad', 'Sem')
 
+            # Encabezado y pie obedecen a «Editar formato», como el PDF y el
+            # Gantt (Marco, 9 sep 2026: la Curva S los seguía pintando).
+            from core.pdf_reports import encabezado_oculto as _enc_oc, pie_oculto as _pie_oc
             # ── Header tripartite estilo Resumen Ejecutivo ────────────────
             # 3 zonas: IZQ empresa + subtítulo · CENTRO título + nombre del
             # proyecto wrapped · DER "Costo al:" + modalidad. Línea fina
@@ -9579,62 +9607,66 @@ class CurvaSWidget(QWidget):
             right_w = mm(58)
             y_top   = mm(2)
 
-            # IZQ: empresa + subtítulo
-            painter.setPen(color_marca_dk)
-            f = painter.font(); f.setPointSizeF(11); f.setBold(True); painter.setFont(f)
-            painter.drawText(QRectF(mm(2), y_top, left_w, mm(5)),
-                                Qt.AlignLeft | Qt.AlignVCenter, empresa)
-            f.setPointSizeF(7); f.setBold(False); painter.setFont(f)
-            painter.setPen(QColor(SLATE_300))
-            painter.drawText(QRectF(mm(2), y_top + mm(5), left_w, mm(4)),
-                                Qt.AlignLeft | Qt.AlignVCenter, sub_emp)
+            if _enc_oc():
+                cur_y = mm(4)
+                f = painter.font()
+            else:
+                # IZQ: empresa + subtítulo
+                painter.setPen(color_marca_dk)
+                f = painter.font(); f.setPointSizeF(11); f.setBold(True); painter.setFont(f)
+                painter.drawText(QRectF(mm(2), y_top, left_w, mm(5)),
+                                    Qt.AlignLeft | Qt.AlignVCenter, empresa)
+                f.setPointSizeF(7); f.setBold(False); painter.setFont(f)
+                painter.setPen(QColor(SLATE_300))
+                painter.drawText(QRectF(mm(2), y_top + mm(5), left_w, mm(4)),
+                                    Qt.AlignLeft | Qt.AlignVCenter, sub_emp)
 
-            # CENTRO: título reporte + nombre proyecto wrapped
-            center_x = mm(2) + left_w + mm(4)
-            center_w = page_w - mm(2) - left_w - right_w - mm(8)
-            f.setPointSizeF(10); f.setBold(True); painter.setFont(f)
-            painter.setPen(QColor("#1F2A38"))
-            painter.drawText(QRectF(center_x, y_top, center_w, mm(5)),
-                                Qt.AlignCenter | Qt.AlignVCenter,
-                                'Curva S — Avance Financiero Acumulado')
-            # Nombre proyecto centrado abajo del título, hasta 3 líneas
-            f.setPointSizeF(7); f.setBold(False); f.setItalic(True); painter.setFont(f)
-            painter.setPen(QColor(SLATE_500))
-            nom = (proy.get('nombre') or '').strip()
-            fm_nom = QFontMetrics(f)
-            max_nom_h = mm(11)
-            measured = fm_nom.boundingRect(
-                QRectF(0, 0, center_w, max_nom_h).toRect(),
-                Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap,
-                nom,
-            )
-            nom_h = min(max_nom_h, max(mm(4), measured.height() + 1))
-            painter.drawText(
-                QRectF(center_x, y_top + mm(5), center_w, nom_h),
-                Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, nom,
-            )
-            f.setItalic(False); painter.setFont(f)
+                # CENTRO: título reporte + nombre proyecto wrapped
+                center_x = mm(2) + left_w + mm(4)
+                center_w = page_w - mm(2) - left_w - right_w - mm(8)
+                f.setPointSizeF(10); f.setBold(True); painter.setFont(f)
+                painter.setPen(QColor("#1F2A38"))
+                painter.drawText(QRectF(center_x, y_top, center_w, mm(5)),
+                                    Qt.AlignCenter | Qt.AlignVCenter,
+                                    'Curva S — Avance Financiero Acumulado')
+                # Nombre proyecto centrado abajo del título, hasta 3 líneas
+                f.setPointSizeF(7); f.setBold(False); f.setItalic(True); painter.setFont(f)
+                painter.setPen(QColor(SLATE_500))
+                nom = (proy.get('nombre') or '').strip()
+                fm_nom = QFontMetrics(f)
+                max_nom_h = mm(11)
+                measured = fm_nom.boundingRect(
+                    QRectF(0, 0, center_w, max_nom_h).toRect(),
+                    Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap,
+                    nom,
+                )
+                nom_h = min(max_nom_h, max(mm(4), measured.height() + 1))
+                painter.drawText(
+                    QRectF(center_x, y_top + mm(5), center_w, nom_h),
+                    Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, nom,
+                )
+                f.setItalic(False); painter.setFont(f)
 
-            # DER: "Costo al: …" + modalidad
-            right_x = page_w - mm(2) - right_w
-            painter.setPen(QColor(SLATE_700))
-            f.setPointSizeF(8); f.setBold(True); painter.setFont(f)
-            costo_str = f"Costo al: {_clean_costo_al(proy.get('costo_al'))}"
-            painter.drawText(QRectF(right_x, y_top, right_w, mm(5)),
-                                Qt.AlignRight | Qt.AlignVCenter, costo_str)
-            f.setPointSizeF(7); f.setBold(False); f.setItalic(True); painter.setFont(f)
-            painter.setPen(QColor(SLATE_300))
-            painter.drawText(QRectF(right_x, y_top + mm(5), right_w, mm(4)),
-                                Qt.AlignRight | Qt.AlignVCenter,
-                                (proy.get('modalidad') or '').strip())
-            f.setItalic(False); painter.setFont(f)
+                # DER: "Costo al: …" + modalidad
+                right_x = page_w - mm(2) - right_w
+                painter.setPen(QColor(SLATE_700))
+                f.setPointSizeF(8); f.setBold(True); painter.setFont(f)
+                costo_str = f"Costo al: {_clean_costo_al(proy.get('costo_al'))}"
+                painter.drawText(QRectF(right_x, y_top, right_w, mm(5)),
+                                    Qt.AlignRight | Qt.AlignVCenter, costo_str)
+                f.setPointSizeF(7); f.setBold(False); f.setItalic(True); painter.setFont(f)
+                painter.setPen(QColor(SLATE_300))
+                painter.drawText(QRectF(right_x, y_top + mm(5), right_w, mm(4)),
+                                    Qt.AlignRight | Qt.AlignVCenter,
+                                    (proy.get('modalidad') or '').strip())
+                f.setItalic(False); painter.setFont(f)
 
-            # Línea separadora slate-100 al final del header
-            header_bottom = max(y_top + mm(9), y_top + mm(5) + nom_h + mm(1))
-            painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
-            painter.drawLine(QPointF(mm(2), header_bottom),
-                                QPointF(page_w - mm(2), header_bottom))
-            cur_y = header_bottom + mm(4)
+                # Línea separadora slate-100 al final del header
+                header_bottom = max(y_top + mm(9), y_top + mm(5) + nom_h + mm(1))
+                painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
+                painter.drawLine(QPointF(mm(2), header_bottom),
+                                    QPointF(page_w - mm(2), header_bottom))
+                cur_y = header_bottom + mm(4)
 
             # ── KPI strip — 4 cards horizontales ───────────────────────
             # Estilo espejo del Resumen Ejecutivo: borde superior 2.5pt
@@ -9724,27 +9756,28 @@ class CurvaSWidget(QWidget):
             tab_h = page_h - tab_y - mm(6)
             self._pdf_render_tabla(painter, mm(2), tab_y, page_w - mm(4), tab_h)
 
-            # ── Footer tripartito estilo Resumen Ejecutivo ───────────────
-            # IZQ Cliente · CENTRO fecha · DER Página X de N. Línea slate-100
-            # de separador arriba. Espejo de `_draw_footer` del PDF principal.
-            painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
-            painter.drawLine(QPointF(mm(2), page_h - mm(6)),
-                                QPointF(page_w - mm(2), page_h - mm(6)))
-            painter.setPen(QColor(SLATE_300))
-            f.setPointSizeF(7); f.setBold(False); painter.setFont(f)
-            cliente_txt = (f"Cliente: {proy['cliente']}"
-                              if proy.get('cliente') else '')
-            painter.drawText(QRectF(mm(2), page_h - mm(5), page_w - mm(4), mm(5)),
-                                Qt.AlignLeft | Qt.AlignVCenter, cliente_txt)
-            painter.drawText(QRectF(0, page_h - mm(5), page_w, mm(5)),
-                                Qt.AlignCenter, _dt.now().strftime("%d/%m/%Y"))
-            # Página: continua si `pie_total` está set (Reporte Completo).
-            if pie_total:
-                pag_txt = f"Página {1 + (pie_offset or 0)} de {pie_total}"
-            else:
-                pag_txt = "Página 1 de 1"
-            painter.drawText(QRectF(mm(2), page_h - mm(5), page_w - mm(4), mm(5)),
-                                Qt.AlignRight | Qt.AlignVCenter, pag_txt)
+            if not _pie_oc():
+                # ── Footer tripartito estilo Resumen Ejecutivo ───────────────
+                # IZQ Cliente · CENTRO fecha · DER Página X de N. Línea slate-100
+                # de separador arriba. Espejo de `_draw_footer` del PDF principal.
+                painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
+                painter.drawLine(QPointF(mm(2), page_h - mm(6)),
+                                    QPointF(page_w - mm(2), page_h - mm(6)))
+                painter.setPen(QColor(SLATE_300))
+                f.setPointSizeF(7); f.setBold(False); painter.setFont(f)
+                cliente_txt = (f"Cliente: {proy['cliente']}"
+                                  if proy.get('cliente') else '')
+                painter.drawText(QRectF(mm(2), page_h - mm(5), page_w - mm(4), mm(5)),
+                                    Qt.AlignLeft | Qt.AlignVCenter, cliente_txt)
+                painter.drawText(QRectF(0, page_h - mm(5), page_w, mm(5)),
+                                    Qt.AlignCenter, _dt.now().strftime("%d/%m/%Y"))
+                # Página: continua si `pie_total` está set (Reporte Completo).
+                if pie_total:
+                    pag_txt = f"Página {1 + (pie_offset or 0)} de {pie_total}"
+                else:
+                    pag_txt = "Página 1 de 1"
+                painter.drawText(QRectF(mm(2), page_h - mm(5), page_w - mm(4), mm(5)),
+                                    Qt.AlignRight | Qt.AlignVCenter, pag_txt)
         finally:
             painter.end()
 
@@ -11814,7 +11847,9 @@ class InsumosWidget(QWidget):
         cliente_adq = (proy.get('cliente') or '').strip()
         fecha_adq   = _dt_adq.now().strftime('%d/%m/%Y')
         prefix_adq  = '&7&K485A6C'   # 7pt + slate-500 (tamaño antes del color)
-        ws.oddFooter.left.text   = f"{prefix_adq}Cliente: {cliente_adq}" if cliente_adq else f"{prefix_adq} "
-        ws.oddFooter.center.text = f"{prefix_adq}{fecha_adq}"
-        ws.oddFooter.right.text  = f"{prefix_adq}Página &P de &N"
+        from core.pdf_reports import pie_oculto as _pie_oc_adq
+        if not _pie_oc_adq():
+            ws.oddFooter.left.text   = f"{prefix_adq}Cliente: {cliente_adq}" if cliente_adq else f"{prefix_adq} "
+            ws.oddFooter.center.text = f"{prefix_adq}{fecha_adq}"
+            ws.oddFooter.right.text  = f"{prefix_adq}Página &P de &N"
         wb.save(path)

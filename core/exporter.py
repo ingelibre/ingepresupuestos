@@ -438,6 +438,31 @@ def exportar_formula_polinomica(proyecto_id):
 
 # ─── Helper: configuración de impresión ──────────────────────────────────────
 
+# ── Encabezado y pie apagados en «Editar formato» ────────────────────────────
+# Los editables obedecen a las mismas casillas que el PDF. Cuando el
+# encabezado está apagado, los helpers de cabecera no escriben nada y
+# devuelven la fila 1; anotan en `_HDR_OMITIDAS` cuántas filas dejaron de
+# ocupar, para que los reportes que repiten «las 3 filas del encabezado» al
+# imprimir (`_filas_hdr`) no repitan por error las primeras filas de la tabla.
+_HDR_OMITIDAS: dict = {}     # id(ws) → filas que el encabezado habría ocupado
+
+
+def _encabezado_oculto() -> bool:
+    from core.pdf_reports import encabezado_oculto
+    return encabezado_oculto()
+
+
+def _pie_oculto() -> bool:
+    from core.pdf_reports import pie_oculto
+    return pie_oculto()
+
+
+def _filas_hdr(ws, n: int) -> int:
+    """Filas a repetir al imprimir para un reporte que cuenta `n` con el
+    encabezado puesto: se descuentan las que el encabezado no escribió."""
+    return max(0, n - _HDR_OMITIDAS.get(id(ws), 0))
+
+
 def _setup_impresion(ws, n_filas_encabezado=8, n_cols=None, *, proyecto=None):
     """Ajusta la hoja para imprimir en A4 ajustado al ancho de la tabla.
 
@@ -460,7 +485,8 @@ def _setup_impresion(ws, n_filas_encabezado=8, n_cols=None, *, proyecto=None):
         header=0.15, footer=0.2
     )
     # Repetir filas de encabezado (proyecto/título) en cada página impresa
-    ws.print_title_rows = f'1:{n_filas_encabezado}'
+    if n_filas_encabezado and n_filas_encabezado > 0:
+        ws.print_title_rows = f'1:{n_filas_encabezado}'
     # Área de impresión + centrado horizontal (si se proporciona el ancho)
     if n_cols:
         last_col = get_column_letter(n_cols)
@@ -471,7 +497,7 @@ def _setup_impresion(ws, n_filas_encabezado=8, n_cols=None, *, proyecto=None):
     # Pie tripartito espejo del PDF — `&P` página actual, `&N` total páginas
     # (openpyxl los traduce a códigos nativos que Excel/Calc reemplazan al
     # imprimir o exportar). `&K666` setea color slate-500, `&7` size 7pt.
-    if proyecto is not None:
+    if proyecto is not None and not _pie_oculto():
         from datetime import datetime as _dt_p
         cliente = (proyecto['cliente'] or '').strip() if 'cliente' in proyecto.keys() else ''
         fecha   = _dt_p.now().strftime('%d/%m/%Y')
@@ -503,6 +529,9 @@ def _xlsx_header_pdf_style(ws, proyecto, titulo, n_cols, *, cols_partition=None)
     (`third = n_cols // 3`). Útil para reportes con anchos de col muy desiguales
     como Presupuesto (`(2, 5)` → L=A-B, C=C-E, R=F-G).
     """
+    if _encabezado_oculto():
+        _HDR_OMITIDAS[id(ws)] = 3
+        return 1
     if cols_partition is not None:
         if len(cols_partition) == 3:
             # Override completo: (L_END, C_END, R_START) — permite "huecos"
@@ -647,6 +676,9 @@ def _xlsx_header_pdf_style(ws, proyecto, titulo, n_cols, *, cols_partition=None)
 # ─── Helper: encabezado Excel (legacy, estilo PowerCost) ────────────────────
 
 def _xlsx_encabezado(ws, proyecto, titulo, n_cols):
+    if _encabezado_oculto():
+        _HDR_OMITIDAS[id(ws)] = 7      # título + 5 datos + línea
+        return 1
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
     ws['A1'] = titulo
     ws['A1'].font      = Font(name='Inter', bold=False, italic=False, size=21)
@@ -1372,7 +1404,7 @@ def exportar_acus(proyecto_id):
     conn.close()
     # Solo repetir las 3 filas del tripartito en cada página — el h2 y la
     # cabecera de columnas se repiten POR partida dentro del cuerpo.
-    _setup_impresion(ws, n_filas_encabezado=3, n_cols=N, proyecto=proyecto)
+    _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 3), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1672,7 +1704,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
         ws.row_dimensions[r].height = 20
         r += 1
 
-        _setup_impresion(ws, n_filas_encabezado=4, n_cols=N, proyecto=proyecto)
+        _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 4), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1923,7 +1955,7 @@ def _hoja_metrados(wb, proyecto_id):
     conn.close()
     # Solo repetir las 3 filas del tripartito en cada página — el h2 y la
     # cabecera de columnas se repiten POR partida dentro del cuerpo.
-    _setup_impresion(ws, n_filas_encabezado=3, n_cols=N, proyecto=proyecto)
+    _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 3), n_cols=N, proyecto=proyecto)
 
 
 # ─── EXCEL: Metrados de Acero ────────────────────────────────────────────────
@@ -2086,7 +2118,7 @@ def _hoja_acero_metrados(wb, proyecto_id):
     conn.close()
     # Solo repetir las 3 filas del tripartito en cada página — espejo del
     # comportamiento de la Hoja de Metrados (sister sheet).
-    _setup_impresion(ws, n_filas_encabezado=3, n_cols=N, proyecto=proyecto)
+    _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 3), n_cols=N, proyecto=proyecto)
 
 
 # ─── EXCEL: Especificaciones ──────────────────────────────────────────────────
@@ -2138,7 +2170,7 @@ def _hoja_especificaciones(wb, proyecto_id):
     ws.column_dimensions['B'].width = 15
     ws.column_dimensions['C'].width = 15
     ws.column_dimensions['D'].width = 15
-    _setup_impresion(ws)
+    _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 8))
 
 
 # ─── EXCEL: Gastos Generales ──────────────────────────────────────────────────
@@ -2466,7 +2498,7 @@ def exportar_valorizacion(val_id):
         ws.column_dimensions[get_column_letter(c)].width = w
     # Inmovilizar las filas del encabezado (quedan fijas al hacer scroll).
     ws.freeze_panes = ws.cell(row=data_start, column=1)
-    _setup_impresion(ws, n_cols=N, proyecto=proyecto)
+    _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 8), n_cols=N, proyecto=proyecto)
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return buf
 
@@ -2586,7 +2618,7 @@ def exportar_reporte_completo(proyecto_id):
     _escribir_pie(ws_p, r + 2, pie)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], [10, 42, 6, 7, 10, 12, 12, 12, 14]):
         ws_p.column_dimensions[col].width = w
-    _setup_impresion(ws_p)
+    _setup_impresion(ws_p, n_filas_encabezado=_filas_hdr(ws_p, 8))
 
     # ── 2. ACUs ───────────────────────────────────────────────────────────────
     conn = get_db()
@@ -2680,7 +2712,7 @@ def exportar_reporte_completo(proyecto_id):
 
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'], [14, 36, 6, 8, 10, 12, 12, 6, 6, 14]):
         ws_a.column_dimensions[col].width = w
-    _setup_impresion(ws_a)
+    _setup_impresion(ws_a, n_filas_encabezado=_filas_hdr(ws_a, 8))
 
     # ── 3. Insumos ────────────────────────────────────────────────────────────
     ws_i = wb.create_sheet("Insumos")
@@ -2776,7 +2808,7 @@ def exportar_reporte_completo(proyecto_id):
     ws_i.cell(ri + 1, 1, f"Son :   {_monto_letras(monto_final)}").font = Font(name='Inter',bold=True, italic=True, size=11)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], [14, 36, 6, 8, 12, 12, 12, 6]):
         ws_i.column_dimensions[col].width = w
-    _setup_impresion(ws_i)
+    _setup_impresion(ws_i, n_filas_encabezado=_filas_hdr(ws_i, 8))
 
     conn.close()
 

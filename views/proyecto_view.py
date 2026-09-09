@@ -9743,130 +9743,11 @@ class ProyectoView(QWidget):
         QProcess.startDetached(sys.executable, sys.argv)
         QApplication.instance().quit()
 
-    def _archivo_imprimir(self):
-        """Diálogo con lista de tipos de reporte. Al seleccionar, genera el
-        PDF temporal del tipo elegido y abre QPrintPreviewDialog para imprimir."""
-        from PySide6.QtWidgets import (
-            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-            QListWidgetItem, QPushButton, QApplication, QMessageBox,
-        )
-        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
-        from core import pdf_reports as _pr
-        import tempfile
-
-        # Diálogo modal con la lista de tipos
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Imprimir reporte")
-        dlg.setMinimumWidth(440)
-        dlg.setMinimumHeight(420)
-        v = QVBoxLayout(dlg)
-        v.setContentsMargins(20, 18, 20, 16)
-        v.setSpacing(12)
-
-        lbl = QLabel("Selecciona el tipo de reporte a imprimir:")
-        lbl.setStyleSheet("background:transparent; border:none;")
-        v.addWidget(lbl)
-
-        lw = QListWidget()
-        for key, nombre, desc in _pr.REPORT_TYPES:
-            it = QListWidgetItem(nombre)
-            it.setData(Qt.UserRole, key)
-            it.setToolTip(desc)
-            lw.addItem(it)
-        lw.setCurrentRow(0)
-        lw.itemDoubleClicked.connect(lambda _: dlg.accept())
-        v.addWidget(lw, stretch=1)
-
-        hl = QHBoxLayout()
-        hl.addStretch()
-        btn_cancel = QPushButton("Cancelar")
-        btn_cancel.clicked.connect(dlg.reject)
-        hl.addWidget(btn_cancel)
-        btn_ok = QPushButton("Vista previa  →")
-        btn_ok.setDefault(True)
-        btn_ok.clicked.connect(dlg.accept)
-        hl.addWidget(btn_ok)
-        v.addLayout(hl)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-        it = lw.currentItem()
-        if it is None:
-            return
-        tipo = it.data(Qt.UserRole)
-
-        # Generar PDF temporal del tipo elegido
-        fp = tempfile.NamedTemporaryFile(
-            prefix=f'imprimir_{tipo}_', suffix='.pdf', delete=False
-        )
-        fp.close()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            _pr.generar_pdf_archivo(tipo, self.pid, fp.name)
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            QMessageBox.warning(
-                self, "Imprimir reporte",
-                f"No se pudo generar el PDF:\n{e}"
-            )
-            return
-        QApplication.restoreOverrideCursor()
-
-        # Vista previa de impresión
-        printer = QPrinter(QPrinter.HighResolution)
-        preview = QPrintPreviewDialog(printer, self)
-        preview.setWindowTitle(f"Vista previa de impresión — {it.text()}")
-        preview.resize(940, 760)
-        preview.paintRequested.connect(
-            lambda p, pdf=fp.name: self._paint_pdf_to_printer(pdf, p)
-        )
-        preview.exec()
-
-    def _paint_pdf_to_printer(self, pdf_path: str, printer):
-        """Renderiza cada página del PDF al QPrinter (usado por la vista
-        previa de impresión). Espejo de ReportesView::_paint_pdf_a_printer."""
-        from PySide6.QtGui import QPageLayout, QPainter
-        from PySide6.QtPdf import QPdfDocument
-        from PySide6.QtCore import QSize
-
-        doc = QPdfDocument()
-        doc.load(pdf_path)
-        n = doc.pageCount()
-        if n <= 0:
-            return
-        painter = QPainter(printer)
-        try:
-            layout = printer.pageLayout()
-            paint_pts = layout.paintRect(QPageLayout.Unit.Point)
-            dpi = printer.resolution()
-            target_w_px = int(paint_pts.width() * dpi / 72.0)
-            target_h_px = int(paint_pts.height() * dpi / 72.0)
-            if target_w_px <= 0 or target_h_px <= 0:
-                return
-            for i in range(n):
-                if i > 0:
-                    printer.newPage()
-                page_size_pts = doc.pagePointSize(i)
-                pw, ph = page_size_pts.width(), page_size_pts.height()
-                if pw <= 0 or ph <= 0:
-                    continue
-                scale = min(paint_pts.width() / pw, paint_pts.height() / ph)
-                render_w = int(pw * scale * dpi / 72.0)
-                render_h = int(ph * scale * dpi / 72.0)
-                if render_w <= 0 or render_h <= 0:
-                    continue
-                img = doc.render(i, QSize(render_w, render_h))
-                ox = max(0, (target_w_px - render_w) // 2)
-                oy = max(0, (target_h_px - render_h) // 2)
-                painter.drawImage(ox, oy, img)
-        finally:
-            painter.end()
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Centro de Reportes — vista anclada (page del root_stack)
-    # ══════════════════════════════════════════════════════════════════════════
-
-    def _abrir_centro_reportes(self):
+    def _reportes_view_para_generar(self):
+        """La vista del Centro de reportes de este proyecto, creada si hace
+        falta SIN arrancar su vista previa. Si el usuario ya la tiene abierta,
+        es la misma instancia, así que Ctrl+P imprime con lo que él configuró
+        allí (período, papel, una sola hoja…)."""
         if not hasattr(self, '_reportes_view') or self._reportes_view is None:
             from views.reportes_view import ReportesView
             self._reportes_view = ReportesView(
@@ -9874,8 +9755,174 @@ class ProyectoView(QWidget):
                 self._proy.get('nombre', ''),
                 on_back=lambda: self._root_stack.setCurrentIndex(0),
                 parent=self,
+                autoselect=False,
             )
             self._root_stack.addWidget(self._reportes_view)
+        return self._reportes_view
+
+    # Ctrl+P en la pantalla principal: lo que se ve en ella (el árbol y las
+    # pestañas del panel). El resto de reportes vive en el Centro.
+    _TIPOS_IMPRESION_PRINCIPAL = ('presupuesto', 'acus', 'insumos', 'metrados',
+                                  'especificaciones', 'resumen', 'memoria_descriptiva')
+
+    def opciones_impresion(self) -> list:
+        """Qué ofrece Ctrl+P según la pantalla a la vista: lista de
+        (clave, nombre, generador). `generador(progress) -> ruta del PDF`
+        (o None si no hay nada que imprimir)."""
+        from core import pdf_reports as _pr
+        nombres = {k: n for k, n, _d in _pr.REPORT_TYPES}
+
+        def _centro(tipo):
+            return (tipo, nombres.get(tipo, tipo),
+                    lambda progress=None, t=tipo:
+                        self._reportes_view_para_generar().generar_pdf_sincrono(t, progress=progress))
+
+        actual = self._root_stack.currentWidget()
+        cron = getattr(self, '_cron_view', None)
+        ctrl = getattr(self, '_control_view', None)
+        rep  = getattr(self, '_reportes_view', None)
+        met  = getattr(self, '_metrados_view', None)
+        if cron is not None and actual is cron:
+            return [_centro(cron.tipo_reporte_actual())]
+        if ctrl is not None and actual is ctrl:
+            op = ctrl.opcion_impresion()
+            if op is None:
+                return []
+            clave, nombre, fn = op
+
+            def _gen(progress=None, fn=fn, clave=clave):
+                import tempfile
+                fp = tempfile.NamedTemporaryFile(prefix=f'imprimir_{clave}_', suffix='.pdf', delete=False)
+                fp.close()
+                return fn(fp.name)
+            return [(clave, nombre, _gen)]
+        if rep is not None and actual is rep:
+            return [_centro(rep._tipo_actual or 'presupuesto')]
+        if met is not None and actual is met:
+            return [_centro('metrados')]
+        if self._root_stack.currentIndex() == 1:        # Pie de presupuesto
+            return [_centro('gastos_generales')]
+        return [_centro(t) for t in self._TIPOS_IMPRESION_PRINCIPAL]
+
+    def _archivo_imprimir(self):
+        """Impresión rápida (Ctrl+P): imprime LO QUE ESTÁS VIENDO. En la
+        pantalla principal ofrece presupuesto, ACU, insumos, metrados y
+        especificaciones; en el cronograma, la pestaña a la vista (Gantt,
+        valorizado…); en Control de Obra, el panel a la vista (requerimiento,
+        cuaderno…); en Metrados, Pie y Centro, ese reporte. Con una sola
+        opción no pregunta. El PDF es EXACTAMENTE el del Centro de reportes,
+        con su configuración y su orientación, sin carátula ni separadores.
+        (Marco, 9 sep 2026: antes listaba todo, con el Gantt básico, en
+        vertical y sin señal de espera.)"""
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
+            QListWidgetItem, QPushButton, QApplication, QMessageBox,
+            QProgressDialog,
+        )
+        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+
+        opciones = self.opciones_impresion()
+        if not opciones:
+            QMessageBox.information(self, "Imprimir",
+                                    "No hay nada que imprimir en esta pantalla.")
+            return
+        if len(opciones) == 1:
+            clave, nombre, generador = opciones[0]
+        else:
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Imprimir")
+            dlg.setMinimumWidth(420)
+            v = QVBoxLayout(dlg)
+            v.setContentsMargins(20, 18, 20, 16)
+            v.setSpacing(12)
+            lbl = QLabel("¿Qué quieres imprimir?")
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("background:transparent; border:none;")
+            v.addWidget(lbl)
+            lw = QListWidget()
+            for clave, nombre, _g in opciones:
+                it = QListWidgetItem(nombre)
+                it.setData(Qt.UserRole, clave)
+                lw.addItem(it)
+            lw.setCurrentRow(0)
+            lw.itemDoubleClicked.connect(lambda _: dlg.accept())
+            v.addWidget(lw, stretch=1)
+            hl = QHBoxLayout()
+            hl.addStretch()
+            btn_cancel = QPushButton("Cancelar")
+            btn_cancel.clicked.connect(dlg.reject)
+            hl.addWidget(btn_cancel)
+            btn_ok = QPushButton("Vista previa  →")
+            btn_ok.setDefault(True)
+            btn_ok.clicked.connect(dlg.accept)
+            hl.addWidget(btn_ok)
+            v.addLayout(hl)
+            if dlg.exec() != QDialog.Accepted or lw.currentRow() < 0:
+                return
+            clave, nombre, generador = opciones[lw.currentRow()]
+
+        # Ventanita de progreso: se genera en este hilo y el Completo o un
+        # cronograma tardan; sin esto parecía colgado.
+        prog = QProgressDialog(f"Generando {nombre}…", "", 0, 0, self)
+        prog.setWindowTitle("Imprimir")
+        prog.setCancelButton(None)
+        prog.setWindowModality(Qt.WindowModal)
+        prog.setMinimumDuration(0)
+        prog.setMinimumWidth(380)
+        prog.show()
+        QApplication.processEvents()
+
+        def _progreso(frac, mensaje=None):
+            if mensaje:
+                prog.setLabelText(mensaje)
+            if frac is None:
+                prog.setRange(0, 0)
+            else:
+                prog.setRange(0, 100)
+                prog.setValue(max(0, min(100, int(frac * 100))))
+            QApplication.processEvents()
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            pdf_path = generador(_progreso)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            QApplication.restoreOverrideCursor()
+            prog.close()
+            QMessageBox.warning(self, "Imprimir", f"No se pudo generar el PDF:\n{e}")
+            return
+        QApplication.restoreOverrideCursor()
+        prog.close()
+        if not pdf_path:
+            return      # el panel ya avisó (nada que imprimir / cancelado)
+
+        # Vista previa con el papel y la orientación del PDF: el presupuesto
+        # sale vertical y los cronogramas apaisados.
+        from utils.impresion import ajustar_printer_al_pdf
+        printer = QPrinter(QPrinter.HighResolution)
+        ajustar_printer_al_pdf(printer, pdf_path)
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle(f"Vista previa de impresión — {nombre}")
+        preview.resize(940, 760)
+        preview.paintRequested.connect(
+            lambda p, pdf=pdf_path: self._paint_pdf_to_printer(pdf, p)
+        )
+        preview.exec()
+
+    def _paint_pdf_to_printer(self, pdf_path: str, printer):
+        """Renderiza cada página del PDF al QPrinter (vista previa de
+        impresión): el helper compartido gira cada página a su orientación."""
+        from utils.impresion import pintar_pdf_en_printer
+        pintar_pdf_en_printer(printer, pdf_path)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Centro de Reportes — vista anclada (page del root_stack)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _abrir_centro_reportes(self):
+        # Puede existir ya, creada por Ctrl+P sin vista previa; `cargar()`
+        # selecciona entonces el primer reporte.
+        self._reportes_view_para_generar()
         idx = self._root_stack.indexOf(self._reportes_view)
         self._root_stack.setCurrentIndex(idx)
         # Diferimos la carga al siguiente frame para que el topbar/skeleton

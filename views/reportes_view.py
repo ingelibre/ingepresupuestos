@@ -379,7 +379,8 @@ class ReportesView(QWidget):
     """
 
     def __init__(self, proyecto_id: int, proyecto_nombre: str = '',
-                 on_back: Optional[Callable[[], None]] = None, parent=None):
+                 on_back: Optional[Callable[[], None]] = None, parent=None,
+                 autoselect: bool = True):
         super().__init__(parent)
         self.pid = proyecto_id
         self._proy_nombre = proyecto_nombre
@@ -395,14 +396,41 @@ class ReportesView(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self._build_ui()
-        # Auto-seleccionar primer reporte (Resumen Ejecutivo)
-        if pdf_reports.REPORT_TYPES:
+        # Auto-seleccionar primer reporte (Resumen Ejecutivo). Con
+        # `autoselect=False` (impresión rápida, Ctrl+P) no se arranca ninguna
+        # vista previa: la vista se crea solo para generar el PDF.
+        if autoselect and pdf_reports.REPORT_TYPES:
             self._on_card_clicked(pdf_reports.REPORT_TYPES[0][0])
 
     def cargar(self):
         """Hook llamado al activar la vista (para refrescar)."""
         if self._tipo_actual:
             self._regenerar_preview()
+        elif pdf_reports.REPORT_TYPES:
+            # Creada sin auto-selección (por Ctrl+P) y ahora se abre de verdad.
+            self._on_card_clicked(pdf_reports.REPORT_TYPES[0][0])
+
+    def generar_pdf_sincrono(self, tipo: str, *, rapido: bool = True,
+                             progress=None) -> Optional[str]:
+        """El MISMO PDF que la vista previa de este Centro para `tipo`, con
+        la configuración que tenga ahora (período, papel, una sola hoja…),
+        generado en el hilo actual. `rapido` = sin carátula ni separadores:
+        es lo que quiere Ctrl+P (Marco, 9 sep 2026: el atajo generaba un
+        Gantt básico con otra configuración y con portada). Devuelve la ruta
+        del PDF temporal o None."""
+        from core import pdf_reports as _pr
+        if tipo == 'cronograma':
+            return self._render_gantt_rich_pdf()
+        if tipo in ('cronograma_valorizado', 'cronograma_adquisiciones'):
+            return self._render_cronograma_tabular_pdf(tipo)
+        if tipo == 'cronograma_curva_s':
+            return self._render_curva_s_rich_pdf()
+        if tipo == 'completo':
+            return self._render_completo_merged_pdf(progress=progress, rapido=rapido)
+        tmp = tempfile.NamedTemporaryFile(prefix=f"reporte_{tipo}_", suffix='.pdf', delete=False)
+        tmp.close()
+        _pr.generar_pdf_archivo(tipo, self.pid, tmp.name, with_cover=False)
+        return tmp.name
 
     # ─── UI builders ─────────────────────────────────────────────────────────
 
@@ -1163,8 +1191,7 @@ class ReportesView(QWidget):
             modo='fit', orient='landscape',
             incluir_pred=False, escala='auto',
             hojas_x=0, papel=papel,
-            incluir_header=True, incluir_footer=True,
-            incluir_legend=True, incluir_page=True,
+            # encabezado / pie / leyenda / página: según el formato de reportes
         )
         return tmp.name
 
@@ -1898,7 +1925,7 @@ class ReportesView(QWidget):
             painter.end()
         return tmp.name
 
-    def _render_completo_merged_pdf(self, progress=None) -> Optional[str]:
+    def _render_completo_merged_pdf(self, progress=None, rapido: bool = False) -> Optional[str]:
         """Genera el Reporte Completo como merge de varios PDFs:
         - Núcleo HTML A4 portrait (memoria → resumen → presupuesto → ACU →
           metrados → insumos → especificaciones) con portada principal + divisores.
@@ -1944,7 +1971,7 @@ class ReportesView(QWidget):
                                               titulo_cover=cover_title,
                                               pie_offset=offset,
                                               pie_total=total,
-                                              con_divisor=not self._sin_separadores())
+                                              con_divisor=not sin_sep)
             return p.name
 
         def _r_divider(num, titulo, desc):
@@ -1984,8 +2011,6 @@ class ReportesView(QWidget):
                 gantt._render_pdf_completo(
                     tmp.name, 'fit', 'landscape', True, escala='auto',
                     hojas_x=0, papel=papel,
-                    incluir_header=True, incluir_footer=True,
-                    incluir_legend=True, incluir_page=True,
                     pie_offset=offset, pie_total=total,
                 )
                 return tmp.name
@@ -2093,13 +2118,14 @@ class ReportesView(QWidget):
         # La portada principal va en la PRIMERA sección de núcleo seleccionada.
         secciones = []
         nombres = []   # etiquetas para el indicador de progreso
-        sin_sep = self._sin_separadores()
+        # `rapido` (Ctrl+P): sin carátula principal ni separadores.
+        sin_sep = rapido or self._sin_separadores()
         primera_nucleo = next((c for c in sel if c in _SECCIONES_NUCLEO), None)
         for num, code in enumerate(sel, start=1):
             if code in _SECCIONES_NUCLEO:
                 secciones.append(('paged',
                     lambda o, t, c=code, n=num: _r_sec_nucleo(
-                        c, n, c == primera_nucleo, titulo_cover, o, t)))
+                        c, n, c == primera_nucleo and not rapido, titulo_cover, o, t)))
                 nombres.append(etiqueta_de[code])
             else:
                 titulo_c, desc_c, fn_c = cron_info[code]
@@ -2509,6 +2535,9 @@ class ReportesView(QWidget):
             QMessageBox.warning(self, "Reportes", "Aún no hay un PDF generado.")
             return
         printer = QPrinter(QPrinter.HighResolution)
+        # Papel y orientación de la primera página del PDF (Gantt apaisado)
+        from utils.impresion import ajustar_printer_al_pdf
+        ajustar_printer_al_pdf(printer, self._tmp_pdf)
         # Renderiza páginas del PDF temporal en el QPainter
         dlg = QPrintPreviewDialog(printer, self)
         dlg.setWindowTitle("Vista previa de impresión")

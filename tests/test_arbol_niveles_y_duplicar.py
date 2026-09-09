@@ -513,3 +513,90 @@ def test_el_pdf_del_gantt_parte_en_dos_lineas_la_descripcion_larga():
         assert len(lineas) == 2 and lineas[0] == 'UNA DOS TRES'
     finally:
         p.end()
+
+
+# ── 6. Ctrl+P = el PDF del Centro de reportes, sin carátula ─────────────────
+
+def test_la_impresion_rapida_genera_lo_mismo_que_el_centro_sin_caratula():
+    """Marco, 9 sep 2026: Ctrl+P generaba un Gantt básico con otra
+    configuración y con portada. Ahora pasa por `ReportesView.generar_pdf_sincrono`."""
+    import pypdf
+    import core.pdf_reports as pr
+    _usar_bd_temporal()
+    v = ProyectoView(PID, Usuario(id=1, nombre="t", rol="admin"))
+    rv = v._reportes_view_para_generar()
+    assert rv._tipo_actual is None          # creada sin arrancar vista previa
+    assert v._reportes_view_para_generar() is rv
+    pages = lambda p: len(pypdf.PdfReader(p).pages)
+    # Presupuesto: sin carátula (una página menos que con ella)
+    p_rap = rv.generar_pdf_sincrono('presupuesto')
+    fd, p_con = tempfile.mkstemp(suffix='.pdf'); os.close(fd)
+    pr.generar_pdf_archivo('presupuesto', PID, p_con, with_cover=True)
+    assert pages(p_rap) == pages(p_con) - 1
+    # Gantt: el renderizador rico del cronograma (una hoja en modo «fit»)
+    p_g = rv.generar_pdf_sincrono('cronograma')
+    assert p_g and pages(p_g) >= 1 and os.path.basename(p_g).startswith('reporte_gantt_')
+    for p in (p_rap, p_con, p_g):
+        os.unlink(p)
+
+
+# ── 7. Ctrl+P imprime lo que estás viendo, con su orientación ───────────────
+
+def test_ctrl_p_ofrece_solo_lo_de_la_pantalla_a_la_vista():
+    """Marco, 9 sep 2026: Ctrl+P listaba todos los reportes; ahora en la
+    pantalla principal ofrece presupuesto/ACU/insumos/metrados/
+    especificaciones, en el cronograma la pestaña a la vista y en el Pie
+    su reporte (una sola opción = sin preguntar)."""
+    _usar_bd_temporal()
+    v = ProyectoView(PID, Usuario(id=1, nombre="t", rol="admin"))
+    v._completar_panel_tabs()
+    claves = lambda: [k for k, _n, _g in v.opciones_impresion()]
+    assert claves() == ['presupuesto', 'acus', 'insumos', 'metrados', 'especificaciones', 'resumen', 'memoria_descriptiva']
+    v._ir_pie()
+    assert claves() == ['gastos_generales']
+    v._ir_cronograma()
+    assert claves() == ['cronograma']
+    v._cron_view._stack.setCurrentIndex(1)
+    assert claves() == ['cronograma_valorizado']
+    v._root_stack.setCurrentIndex(0)
+    assert len(claves()) == 7
+
+
+def test_al_imprimir_una_pagina_de_otra_orientacion_se_gira_en_vez_de_recortarse():
+    """`pintar_pdf_en_printer` no cambia la orientación del papel a mitad del
+    documento (la vista previa de Qt lo ignora): una página apaisada sobre
+    papel vertical se dibuja girada. `ajustar_printer_al_pdf` pone el papel
+    como la primera página (un Gantt sale apaisado)."""
+    import pypdf
+    from PySide6.QtCore import QMarginsF
+    from PySide6.QtGui import QPageLayout, QPageSize, QPainter, QPdfWriter
+    from PySide6.QtPrintSupport import QPrinter
+    from utils.impresion import ajustar_printer_al_pdf, pintar_pdf_en_printer
+
+    def _pdf(orients):
+        fd, p = tempfile.mkstemp(suffix='.pdf'); os.close(fd)
+        w = QPdfWriter(p); w.setPageSize(QPageSize(QPageSize.A4)); w.setPageOrientation(orients[0])
+        pt = QPainter(w)
+        for i, o in enumerate(orients):
+            if i:
+                w.setPageOrientation(o); w.newPage()
+            pt.drawText(100, 100, f"pagina {i}")
+        pt.end()
+        return p
+
+    mixto = _pdf([QPageLayout.Portrait, QPageLayout.Landscape, QPageLayout.Portrait])
+    src = ['H' if pg.mediabox.width > pg.mediabox.height else 'V' for pg in pypdf.PdfReader(mixto).pages]
+    assert src == ['V', 'H', 'V']
+    printer = QPrinter(QPrinter.HighResolution); printer.setOutputFormat(QPrinter.PdfFormat)
+    fd, out = tempfile.mkstemp(suffix='.pdf'); os.close(fd); printer.setOutputFileName(out)
+    ajustar_printer_al_pdf(printer, mixto)
+    assert printer.pageLayout().orientation() == QPageLayout.Portrait
+    pintar_pdf_en_printer(printer, mixto)
+    dst = ['H' if pg.mediabox.width > pg.mediabox.height else 'V' for pg in pypdf.PdfReader(out).pages]
+    assert dst == ['V', 'V', 'V']          # mismo papel; la apaisada va girada
+    apaisado = _pdf([QPageLayout.Landscape])
+    pr2 = QPrinter(QPrinter.HighResolution)
+    ajustar_printer_al_pdf(pr2, apaisado)
+    assert pr2.pageLayout().orientation() == QPageLayout.Landscape
+    for p in (mixto, out, apaisado):
+        os.unlink(p)

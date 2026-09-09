@@ -715,6 +715,16 @@ class FormatoReporteDialog(QDialog):
             "izquierda y al centro deja solo el número de página. Con el pie "
             "apagado no se imprime nada abajo, ni la línea."
         ))
+        lay.addWidget(self._section_title("Diagrama de Gantt"))
+        self.chk_gantt_leyenda = QCheckBox(
+            "Imprimir la leyenda del Gantt al pie (Tarea, Crítica, Hito, Dependencia, Hoy, Fin plazo)")
+        self.chk_gantt_leyenda.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(self.chk_gantt_leyenda)
+        lay.addWidget(self._hint(
+            "El encabezado y el pie del Gantt siguen las casillas de arriba, "
+            "como el resto de reportes. La leyenda va aparte: quítala si ya "
+            "conoces los colores y quieres ganar espacio."
+        ))
         lay.addStretch(1)
         return pagina
 
@@ -818,6 +828,8 @@ class FormatoReporteDialog(QDialog):
         self.chk_encabezado.setChecked(
             str(f.get('rep_encabezado_oculto') or '0') != '1')
         self.chk_pie.setChecked(str(f.get('rep_pie_oculto') or '0') != '1')
+        self.chk_gantt_leyenda.setChecked(
+            str(f.get('rep_gantt_leyenda_oculta') or '0') != '1')
         self._on_pie_toggled(self.chk_pie.isChecked())
         for casilla, clave in ((self.chk_pie_izq, 'rep_pie_izq_oculto'),
                                (self.chk_pie_cen, 'rep_pie_cen_oculto'),
@@ -971,6 +983,7 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_derecho']       = self.inp_pie_der.text().strip()
         self._formato['rep_encabezado_oculto'] = '0' if self.chk_encabezado.isChecked() else '1'
         self._formato['rep_pie_oculto']        = '0' if self.chk_pie.isChecked() else '1'
+        self._formato['rep_gantt_leyenda_oculta'] = '0' if self.chk_gantt_leyenda.isChecked() else '1'
         self._formato['rep_pie_izq_oculto']    = '1' if self.chk_pie_izq.isChecked() else '0'
         self._formato['rep_pie_cen_oculto']    = '1' if self.chk_pie_cen.isChecked() else '0'
         self._formato['rep_pie_der_oculto']    = '1' if self.chk_pie_der.isChecked() else '0'

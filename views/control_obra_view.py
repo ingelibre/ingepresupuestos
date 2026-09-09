@@ -309,6 +309,18 @@ class ControlObraView(QWidget):
         v.addStretch()
         return w
 
+    def opcion_impresion(self):
+        """Lo que imprime Ctrl+P en esta pantalla: (clave, nombre, fn) del
+        panel a la vista, con `fn(path)` que escribe el PDF y devuelve la
+        ruta (o None si no hay nada que imprimir). Control de Obra no está
+        en el Centro de reportes, así que cada panel genera el suyo."""
+        idx = self._stack.currentIndex()
+        panel = self._stack.widget(idx)
+        fn = getattr(panel, 'pdf_rapido', None)
+        if fn is None:
+            return None
+        return (f'control_{idx}', self._tabs[idx], fn)
+
     def mostrar_tab(self, idx: int):
         if 0 <= idx < len(self._tab_btns):
             self._tab_btns[idx].click()
@@ -338,6 +350,16 @@ class ControlObraView(QWidget):
 class _ValorizacionesPanel(QWidget):
     """Pestaña Valorizaciones: lista de períodos + grilla de avance por partida.
     Solo se edita la columna «Metr. actual»; el resto se deriva."""
+
+    def pdf_rapido(self, path: str):
+        """Ctrl+P: la valorización a la vista, sin diálogos."""
+        if not self._val_id:
+            QMessageBox.information(self, "Imprimir",
+                                    "No hay ninguna valorización a la vista.")
+            return None
+        from core import pdf_reports
+        pdf_reports.generar_valorizacion_pdf(self._val_id, path)
+        return path
 
     def __init__(self, pid: int, proy: dict, parent=None):
         super().__init__(parent)
@@ -1333,6 +1355,16 @@ class _CuadernoPanel(QWidget):
     incidencias/observaciones. Cada «Metr. del día» se acumula hacia la
     valorización cuyo período contiene la fecha (modelo mixto). Solo se edita el
     metrado del día (y las observaciones del día seleccionado)."""
+
+    def pdf_rapido(self, path: str):
+        """Ctrl+P: pregunta qué días (todos / uno / elegir), como el botón
+        de reporte, y genera el PDF sin pedir dónde guardarlo."""
+        ids = self._pedir_dias()
+        if not ids:
+            return None
+        from core import pdf_reports
+        pdf_reports.generar_cuaderno_pdf(self.pid, ids, path)
+        return path
 
     def __init__(self, pid: int, proy: dict, parent=None):
         super().__init__(parent)
@@ -3305,6 +3337,11 @@ class _AlmacenPanel(QWidget):
     consumido y POR LLEGAR = pedido − ingresado. El panel derecho muestra el
     kárdex por día (Entrada/Salida/Stock) y permite registrar ingresos."""
 
+    def pdf_rapido(self, path: str):
+        from core import pdf_reports
+        pdf_reports.generar_almacen_pdf(self.pid, path)
+        return path
+
     def __init__(self, pid: int, proy: dict, parent=None):
         super().__init__(parent)
         self.pid = pid
@@ -4084,6 +4121,15 @@ class _CurvaSRealPanel(QWidget):
     """Curva S real: avance acumulado programado (cronograma) vs real
     (valorizaciones), gráfico + tabla comparativa con la desviación."""
 
+    def pdf_rapido(self, path: str):
+        from core import pdf_reports
+        vis = {'prog': self.chk_prog.isChecked(),
+               'reprog': self.chk_reprog.isChecked(),
+               'real': self.chk_real.isChecked(),
+               'pct': self.chk_pct.isChecked()}
+        pdf_reports.generar_curva_s_pdf(self.pid, path, base=self._base, vis=vis)
+        return path
+
     def __init__(self, pid: int, proy: dict, parent=None):
         super().__init__(parent)
         self.pid = pid
@@ -4521,6 +4567,16 @@ class _RequerimientosPanel(QWidget):
     """Requerimientos: documentos numerados, UNO POR CATEGORÍA (combustibles,
     materiales de construcción, agregados, pinturas…). «Precargar del presupuesto»
     trae solo los insumos de esa categoría con su saldo pendiente."""
+
+    def pdf_rapido(self, path: str):
+        """Ctrl+P: el requerimiento (TDR) a la vista."""
+        if not getattr(self, '_req_id', None):
+            QMessageBox.information(self, "Imprimir",
+                                    "No hay ningún requerimiento a la vista.")
+            return None
+        from core import pdf_reports
+        pdf_reports.generar_tdr_pdf(path, self._req_id)
+        return path
 
     def __init__(self, pid: int, proy: dict, parent=None):
         super().__init__(parent)

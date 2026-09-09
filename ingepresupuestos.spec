@@ -59,6 +59,8 @@ datas = [
     # El decreto que rige la fórmula polinómica, para poder consultarlo
     # sin internet desde la propia vista.
     ('resources/DS-011-79-VC.pdf',           'resources'),
+    # QR de Yape de «Apoya al proyecto» (Acerca de).
+    ('resources/qr_yape.png',                'resources'),
     # Mapa QML (QtLocation/OSM) para marcar la ubicación del proyecto.
     ('resources/map.qml',                    'resources'),
     # Repositorio de proveedores de tiles propio (calle OSM + satélite Esri,

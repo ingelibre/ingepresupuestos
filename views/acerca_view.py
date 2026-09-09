@@ -73,6 +73,8 @@ def _app_info() -> list[tuple[str, str]]:
         ("Reportes",         "PDF · Excel · ODS · Word · ODT"),
         ("Licencia",         "GPL-3.0-or-later · software libre"),
         ("Sitio web",        "<a href='https://ingepresupuestos.com'>ingepresupuestos.com</a>"),
+        # Enlace interno: abre la ventana «Apoya al proyecto» (ver la fila).
+        ("Apoya al proyecto", "<a href='apoyar'>Probándolo, reportando o con un aporte</a>"),
     ]
 
 
@@ -286,7 +288,14 @@ class AcercaView(QWidget):
             lk.setMinimumWidth(120)
             rl.addWidget(lk)
             lv = QLabel(v)
-            if '<a ' in v:
+            if "href='apoyar'" in v:
+                # Enlace interno: abre la ventana con las formas de apoyar.
+                lv.setTextFormat(Qt.RichText)
+                lv.setOpenExternalLinks(False)
+                lv.setTextInteractionFlags(Qt.TextBrowserInteraction)
+                lv.linkActivated.connect(lambda _u: self._abrir_apoyo())
+                self.lbl_apoyo = lv
+            elif '<a ' in v:
                 # Valor con enlace (p.ej. el sitio web): clicable y abre en
                 # el navegador del sistema.
                 lv.setTextFormat(Qt.RichText)
@@ -335,6 +344,142 @@ class AcercaView(QWidget):
         wrap = QWidget()
         wrap.setLayout(col)
         return wrap
+
+    # ── Apoya al proyecto ─────────────────────────────────────────────────
+    # Espejo de ingepresupuestos.com/apoyar (Marco, 9 sep 2026): es software
+    # libre y gratuito; se apoya probándolo y reportando, recomendándolo o
+    # con un aporte por Yape/Plin (QR y número) o Liberapay/PayPal.
+    YAPE_NUMERO = "998 839 090"
+    LIBERAPAY_URL = "https://liberapay.com/ingelibre/donate"
+    PAYPAL_CORREO = "ing.marco.sumari@gmail.com"
+    APOYAR_URL = "https://ingepresupuestos.com/apoyar"
+
+    def _abrir_apoyo(self):
+        """Ventana «Apoya al proyecto» (desde la fila de Información técnica)."""
+        from PySide6.QtWidgets import QDialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Apoya al proyecto")
+        dlg.setModal(True)
+        dlg.setStyleSheet(f"QDialog {{ background:{WHITE}; }}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._build_card_apoyo())
+        dlg.setFixedWidth(520)
+        dlg.adjustSize()
+        self._dlg_apoyo = dlg
+        dlg.exec()
+
+    def _build_card_apoyo(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("cardApoyo")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(f"QFrame#cardApoyo {{ background:{WHITE}; border:none; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(22, 18, 22, 18)
+        v.setSpacing(10)
+
+        hd = QWidget()
+        hd.setStyleSheet("background:transparent; border:none;")
+        hl = QHBoxLayout(hd)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(8)
+        i_h = QLabel(); i_h.setPixmap(icon("favorito_on").pixmap(20, 20))
+        i_h.setStyleSheet("background:transparent; border:none;")
+        hl.addWidget(i_h)
+        t = QLabel("Apoya al proyecto")
+        t.setStyleSheet(f"color:{SLATE_700}; font-size:15px; font-weight:700;"
+                        " background:transparent; border:none;")
+        hl.addWidget(t)
+        hl.addStretch(1)
+        v.addWidget(hd)
+
+        intro = QLabel(
+            "IngePresupuestos es software libre y gratuito. Para seguir dando "
+            "soporte y mejorándolo, puedes apoyarlo de tres maneras:<br>"
+            "• <b>Probándolo y reportando</b> lo que falle o te falte, con el "
+            "formulario de contacto de «Acerca de».<br>"
+            "• <b>Recomendándolo</b> a un colega.<br>"
+            "• <b>Con un aporte</b>, si te ahorró horas de trabajo."
+        )
+        intro.setWordWrap(True)
+        intro.setTextFormat(Qt.RichText)
+        intro.setStyleSheet(f"color:{SLATE_700}; font-size:12px; background:transparent;"
+                            " border:none;")
+        v.addWidget(intro)
+
+        # Yape / Plin: QR + número con botón Copiar
+        fila = QWidget()
+        fila.setStyleSheet("background:transparent; border:none;")
+        fl = QHBoxLayout(fila)
+        fl.setContentsMargins(0, 4, 0, 0)
+        fl.setSpacing(12)
+        qr = QLabel()
+        qr.setStyleSheet("background:transparent; border:none;")
+        qr_path = BASE_DIR / "resources" / "qr_yape.png"
+        if qr_path.exists():
+            qr.setPixmap(QPixmap(str(qr_path)).scaled(
+                170, 170, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        fl.addWidget(qr, 0, Qt.AlignTop)
+        dv = QVBoxLayout()
+        dv.setSpacing(4)
+        l1 = QLabel("<b>Yape o Plin</b> <span style='color:#95A3AB'>Perú</span>")
+        l1.setTextFormat(Qt.RichText)
+        l1.setStyleSheet(f"color:{SLATE_700}; font-size:12px; background:transparent; border:none;")
+        dv.addWidget(l1)
+        num_w = QWidget()
+        num_w.setStyleSheet("background:transparent; border:none;")
+        nl = QHBoxLayout(num_w)
+        nl.setContentsMargins(0, 0, 0, 0)
+        nl.setSpacing(8)
+        num = QLabel(self.YAPE_NUMERO)
+        num.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        num.setStyleSheet(f"color:{ORANGE_DARK}; font-size:16px; font-weight:700;"
+                          " background:transparent; border:none;")
+        nl.addWidget(num)
+        self.btn_copiar_yape = QPushButton("Copiar")
+        self.btn_copiar_yape.setCursor(Qt.PointingHandCursor)
+        self.btn_copiar_yape.setFixedHeight(24)
+        self.btn_copiar_yape.setStyleSheet(
+            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
+            f" border:1px solid {SILVER_300}; border-radius:5px;"
+            f" padding:0 10px; font-size:11px; }}"
+            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
+            f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
+        )
+        self.btn_copiar_yape.clicked.connect(self._copiar_yape)
+        nl.addWidget(self.btn_copiar_yape)
+        nl.addStretch(1)
+        dv.addWidget(num_w)
+        nota = QLabel("A nombre de Marco Sumari. El mismo número recibe Plin "
+                      "desde Interbank, BBVA o Scotiabank.")
+        nota.setWordWrap(True)
+        nota.setStyleSheet(f"color:#95A3AB; font-size:10px; background:transparent; border:none;")
+        dv.addWidget(nota)
+        dv.addStretch(1)
+        fl.addLayout(dv, 1)
+        v.addWidget(fila)
+
+        ext = QLabel(
+            f"<b>Desde el extranjero:</b> "
+            f"<a href='{self.LIBERAPAY_URL}' style='color:{ORANGE_DARK}'>Liberapay</a> "
+            f"(tarjeta o PayPal) o PayPal directo a "
+            f"<span style='color:{SLATE_700}'>{self.PAYPAL_CORREO}</span>.<br>"
+            f"<a href='{self.APOYAR_URL}' style='color:{ORANGE_DARK}'>"
+            f"ingepresupuestos.com/apoyar</a>"
+        )
+        ext.setTextFormat(Qt.RichText)
+        ext.setOpenExternalLinks(True)
+        ext.setWordWrap(True)
+        ext.setStyleSheet(f"color:{SLATE_700}; font-size:11px; background:transparent; border:none;")
+        v.addWidget(ext)
+        return card
+
+    def _copiar_yape(self):
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self.YAPE_NUMERO.replace(" ", ""))
+        self.btn_copiar_yape.setText("Copiado ✓")
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1800, lambda: self.btn_copiar_yape.setText("Copiar"))
 
     def _buscar_actualizaciones(self):
         """Chequeo manual de actualizaciones (no silencioso)."""

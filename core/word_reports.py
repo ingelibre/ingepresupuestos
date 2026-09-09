@@ -257,6 +257,9 @@ def _add_header_marca(doc: Document, proy: dict, titulo: str):
     de la sección — sin esto el header queda fijo en 17cm (útil A4 portrait)
     y se ve angosto en docs landscape (Curva S) o A3.
     """
+    from core.pdf_reports import encabezado_oculto as _enc_oc
+    if _enc_oc():
+        return          # «Imprimir el encabezado» apagado en Editar formato
     section = doc.sections[0]
     header = section.header
     # Limpiar el primer párrafo default
@@ -394,6 +397,9 @@ def _add_footer(doc: Document, proy: dict):
     landscape y otros tamaños de página: los tab stops a posiciones grandes
     no siempre se renderizan correctamente en LibreOffice/Word.
     """
+    from core.pdf_reports import pie_oculto as _pie_oc
+    if _pie_oc():
+        return          # «Imprimir el pie» apagado en Editar formato
     from datetime import datetime as _dt_f
     from docx.oxml.ns import qn as _qn
     from docx.oxml import OxmlElement as _OE

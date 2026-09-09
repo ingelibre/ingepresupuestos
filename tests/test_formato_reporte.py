@@ -400,3 +400,85 @@ def test_los_nueve_colores_de_nivel_tienen_un_solo_dueno():
     css = pr._base_css()
     for n in range(1, NIVEL_MAX + 1):
         assert f"tr.titulo{n} td" in css, n
+
+
+def test_el_gantt_obedece_al_formato_de_encabezado_pie_y_leyenda():
+    """Marco, 9 sep 2026: apagó encabezado y pie en «Editar formato» y el
+    PDF del Gantt los seguía imprimiendo (el Centro y Ctrl+P le pasaban
+    siempre True). Ahora `gantt_flags_desde_formato` los deriva de las
+    mismas casillas; la leyenda tiene la suya (`rep_gantt_leyenda_oculta`)."""
+    f = pr.gantt_flags_desde_formato({})
+    assert f == {'incluir_header': True, 'incluir_footer': True,
+                 'incluir_page': True, 'incluir_legend': True}
+    f = pr.gantt_flags_desde_formato({'rep_encabezado_oculto': '1', 'rep_pie_oculto': '1'})
+    assert not f['incluir_header'] and not f['incluir_footer'] and not f['incluir_page']
+    assert f['incluir_legend']                      # la leyenda va aparte
+    # Pie encendido pero ranura derecha vacía → sin número de página
+    f = pr.gantt_flags_desde_formato({'rep_pie_der_oculto': '1'})
+    assert f['incluir_footer'] and not f['incluir_page']
+    assert not pr.gantt_flags_desde_formato({'rep_gantt_leyenda_oculta': '1'})['incluir_legend']
+    assert 'rep_gantt_leyenda_oculta' in pr.FORMATO_CLAVES
+    # El diálogo la lee y la escribe
+    import inspect
+    from views import formato_reporte_dialog as FRD
+    src = inspect.getsource(FRD)
+    assert "rep_gantt_leyenda_oculta" in src and "chk_gantt_leyenda" in src
+    # Y `_render_pdf_completo` ya no fuerza True: sus cuatro flags aceptan None
+    from views.cronograma_view import GanttWidget
+    sig = inspect.signature(GanttWidget._render_pdf_completo)
+    assert all(sig.parameters[k].default is None
+               for k in ('incluir_header', 'incluir_footer', 'incluir_legend', 'incluir_page'))
+
+
+def test_los_editables_obedecen_a_encabezado_y_pie_apagados():
+    """Marco, 9 sep 2026: con «Imprimir el encabezado/pie» apagados, Excel,
+    ODS, Word y ODT seguían llevándolos. Los cuatro salen de helpers comunes
+    (`_xlsx_header_pdf_style`/`_xlsx_encabezado` + `_setup_impresion` en
+    Excel —el ODS se convierte del .xlsx—; `_add_header_marca`/`_add_footer`
+    en Word —el ODT del .docx—), así que la casilla se mira ahí. La tabla
+    sube exactamente las filas del encabezado y no pierde ninguna."""
+    import io
+    import docx
+    import openpyxl
+    import core.exporter as EX
+    import core.word_reports as WR
+
+    def _flags(enc, pie):
+        d.set_config('rep_encabezado_oculto', '1' if enc else '0')
+        d.set_config('rep_pie_oculto', '1' if pie else '0')
+
+    def _hoja():
+        return openpyxl.load_workbook(io.BytesIO(EX.exportar_presupuesto(PID).getvalue())).worksheets[0]
+
+    def _fila_tabla(ws):
+        return next(r[0].row for r in ws.iter_rows(min_row=1, max_row=12)
+                    if any(c.value and str(c.value).strip() == 'Ítem' for c in r))
+
+    try:
+        _flags(False, False)
+        ws = _hoja()
+        arriba = ' '.join(str(c.value) for row in ws.iter_rows(min_row=1, max_row=3) for c in row if c.value)
+        assert 'Costo al' in arriba and ws.oddFooter.right.text
+        f0, n0 = _fila_tabla(ws), ws.max_row
+        _flags(True, True)
+        ws = _hoja()
+        arriba = ' '.join(str(c.value) for row in ws.iter_rows(min_row=1, max_row=3) for c in row if c.value)
+        assert 'Costo al' not in arriba and 'IngePresupuestos' not in arriba
+        assert not ws.oddFooter.right.text
+        assert _fila_tabla(ws) == f0 - 3 and ws.max_row == n0 - 3     # sube 3 filas, ninguna se pierde
+        # Word: cabecera y pie vacíos, mismo cuerpo
+        def _word():
+            fd, p = tempfile.mkstemp(suffix='_res.docx'); os.close(fd)
+            _tmpfiles.append(p)
+            WR.generar_word('resumen', PID, p)
+            doc = docx.Document(p); sec = doc.sections[0]
+            h = ''.join(c.text for t in sec.header.tables for r in t.rows for c in r.cells) + ''.join(p_.text for p_ in sec.header.paragraphs)
+            f = ''.join(c.text for t in sec.footer.tables for r in t.rows for c in r.cells) + ''.join(p_.text for p_ in sec.footer.paragraphs)
+            return h.strip(), f.strip(), len(doc.paragraphs), len(doc.tables)
+        h1, f1, np1, nt1 = _word()
+        assert not h1 and not f1
+        _flags(False, False)
+        h0, f0_, np0, nt0 = _word()
+        assert h0 and f0_ and (np0, nt0) == (np1, nt1)
+    finally:
+        _flags(False, False)
