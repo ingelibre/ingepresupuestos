@@ -85,12 +85,11 @@ SELECT_BG = "#FEF5EB"
 
 # Estilo de títulos por nivel — MISMO que el presupuesto (`proyecto_view.NIVEL_ESTILO`)
 # para mantener consistencia: (color de fuente, fondo tinte). Nivel 1 va subrayado.
-NIVEL_ESTILO = {
-    1: ("#B71C1C", "#E2E8F0"),   # rojo oscuro — capítulos
-    2: ("#0D52BF", "#F5F8FF"),   # arándano    — sub-capítulos
-    3: ("#6A1B9A", "#F9F5FF"),   # morado      — secciones
-    4: ("#AD1457", "#FFF5FA"),   # rosa oscuro — sub-secciones
-}
+# Los colores salen del tema (`theme.NIVEL_FG`, nueve niveles); hasta el
+# 9 sep 2026 era una copia de cuatro y del 5 en adelante caía a slate.
+from utils.theme import NIVEL_FG as _NIVEL_FG, NIVEL_BG as _NIVEL_BG, NIVEL_MAX as _NIVEL_MAX  # noqa: E402
+NIVEL_ESTILO = {n: (_NIVEL_FG[n], "#E2E8F0" if n == 1 else _NIVEL_BG[n])
+                for n in range(1, _NIVEL_MAX + 1)}
 
 # Columnas de la grilla de valorización — agrupadas como una valorización real:
 # Presupuesto base · Anterior · Actual · Acumulado · Saldo (cada grupo con
@@ -808,7 +807,7 @@ class _ValorizacionesPanel(QWidget):
             it.setForeground(QColor("#1A2535"))
             it.setBackground(QColor("#D5DBE2"))
         elif es_tit:
-            color, tbg = NIVEL_ESTILO.get(min(max(nivel, 1), 4),
+            color, tbg = NIVEL_ESTILO.get(min(max(nivel, 1), _NIVEL_MAX),
                                           (SLATE_700, SILVER_200))
             fnt = it.font(); fnt.setBold(True)
             # El color de nivel (N1 rojo, etc.) SOLO en el ítem/descripción; los

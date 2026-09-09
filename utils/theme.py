@@ -84,16 +84,44 @@ PURPLE_500 = "#7A36B1"   # Grape (Elementary)
 # colores y el cronograma uno (reporte de David Ramos, 5 sep 2026).
 #
 # El nivel se ACOTA al más profundo definido: el árbol anida sin tope
-# (`_procesar_nivel` recursiona con nivel+1) y un nivel 6 debe verse como el 5,
-# no caer a un color por defecto que además era más grande que su padre.
+# (`_procesar_nivel` recursiona con nivel+1) y un nivel 10 debe verse como
+# el 9, no caer a un color por defecto que además era más grande que su padre.
+#
+# Nueve niveles desde el 9 sep 2026 (David Ramos: «existen títulos que
+# llegan casi por esa cantidad»; hasta la 3.0.8 eran cinco y del 6 en
+# adelante repetían el ámbar). Los cuatro nuevos son oscuros, legibles en
+# negrita sobre blanco, y no se confunden ni entre sí ni con los colores de
+# tipo de insumo del ACU (ámbar MO, verde MAT, gris EQ, morado SC).
 NIVEL_FG = {
     1: "#B71C1C",   # rojo oscuro   — capítulos principales
     2: BLUE_700,    # arándano      — sub-capítulos
     3: "#6A1B9A",   # morado        — secciones
     4: "#AD1457",   # rosa oscuro   — sub-secciones
     5: "#92400E",   # ámbar oscuro  — sub-sub-secciones
+    6: "#00695C",   # verde azulado oscuro
+    7: "#D84315",   # naranja oscuro (el índigo se confundía con el arándano del 2)
+    8: "#33691E",   # oliva
+    9: "#37474F",   # gris azulado oscuro
 }
 NIVEL_MAX = max(NIVEL_FG)
+
+# Tinte de fondo MUY suave por nivel, para las vistas que lo usan (metrados,
+# control de obra; el presupuesto solo tinta el nivel 1). Mismo dueño único
+# que el color del texto.
+NIVEL_BG = {
+    1: "#FFF5F5", 2: "#F5F8FF", 3: "#F9F5FF", 4: "#FFF5FA", 5: "#FFFBF5",
+    6: "#F1FAF8", 7: "#F3F4FB", 8: "#F5FAF0", 9: "#F4F6F7",
+}
+
+
+def nivel_bg(nivel) -> str:
+    """Tinte de fondo del título de ese nivel, acotado como `nivel_fg`."""
+    try:
+        n = int(nivel or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return NIVEL_BG[min(max(n, 1), NIVEL_MAX)]
+
 
 
 def nivel_fg(nivel) -> str:

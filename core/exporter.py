@@ -10,6 +10,7 @@ from openpyxl.worksheet.page import PageMargins
 import os
 import io
 from core.database import get_db, calcular_totales, get_acu_items, get_decimales_metrado, cuadrilla_reporte
+from utils.formatting import ITEM_TRAMOS_POR_LINEA
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
 # contiene todos los pesos y variantes (italic en su propio archivo).
@@ -741,10 +742,9 @@ def exportar_presupuesto(proyecto_id):
     # Colores de fuente por nivel = espejo del programa (NIVEL_ESTILO en
     # proyecto_view.py): N1 rojo, N2 arándano, N3 morado, N4 rosa.
     # Del esquema activo (pdf_reports.colores_titulos): el mismo del PDF.
-    from core.pdf_reports import colores_titulos as _colores_titulos
+    from core.pdf_reports import colores_titulos as _colores_titulos, N_NIVELES
     _ct = {k: v.lstrip('#').upper() for k, v in _colores_titulos().items()}
-    C_TITULO1, C_TITULO2, C_TITULO3, C_TITULO4, C_TITULO5 = (
-        _ct[1], _ct[2], _ct[3], _ct[4], _ct[5])
+    C_TITULO1 = _ct[1]        # el nivel 1 se usa suelto más abajo
 
     side_orange_md = Side(style='medium', color=C_ORANGE)
     side_slate_md  = Side(style='medium', color=C_SLATE_700)
@@ -782,9 +782,16 @@ def exportar_presupuesto(proyecto_id):
     # datos B+C se mergean → el usuario sigue viendo 1 columna Descripción).
     # Tripartite resultante: Left=A+B=28 · Center=C+D=39 · Right=E+F+G=42.
     N = 7  # Ítem · Desc1 · Desc2 · Und · Metrado · Precio Unit. · Parcial
-    ws.column_dimensions['A'].width = 10   # Ítem
-    ws.column_dimensions['B'].width = 18   # Descripción parte 1
-    ws.column_dimensions['C'].width = 43   # Descripción parte 2 (ancha para
+    # Ítem: se ajusta al código más largo del proyecto, hasta cinco tramos
+    # («01.02.02.03.06», 14 caracteres) — con 10 fijo «01.02.02.03» ya se
+    # cortaba. Lo que gana A lo pierde B, así la descripción (B+C) no cambia
+    # de sitio ni de ancho en un proyecto normal. De seis tramos en adelante
+    # el código no ensancha A: desborda sobre B (ver el bucle de filas).
+    _max_item = max((len(it['partida'].get('item') or '') for it in items), default=0)
+    _w_a = max(12, min(_max_item, 14) + 2)
+    ws.column_dimensions['A'].width = _w_a          # Ítem (12–16)
+    ws.column_dimensions['B'].width = 30 - _w_a     # Descripción parte 1 (A+B = 30: cabe un ítem de 9 tramos en negrita)
+    ws.column_dimensions['C'].width = 41   # Descripción parte 2 (ancha para
                                            # que el centro del header respire)
     ws.column_dimensions['D'].width = 7    # Und
     ws.column_dimensions['E'].width = 12   # Metrado
@@ -849,16 +856,13 @@ def exportar_presupuesto(proyecto_id):
     fmt_met = ('[$-0409]#,##0.' + '0' * _dm) if _dm else '[$-0409]#,##0'
 
     def _font_titulo(nivel: int) -> Font:
-        if nivel == 1:
+        # Espejo del CSS del PDF: N1 subrayado, N2–N4 normal, N5+ cursiva.
+        n = min(max(nivel or 1, 1), N_NIVELES)
+        if n == 1:
             return Font(name='Inter', bold=True, size=11,
                         color=C_TITULO1, underline='single')
-        if nivel == 2:
-            return Font(name='Inter', bold=True, size=11, color=C_TITULO2)
-        if nivel == 3:
-            return Font(name='Inter', bold=True, size=11, color=C_TITULO3)
-        if nivel == 4:
-            return Font(name='Inter', bold=True, size=11, color=C_TITULO4)
-        return Font(name='Inter', bold=True, italic=True, size=11, color=C_TITULO5)
+        return Font(name='Inter', bold=True, italic=(n >= 5), size=11,
+                    color=_ct[n])
 
     hoja_idx = 0
     prev_titulo = False
@@ -895,6 +899,23 @@ def exportar_presupuesto(proyecto_id):
         nivel = int(p.get('nivel') or 1)
         desc = p['descripcion'] or ''
         _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
+        # Ítem de más de cinco tramos: la descripción pasa a la col C y la B
+        # queda VACÍA, así Excel/LibreOffice dejan que el código de la col A
+        # siga de largo sobre ella (una celda solo desborda sobre una vecina
+        # vacía) — igual que en el árbol del programa (Marco, 9 sep 2026).
+        # La sangría se descuenta lo que mide la col B (~6 niveles), para que
+        # la descripción quede más o menos donde la tendría su profundidad.
+        # Umbral: la col A se ajusta hasta cinco tramos; de seis en adelante
+        # desborda. Es el MISMO umbral del árbol y del PDF: en un proyecto
+        # normal (hasta cinco niveles) nada cambia de columna. Con cuatro
+        # las partidas de nivel 5 saltaban a la col C mientras sus títulos
+        # seguían en B (captura de Marco, 9 sep 2026: «se ve fatal»).
+        _desb = len((p.get('item') or '').split('.')) > ITEM_TRAMOS_POR_LINEA
+        _c_desc = 3 if _desb else 2
+        _ind_desc = max(0, _depth - 5) if _desb else _depth
+        # La descripción pierde la col B: menos caracteres por línea al
+        # estimar la altura de la fila.
+        _cpl_menos = 14 if _desb else 0
 
         _cab = _cab_sub.get(id(entry))
         if _cab:
@@ -924,42 +945,42 @@ def exportar_presupuesto(proyecto_id):
             # N1: uppercase + underline + slate-900 bold — SIN bordes.
             # Descripción merge cols 2-6 (B-F: cubre Desc1+Desc2+Und+Met+Precio),
             # monto en col 7 (G).
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
             f = _font_titulo(1)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
-            c_d = ws.cell(r, 2, desc.upper()); c_d.font = f
-            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_depth)
+            c_d = ws.cell(r, _c_desc, desc.upper()); c_d.font = f
+            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
             c_v = ws.cell(r, 7, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
-            ws.row_dimensions[r].height = max(22, _alto_fila(desc, 75))
+            ws.row_dimensions[r].height = max(22, _alto_fila(desc, 75 - _cpl_menos))
 
         elif es_titulo and nivel == 2:
             # N2 rojo — solo color, SIN bordes (igual que el PDF visible)
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
             f = _font_titulo(2)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
-            c_d = ws.cell(r, 2, desc); c_d.font = f
-            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_depth)
+            c_d = ws.cell(r, _c_desc, desc); c_d.font = f
+            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
             c_v = ws.cell(r, 7, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
-            ws.row_dimensions[r].height = max(20, _alto_fila(desc, 65))
+            ws.row_dimensions[r].height = max(20, _alto_fila(desc, 65 - _cpl_menos))
 
         elif es_titulo:
             # N3, N4, N5+ — solo color de texto, SIN bordes
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
             f = _font_titulo(nivel)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
-            c_d = ws.cell(r, 2, desc); c_d.font = f
-            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_depth)
+            c_d = ws.cell(r, _c_desc, desc); c_d.font = f
+            c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
             c_v = ws.cell(r, 7, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
-            ws.row_dimensions[r].height = max(18, _alto_fila(desc, 60))
+            ws.row_dimensions[r].height = max(18, _alto_fila(desc, 60 - _cpl_menos))
 
         else:
             # Partida hoja — texto regular, SIN bordes, zebra `#FBFCFD`.
@@ -976,12 +997,13 @@ def exportar_presupuesto(proyecto_id):
             ws.cell(r, 1, p['item']).font = fh
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='top')
             celdas_fila.append(ws.cell(r, 1))
-            c_desc = ws.cell(r, 2, desc); c_desc.font = fh
-            c_desc.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True, indent=_depth)
+            c_desc = ws.cell(r, _c_desc, desc); c_desc.font = fh
+            c_desc.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True, indent=_ind_desc)
             celdas_fila.append(c_desc)
-            # PRE-estilar col 3 antes del merge (luego es MergedCell read-only)
-            ws.cell(r, 3).font = fh
-            celdas_fila.append(ws.cell(r, 3))
+            # PRE-estilar la otra col de descripción antes del merge (luego es
+            # MergedCell read-only); si el ítem desborda, la B queda vacía.
+            ws.cell(r, 5 - _c_desc).font = fh
+            celdas_fila.append(ws.cell(r, 5 - _c_desc))
             ws.cell(r, 4, p['unidad']).font = fh
             ws.cell(r, 4).alignment = Alignment(horizontal='center', vertical='top')
             celdas_fila.append(ws.cell(r, 4))
@@ -1001,10 +1023,12 @@ def exportar_presupuesto(proyecto_id):
                 for c_ in celdas_fila:
                     c_.fill = zebra_fill
             # Mergear Descripción (cols 2+3) DESPUÉS de estilar — para que
-            # el fill se aplique antes a ambos cells.
-            _merge_descripcion(r)
+            # el fill se aplique antes a ambos cells. Con ítem que desborda
+            # NO se mergea: la B tiene que quedar vacía y suelta.
+            if not _desb:
+                _merge_descripcion(r)
             # chars_por_linea conservador (42) para LibreOffice/PlanMaker.
-            ws.row_dimensions[r].height = max(18, _alto_fila(desc, 42))
+            ws.row_dimensions[r].height = max(18, _alto_fila(desc, 42 - _cpl_menos))
 
         r += 1
         prev_titulo = es_titulo

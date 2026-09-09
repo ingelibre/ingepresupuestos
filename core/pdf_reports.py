@@ -30,6 +30,7 @@ from typing import Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, QMarginsF, QRectF, QSizeF, Qt
 from PySide6.QtGui import (
+    QFont, QFontMetricsF,
     QBrush, QColor, QFont, QFontMetrics, QPageLayout, QPageSize, QPainter,
     QPdfWriter, QPen, QTextDocument,
 )
@@ -39,7 +40,7 @@ from core.database import (
     get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
     get_insumos_para_partidas, set_config, _orden_mo,
 )
-from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money,
+from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money, ITEM_TRAMOS_POR_LINEA,
                              texto_rendimiento)
 
 # ── Configuración de formato (editable por el usuario) ───────────────────────
@@ -90,7 +91,9 @@ FORMATO_CLAVES = {
 }
 
 # ── Colores de los títulos de los reportes ───────────────────────────────────
-# Un ESQUEMA es un juego de cinco colores, uno por nivel de título. Los de
+# Un ESQUEMA es un juego de NUEVE colores (`N_NIVELES`), uno por nivel de
+# título; hasta el 9 sep 2026 eran cinco, y un esquema propio guardado con
+# cinco se completa con los de Clásico del 6 al 9. Los de
 # fábrica viven acá; los del usuario, en `rep_esquemas_titulos` (JSON). El
 # activo se elige en `rep_esquema_titulos`. «Clásico» son los colores de
 # siempre —los mismos de `theme.NIVEL_FG`—, así que una instalación sin
@@ -102,17 +105,22 @@ FORMATO_CLAVES = {
 # en Clásico es el slate-800 que el PDF usó siempre. Hasta el 8 sep 2026 el
 # Excel del Presupuesto lo pintaba de naranja oscuro por su cuenta (Marco:
 # «en el PDF aparece negro y en Excel de otro color»).
+from utils.theme import NIVEL_FG as _NIVEL_FG_TEMA, NIVEL_MAX as N_NIVELES  # noqa: E402
+
 ESQUEMAS_FABRICA = {
     'clasico':   {'nombre': 'Clásico', 'sub': '#1F2A38',
-                  'colores': ['#B71C1C', '#0D52BF', '#6A1B9A', '#AD1457', '#92400E']},
+                  'colores': [_NIVEL_FG_TEMA[n] for n in range(1, N_NIVELES + 1)]},
     'sobrio':    {'nombre': 'Sobrio (grises)', 'sub': '#1F2A38',
-                  'colores': ['#1F2A38', '#2E3C52', '#485A6C', '#64748B', '#64748B']},
+                  'colores': ['#1F2A38', '#2E3C52', '#485A6C', '#64748B', '#64748B',
+                              '#64748B', '#64748B', '#64748B', '#64748B']},
     'azul':      {'nombre': 'Azul corporativo', 'sub': '#082A66',
-                  'colores': ['#0B3D91', '#0D52BF', '#1E6FD9', '#3B82C4', '#5B7FA6']},
+                  'colores': ['#0B3D91', '#0D52BF', '#1E6FD9', '#3B82C4', '#5B7FA6',
+                              '#5B7FA6', '#5B7FA6', '#5B7FA6', '#5B7FA6']},
     'verde':     {'nombre': 'Verde', 'sub': '#0F3D14',
-                  'colores': ['#1B5E20', '#2E7D32', '#388E3C', '#4E8A5A', '#6B8F71']},
+                  'colores': ['#1B5E20', '#2E7D32', '#388E3C', '#4E8A5A', '#6B8F71',
+                              '#6B8F71', '#6B8F71', '#6B8F71', '#6B8F71']},
     'monocromo': {'nombre': 'Monocromo (negro)', 'sub': '#000000',
-                  'colores': ['#000000', '#000000', '#000000', '#000000', '#000000']},
+                  'colores': ['#000000'] * N_NIVELES},
 }
 ESQUEMA_DEFECTO = 'clasico'
 _HEX = re.compile(r'^#[0-9A-Fa-f]{6}$')
@@ -120,8 +128,10 @@ _HEX = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 def esquemas_titulos(formato: dict | None = None) -> dict:
     """Todos los esquemas: los de fábrica y después los del usuario, cada
-    uno ``{'nombre', 'colores': [5 hex], 'fabrica': bool}``. Un esquema de
-    usuario mal formado se ignora; un color inválido cae al de Clásico."""
+    uno ``{'nombre', 'colores': [N_NIVELES hex], 'fabrica': bool}``. Un
+    esquema de usuario mal formado se ignora; un color inválido —o uno que
+    falta, como del 6 al 9 en los guardados antes del 9 sep 2026— cae al de
+    Clásico."""
     fmt = formato if formato is not None else get_formato()
     out = {k: {'nombre': v['nombre'], 'colores': list(v['colores']), 'sub': v['sub'],
                'fabrica': True}
@@ -140,7 +150,7 @@ def esquemas_titulos(formato: dict | None = None) -> dict:
             if not isinstance(cols, list):
                 continue
             cols = [c if isinstance(c, str) and _HEX.match(c) else base[i]
-                    for i, c in enumerate((cols + base)[:5])]
+                    for i, c in enumerate((cols + base[len(cols):])[:N_NIVELES])]
             sub = v.get('sub')
             if not (isinstance(sub, str) and _HEX.match(sub)):
                 sub = ESQUEMAS_FABRICA[ESQUEMA_DEFECTO]['sub']
@@ -150,14 +160,14 @@ def esquemas_titulos(formato: dict | None = None) -> dict:
 
 
 def colores_titulos(formato: dict | None = None) -> dict[int, str]:
-    """Color por nivel de título del esquema activo: claves 1–5 son los
-    niveles y la clave 0 es la cabecera de sub-presupuesto. Si el esquema
+    """Color por nivel de título del esquema activo: claves 1–N_NIVELES son
+    los niveles y la clave 0 es la cabecera de sub-presupuesto. Si el esquema
     activo no existe —se borró, o el nombre está mal— cae a Clásico."""
     fmt = formato if formato is not None else get_formato()
     todos = esquemas_titulos(fmt)
     clave = str(fmt.get('rep_esquema_titulos') or ESQUEMA_DEFECTO)
     esq = todos.get(clave, todos[ESQUEMA_DEFECTO])
-    out = {i + 1: esq['colores'][i] for i in range(5)}
+    out = {i + 1: esq['colores'][i] for i in range(N_NIVELES)}
     out[0] = esq['sub']
     return out
 
@@ -557,6 +567,14 @@ def _base_css(formato: dict | None = None) -> str:
     activo (`colores_titulos`)."""
     o, od, os_ = _brand_colors()
     _t = colores_titulos(formato)
+    # Del 6 al 9 se ven como el 5 (cursiva, 8.5 pt); solo cambia el color.
+    _css_niveles_extra = "".join(
+        f"  table.data tr.titulo{n} td {{\n"
+        f"    background: white; color: {_t[n]};\n"
+        f"    font-weight: 700; font-size: 8.5pt; font-style: italic;\n"
+        f"    padding-top: 6pt; padding-bottom: 4pt;\n"
+        f"  }}\n"
+        for n in range(6, N_NIVELES + 1))
     return f"""
 <style>
   body {{
@@ -642,7 +660,7 @@ def _base_css(formato: dict | None = None) -> str:
     font-weight: 700; font-size: 8.5pt; font-style: italic;
     padding-top: 6pt; padding-bottom: 4pt;
   }}
-  table.totales td {{
+{_css_niveles_extra}  table.totales td {{
     padding: 5pt 8pt; font-size: 9.5pt;
     border-top: 0.5pt solid {SLATE_300};
   }}
@@ -752,6 +770,88 @@ def _html_meta_proyecto(proy: dict) -> str:
     return f'<table class="meta-info">{body}</table>'
 
 
+# ── Ítem + Descripción en UNA celda (Presupuesto y Cronograma valorizado) ──
+# Una columna Ítem de tabla mide lo que mide el código más largo, y en las
+# filas de códigos cortos sobra un hueco entre el ítem y la descripción
+# (capturas de Marco, 9 sep 2026). En vez de dos columnas, cada fila lleva una
+# tabla anidada [código | descripción]: el código ocupa un ancho fijo —el de
+# los códigos de hasta cinco tramos, medido con la fuente de su fila— y solo
+# en una fila con código más largo esa celda se ensancha y empuja SU
+# descripción, descontando el exceso de la sangría de jerarquía: es el mismo
+# desborde del árbol del programa. Los anchos van en px del documento
+# (los de `QFontMetricsF`, 1 pt = 4/3 px) como atributo HTML `width`, que es lo que QTextDocument
+# respeta como fijo (un porcentaje por debajo del contenido parte el código
+# en cada punto; un `colspan` sobre dos columnas ensancha Ítem para TODAS
+# las filas — las dos cosas se probaron).
+_FM_ITEM_CACHE: dict = {}
+
+
+def _fm_item(pt: float, bold: bool) -> QFontMetricsF:
+    k = (pt, bold)
+    if k not in _FM_ITEM_CACHE:
+        f = QFont('Inter'); f.setPointSizeF(pt); f.setBold(bold)
+        _FM_ITEM_CACHE[k] = QFontMetricsF(f)
+    return _FM_ITEM_CACHE[k]
+
+
+def _ancho_codigo_px(item: str, pt: float, bold: bool, upper: bool = False) -> int:
+    """`QFontMetricsF.horizontalAdvance` ya devuelve píxeles a 96 dpi (1 pt =
+    4/3 px), que son las mismas unidades del `width` del documento —el
+    espaciador de sangría de 16 px por nivel mide ~12 pt en el papel—. Se
+    suma el padding de la celda (6 pt por lado = 16 px) y un pelo."""
+    txt = (item or '')
+    if upper:
+        txt = txt.upper()
+    return int(_fm_item(pt, bold).horizontalAdvance(txt) + 16 + 3)
+
+
+def _w_item_fijo(filas) -> int:
+    """`filas`: (item, pt, bold, upper). El ancho fijo = el mayor de los
+    códigos de hasta cinco tramos (mínimo 40 px)."""
+    return max([_ancho_codigo_px(i, pt, b, u) for i, pt, b, u in filas
+                if len((i or '').split('.')) <= ITEM_TRAMOS_POR_LINEA] or [40])
+
+
+def _ind_px_html(px: int, inner_html: str) -> str:
+    """Sangría colgante de `px` por una tabla-espaciador anidada (QTextDocument
+    ignora padding/margin de celda; un prefijo de &nbsp; solo sangra la
+    primera línea)."""
+    if px <= 0:
+        return inner_html
+    return (
+        '<table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>'
+        f'<td width="{px}" style="border:none;padding:0;background:transparent"></td>'
+        '<td style="border:none;padding:0;background:transparent">'
+        f'{inner_html}</td></tr></table>'
+    )
+
+
+def _celda_item_desc(item: str, desc_html: str, depth: int, *, pt: float, bold: bool,
+                     w_fijo: int, ind_por_nivel: int, upper: bool = False,
+                     subrayar: bool = False) -> str:
+    w = max(w_fijo, _ancho_codigo_px(item, pt, bold, upper))
+    item_html = escape(item or '')
+    if subrayar:
+        item_html = f'<u>{item_html}</u>'
+    ind_px = max(0, depth * ind_por_nivel - (w - w_fijo))
+    return (
+        '<table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>'
+        f'<td width="{w}" style="border:none;padding:0;background:transparent;'
+        f'vertical-align:top">{item_html}</td>'
+        '<td style="border:none;padding:0;background:transparent">'
+        f'{_ind_px_html(ind_px, desc_html)}</td></tr></table>'
+    )
+
+
+def _cabecera_item_desc(w_fijo: int, css_celda: str = '') -> str:
+    return (
+        '<table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>'
+        f'<td width="{w_fijo}" style="border:none;padding:0;background:transparent;{css_celda}">Ítem</td>'
+        f'<td style="border:none;padding:0;background:transparent;{css_celda}">Descripción</td>'
+        '</tr></table>'
+    )
+
+
 def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                      incluir_meta=True, todo_costo=False,
                      extracto=False) -> str:
@@ -794,16 +894,28 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     # la col del texto → todas las líneas envueltas quedan indentadas.
     _IND_PX = 16   # ancho del espaciador por nivel de profundidad
 
+    # Ítem + Descripción en una celda (ver `_celda_item_desc`). Fuente por
+    # tipo de fila = la del CSS: titulo1 9.5 pt bold mayúsculas, titulo2 9 pt
+    # bold, titulo3+ 8.8/8.6/8.5 bold, partidas 9 pt (body).
+    def _fuente_fila(p) -> tuple:
+        if not p.get('es_titulo'):
+            return (9.0, False, False)
+        n = p.get('nivel') or 1
+        if n <= 1:
+            return (9.5, True, True)
+        return ({2: 9.0, 3: 8.8, 4: 8.6}.get(n, 8.5), True, False)
+
+    _W_ITEM = _w_item_fijo([(it['partida'].get('item') or '',) + _fuente_fila(it['partida'])
+                            for it in items])
+
+    def _item_desc(p, desc_html: str, depth: int, subrayar: bool = False) -> str:
+        pt, bold, upper = _fuente_fila(p)
+        return _celda_item_desc(p.get('item') or '', desc_html, depth, pt=pt, bold=bold,
+                                w_fijo=_W_ITEM, ind_por_nivel=_IND_PX, upper=upper,
+                                subrayar=subrayar)
+
     def _ind(depth, html_inner):
-        if depth <= 0:
-            return html_inner
-        return (
-            '<table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>'
-            f'<td width="{depth * _IND_PX}" '
-            'style="border:none;padding:0;background:transparent"></td>'
-            '<td style="border:none;padding:0;background:transparent">'
-            f'{html_inner}</td></tr></table>'
-        )
+        return _ind_px_html(depth * _IND_PX, html_inner)
 
     # Cabecera de sub-presupuesto: cuando el proyecto tiene varios, se
     # intercala una banda con su nombre y su costo directo justo antes de
@@ -835,7 +947,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             # (texto subrayado). Una banda oscura pesaba demasiado en la
             # página y competía con la jerarquía de los títulos.
             rows.append(
-                '<tr><td colspan="5" style="background:white;color:%s;'
+                '<tr><td colspan="4" style="background:white;color:%s;'
                 'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
                 'text-transform:uppercase;letter-spacing:0.5pt;'
                 'text-decoration:underline;border:none;">%s</td>'
@@ -847,16 +959,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             )
 
         if es_titulo:
-            if nivel == 1:
-                cls = "titulo1"
-            elif nivel == 2:
-                cls = "titulo2"
-            elif nivel == 3:
-                cls = "titulo3"
-            elif nivel == 4:
-                cls = "titulo4"
-            else:
-                cls = "titulo5"
+            cls = f"titulo{min(max(nivel or 1, 1), N_NIVELES)}"
             row_bg_inline = ""
         else:
             zebra = (partida_idx % 2 == 1)
@@ -866,10 +969,8 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
 
         if es_titulo:
             desc = escape(p.get("descripcion") or "")
-            item_txt = escape(p.get("item") or "")
             if nivel == 1:
                 desc = f'<u>{desc}</u>'
-                item_txt = f'<u>{item_txt}</u>'
             # Fila espaciadora antes del título — solo si el anterior NO es
             # nuestro padre directo. Si soy "01.01" justo después de "01"
             # (su primer hijo), no quiero gap; pero si soy un hermano o
@@ -886,14 +987,13 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             if necesita_spacer:
                 h = _spacer_h.get(nivel, 7)
                 rows.append(
-                    f'<tr class="spacer"><td colspan="6" '
+                    f'<tr class="spacer"><td colspan="5" '
                     f'style="border:none;background:white;'
                     f'font-size:{h}pt;line-height:{h}pt">&nbsp;</td></tr>'
                 )
             rows.append(
                 f'<tr class="{cls}">'
-                f'<td>{item_txt}</td>'
-                f'<td colspan="4">{_ind(_depth, desc)}</td>'
+                f'<td colspan="4">{_item_desc(p, desc, _depth, subrayar=(nivel == 1))}</td>'
                 f'<td class="r">{_fmt(total * factor, dec)}</td>'
                 f'</tr>'
             )
@@ -902,8 +1002,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             sty = f' style="{row_bg_inline}"' if row_bg_inline else ''
             rows.append(
                 f'<tr class="{cls}">'
-                f'<td{sty}>{escape(p.get("item") or "")}</td>'
-                f'<td{sty}>{_ind(_depth, escape(p.get("descripcion") or ""))}</td>'
+                f'<td{sty}>{_item_desc(p, escape(p.get("descripcion") or ""), _depth)}</td>'
                 f'<td class="c"{sty}>{escape(p.get("unidad") or "")}</td>'
                 f'<td class="r"{sty}>{_fmt(p.get("metrado"), get_decimales_metrado())}</td>'
                 f'<td class="r"{sty}>{_fmt((p.get("precio_unitario") or 0) * factor, dec)}</td>'
@@ -920,8 +1019,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         # para que actúe como divisor visual antes de los datos.
         '<table class="data" width="100%">'
         '<thead><tr>'
-        f'<th style="width:48pt;background:{_os_hp}">Ítem</th>'
-        f'<th style="background:{_os_hp}">Descripción</th>'
+        f'<th style="background:{_os_hp}">{_cabecera_item_desc(_W_ITEM)}</th>'
         f'<th style="width:40pt;text-align:center;background:{_os_hp}">Und</th>'
         f'<th style="width:70pt;text-align:right;background:{_os_hp}">Cantidad</th>'
         f'<th style="width:88pt;text-align:right;background:{_os_hp}">Precio</th>'
@@ -1860,15 +1958,36 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
     _dots = [(rp['p'].get('item') or '').count('.') for rp in partidas_data]
     _min_dots = min(_dots) if _dots else 0
 
+    # ── Ítem + Descripción en UNA celda ──────────────────────────────────
+    # Una columna Ítem de tabla mide lo que mide el código más largo y en las
+    # filas de códigos cortos sobra un hueco (captura de Marco, 9 sep 2026).
+    # En vez de dos columnas, cada fila lleva una tabla anidada [código |
+    # descripción]: el código ocupa un ancho fijo `_W_ITEM` (el de los
+    # códigos de hasta cinco tramos, medido con la fuente de su fila) y solo
+    # en una fila con código más largo esa celda se ensancha y empuja SU
+    # descripción — el mismo desborde del árbol del programa. Los anchos van
+    # en px del documento (1 pt = 4/3 px) como atributo HTML, que es lo que
+    # QTextDocument respeta como fijo.
+    def _fuente_kind(kind: str) -> tuple:
+        return {'n1': (9.5, True, True), 'tit': (9.0, True, False)}.get(kind, (8.5, False, False))
+
+    def _kind_de(rp) -> str:
+        if rp.get('sub'):
+            return 'n1'
+        if rp.get('titulo'):
+            return 'n1' if (rp.get('nivel') or 1) <= 1 else 'tit'
+        return 'part'
+
+    _W_ITEM = _w_item_fijo([(rp['p'].get('item') or '',) + _fuente_kind(_kind_de(rp))
+                            for rp in partidas_data])
+
+    def _item_desc(item: str, desc_html: str, depth: int, kind: str) -> str:
+        pt, bold, upper = _fuente_kind(kind)
+        return _celda_item_desc(item, desc_html, depth, pt=pt, bold=bold, w_fijo=_W_ITEM,
+                                ind_por_nivel=14, upper=upper, subrayar=(kind == 'n1'))
+
     def _ind(depth, inner_html):
-        if depth <= 0:
-            return inner_html
-        return (
-            '<table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>'
-            f'<td width="{depth * 14}" style="border:none;padding:0;'
-            'background:transparent"></td><td style="border:none;padding:0;'
-            f'background:transparent">{inner_html}</td></tr></table>'
-        )
+        return _ind_px_html(depth * 14, inner_html)
 
     def _build_chunk_table(k_start: int, k_end: int, is_first_chunk: bool) -> str:
         """Genera la tabla HTML para un rango de períodos [k_start, k_end).
@@ -1924,7 +2043,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
                     for k in range(k_start, k_end)
                 )
                 rows.append(
-                    f'<tr><td colspan="6" style="{_s_css}">'
+                    f'<tr><td colspan="5" style="{_s_css}">'
                     f'{escape(rp["sub"])}</td>{SEP_MED}{_celdas_s}'
                     f'<td style="{_s_css}"></td></tr>'
                 )
@@ -1960,8 +2079,9 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
                 _desc_html = f'{_u0}{_desc_t}{_u1}'
                 rows.append(
                     f'<tr>'
-                    f'<td style="{t_css}">{_u0}{escape(p.get("item") or "")}{_u1}</td>'
-                    f'<td colspan="5" style="{t_css}">{_ind(_depth, _desc_html)}</td>'
+                    f'<td colspan="5" style="{t_css}">'
+                    f'{_item_desc(p.get("item") or "", _desc_html, _depth, "n1" if niv <= 1 else "tit")}'
+                    f'</td>'
                     f'{SEP_MED}'
                     f'{celdas_per_titulo}'
                     f'<td style="{t_total_css}"></td>'
@@ -1989,8 +2109,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
             rows.append(
                 f'<tr>'
-                f'{_td(escape(p.get("item") or ""), bg=row_bg)}'
-                f'{_td(_ind(_depth, escape(p.get("descripcion") or "")), bg=row_bg)}'
+                f'{_td(_item_desc(p.get("item") or "", escape(p.get("descripcion") or ""), _depth, "part"), bg=row_bg)}'
                 f'{_td(escape(str(und_v)), bg=row_bg, align="center")}'
                 f'{_td(cant_txt, bg=row_bg, align="right")}'
                 f'{_td(pu_txt, bg=row_bg, align="right")}'
@@ -2041,7 +2160,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
                 tot_txt = _fmt(total_val, dec)
             return (
                 f'<tr>'
-                f'<td colspan="6" style="{css_lbl}">{lbl}</td>'
+                f'<td colspan="5" style="{css_lbl}">{lbl}</td>'
                 f'{sep_med}'
                 f'{cells}'
                 f'<td style="{css_val}">{tot_txt}</td>'
@@ -2063,8 +2182,9 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             f'style="border-collapse:collapse;width:100%;font-size:8.5pt;">'
             f'<thead>'
             f'<tr>'
-            f'<th rowspan="2" style="{head_css}width:48pt;text-align:left">Ítem</th>'
-            f'<th rowspan="2" style="{head_css}text-align:left">Descripción</th>'
+            # Ítem + Descripción: una sola columna con la cabecera anidada al
+            # mismo ancho fijo que las filas (ver `_item_desc`).
+            f'<th rowspan="2" style="{head_css}text-align:left">{_cabecera_item_desc(_W_ITEM)}</th>'
             f'<th rowspan="2" style="{head_css}width:30pt;text-align:center">Und</th>'
             f'<th rowspan="2" style="{head_css}width:52pt;text-align:right">Cantidad</th>'
             f'<th rowspan="2" style="{head_css}width:58pt;text-align:right">Precio</th>'
@@ -5160,7 +5280,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
             item = escape(f['item'] or '')
             cel_desc = escape(f['descripcion'] or '')
         if es_tit:
-            col = _NIVEL.get(min(max(niv, 1), 5), _NIVEL[5])
+            col = _NIVEL.get(min(max(niv, 1), N_NIVELES), _NIVEL[N_NIVELES])
             deco = 'text-transform:uppercase;letter-spacing:0.4pt;' if niv <= 1 else ''
             btop = f'border-top:1.2pt solid {SLATE_700};' if (niv <= 1 or total) else ''
             base_css = (f'{BORDER_TD}{btop}padding:5pt 6pt;color:{col};'

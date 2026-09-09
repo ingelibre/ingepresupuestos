@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QButtonGroup, QStyledItemDelegate, QStyle,
     QStyleOptionViewItem, QInputDialog, QSlider,
 )
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize, QMarginsF, Signal
+from PySide6.QtCore import Qt, QTimer, QRect, QRectF, QPointF, QSize, QMarginsF, Signal
 from PySide6.QtGui import (
+    QFontMetrics, QFontMetricsF,
     QFont, QColor, QBrush, QPen, QPainter, QPolygonF, QPainterPath, QPageLayout,
     QPainterPathStroker, QTransform, QLinearGradient,
 )
@@ -43,7 +44,7 @@ from core.pdf_reports import (
     cargar_logo as _cargar_logo_rep,
     _rect_logo,
 )
-from utils.formatting import fmt, parse_num
+from utils.formatting import fmt, parse_num, ITEM_TRAMOS_POR_LINEA
 from utils.theme import nivel_fg as _nivel_fg
 
 
@@ -1912,7 +1913,15 @@ class GanttWidget(QWidget):
         """)
         # Bg delegate para que setBackground por item se pinte siempre
         # (la QSS global del proyecto a veces lo ignora).
-        self.tbl.setItemDelegate(_BgFillDelegate(self.tbl))
+        # Cuadrícula desde los delegados y el código de ítem de largo sobre
+        # la Descripción cuando no cabe en su columna (60 px): igual que el
+        # árbol del presupuesto y el valorizado (Marco, 9 sep 2026).
+        self.tbl.setShowGrid(False)
+        self.tbl.setItemDelegate(_BgFillDelegate(self.tbl, grid='#E0E5EC'))
+        self._item_delegate = _ItemDesbordeDelegate(self.tbl, self.tbl, grid='#E0E5EC', col_item=1)
+        self._desc_delegate = _DescDesbordeDelegate(self.tbl, self._item_delegate, self.tbl, grid='#E0E5EC')
+        self.tbl.setItemDelegateForColumn(1, self._item_delegate)
+        self.tbl.setItemDelegateForColumn(2, self._desc_delegate)
         self.tbl.cellChanged.connect(self._on_cell_changed)
         self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl.customContextMenuRequested.connect(self._on_table_ctx_menu)
@@ -3171,17 +3180,37 @@ class GanttWidget(QWidget):
 
             # ── Columnas de la tabla ─────────────────────────────────────
             #   #, Ítem, Descripción, Cal, Lab, Inicio, Fin  (+ Pred opcional)
+            # Ítem: al código más largo hasta cinco tramos, medido con la
+            # fuente de título más grande que usan las filas (9 pt bold); los
+            # de más tramos siguen de largo sobre la Descripción (ver
+            # `_pdf_paint_tabla_filas`). Fechas: lo que mide «00/00/0000» en
+            # esa misma fuente, para que un título no salga «09/09/2…»
+            # (captura de Marco, 9 sep 2026). Antes eran 14 y 17 mm fijos.
+            _f_med = QFont(painter.font()); _f_med.setPointSizeF(9.0); _f_med.setBold(True)
+            _fm_med = QFontMetricsF(_f_med)
+            _items_pdf = [(pt.get('item') or '') for pt in partidas
+                          if len((pt.get('item') or '').split('.')) <= ITEM_TRAMOS_POR_LINEA]
+            _w_item = max([_fm_med.horizontalAdvance(i) for i in _items_pdf] or [0]) + mm(3)
+            _w_fecha = _fm_med.horizontalAdvance('00/00/0000') + mm(2.5)
             col_defs = [
                 ('id',           mm(9),  Qt.AlignCenter),
-                ('Ítem',         mm(14), Qt.AlignLeft | Qt.AlignVCenter),
+                ('Ítem',         max(mm(14), _w_item), Qt.AlignLeft | Qt.AlignVCenter),
                 ('Descripción',  mm(50), Qt.AlignLeft | Qt.AlignVCenter),
                 ('Días\ncal.',   mm(10), Qt.AlignCenter),
                 ('Días\nlab.',   mm(10), Qt.AlignCenter),
-                ('Inicio',       mm(17), Qt.AlignCenter),
-                ('Fin',          mm(17), Qt.AlignCenter),
+                ('Inicio',       max(mm(17), _w_fecha), Qt.AlignCenter),
+                ('Fin',          max(mm(17), _w_fecha), Qt.AlignCenter),
             ]
             if incluir_pred:
                 col_defs.append(('Pred.', mm(18), Qt.AlignCenter))
+            # Descripción: al texto más largo (con su sangría y su fuente),
+            # entre 50 mm y un tercio del ancho de página; lo que no quepa
+            # ni así se parte en DOS líneas (ver `_pdf_row_heights`), y esa
+            # fila es más alta tanto en la tabla como en las barras (Marco,
+            # 9 sep 2026: los textos salían «…»). Antes: 50 mm fijos y elipsis.
+            _desc_need = self._pdf_desc_width(painter, partidas, mm(5.0))
+            _desc_w = max(mm(50), min(PG_W * 0.34, _desc_need))
+            col_defs[2] = ('Descripción', _desc_w, Qt.AlignLeft | Qt.AlignVCenter)
             TABLE_W = sum(w for _, w, _ in col_defs)
 
             gantt_x = TABLE_W
@@ -3202,11 +3231,14 @@ class GanttWidget(QWidget):
             # queda escalado coherentemente cuando hay muchas partidas.
             if modo == 'fit':
                 rows_total = max(1, len(partidas))
-                # iterar: HDR_TIME_H depende de row_h_pdf que depende de HDR_TIME_H
+                # iterar: HDR_TIME_H depende de row_h_pdf que depende de HDR_TIME_H.
+                # `units` = filas contando 1.75 las de dos líneas.
+                units = float(rows_total)
                 for _ in range(4):
                     rows_area_h = body_h - HDR_TIME_H
-                    rh = rows_area_h / rows_total
+                    rh = rows_area_h / units
                     rh = max(mm(1.5), min(mm(7.0), rh))
+                    units = sum(self._pdf_row_heights(painter, partidas, col_defs, rh)) / rh
                     ideal_hdr = max(mm(4.0), min(mm(11.0), rh * 2.0))
                     if abs(ideal_hdr - HDR_TIME_H) < mm(0.3):
                         HDR_TIME_H = ideal_hdr
@@ -3214,20 +3246,27 @@ class GanttWidget(QWidget):
                     HDR_TIME_H = ideal_hdr
                 COL_HDR_H = HDR_TIME_H
                 rows_area_h = body_h - HDR_TIME_H
-                row_h_pdf = max(mm(1.5), min(mm(7.0), rows_area_h / rows_total))
+                row_h_pdf = max(mm(1.5), min(mm(7.0), rows_area_h / units))
+                row_hs_pdf = self._pdf_row_heights(painter, partidas, col_defs, row_h_pdf)
                 rows_chunks = [(0, len(partidas))]
                 day_w_pdf  = gantt_w / (n_dias + lead)
                 days_per_page = [n_dias]
             else:
-                # Múltiples hojas: escala "real" y se pagina
+                # Múltiples hojas: escala "real" y se pagina acumulando las
+                # alturas reales de fila (las de dos líneas son más altas).
                 rows_area_h = body_h - HDR_TIME_H
                 row_h_pdf  = mm(5.0)
-                rows_per_page = max(1, int(rows_area_h // row_h_pdf))
+                row_hs_pdf = self._pdf_row_heights(painter, partidas, col_defs, row_h_pdf)
                 rows_chunks = []
                 idx = 0
                 while idx < len(partidas):
-                    rows_chunks.append((idx, min(idx + rows_per_page, len(partidas))))
-                    idx += rows_per_page
+                    fin, acc = idx, 0.0
+                    while fin < len(partidas) and acc + row_hs_pdf[fin] <= rows_area_h:
+                        acc += row_hs_pdf[fin]
+                        fin += 1
+                    fin = max(fin, idx + 1)
+                    rows_chunks.append((idx, fin))
+                    idx = fin
 
                 if hojas_x and hojas_x > 0:
                     # Reparto controlado por el usuario: dividir n_dias en exactamente
@@ -3304,6 +3343,7 @@ class GanttWidget(QWidget):
                         painter, 0, body_top + COL_HDR_H,
                         TABLE_W, rows_area_h - COL_HDR_H,
                         col_defs, partidas, tasks, cmap, r0, r1, row_h_pdf,
+                        row_hs_pdf,
                     )
 
                     # Cabecera de tiempo del gantt
@@ -3316,7 +3356,7 @@ class GanttWidget(QWidget):
                         painter, gantt_x, body_top + HDR_TIME_H,
                         page_gantt_w, rows_area_h - 0,
                         partidas, tasks, cmap, r0, r1, d_ini, d_fin,
-                        row_h_pdf, day_w_pdf, f_ini,
+                        row_h_pdf, day_w_pdf, f_ini, row_hs_pdf,
                     )
 
                     # Marco general de la zona de cuerpo
@@ -3552,9 +3592,99 @@ class GanttWidget(QWidget):
             p.drawLine(QPointF(cx, y + h * 0.18), QPointF(cx, y + h * 0.82))
         p.restore()
 
+    # ── Descripción del PDF: ancho medido y filas de dos líneas ───────────
+    @staticmethod
+    def _pdf_fuentes_fila(p, row_h):
+        """(f_body, f_title) para una altura de fila — la misma regla que
+        `_pdf_paint_tabla_filas`, para que medir y pintar coincidan."""
+        dpi = p.device().logicalDpiX()
+        row_h_pt = row_h * 72.0 / dpi
+        body_pt  = max(4.5, min(8.5, row_h_pt * 0.55))
+        title_pt = max(5.0, min(9.0, row_h_pt * 0.60))
+        f_body = QFont(p.font());  f_body.setPointSizeF(body_pt);   f_body.setBold(False)
+        f_title = QFont(p.font()); f_title.setPointSizeF(title_pt); f_title.setBold(True)
+        return f_body, f_title
+
+    @staticmethod
+    def _pdf_desc_texto(pt) -> str:
+        """El texto de la columna Descripción tal como se pinta (con la
+        sangría de espacios por nivel y el rombo de los hitos)."""
+        niv = (pt.get('nivel') or 1) - 1
+        desc = pt.get('descripcion') or ''
+        virtual = pt.get('_virtual')
+        if virtual in ('inicio', 'fin'):
+            return "◆ " + desc
+        if niv > 0 and not virtual:
+            return ('  ' * niv) + desc
+        return desc
+
+    def _pdf_desc_width(self, p, partidas, row_h) -> float:
+        """Ancho de columna que necesita la descripción más larga (en una
+        línea), con la fuente que le toca a su fila."""
+        f_body, f_title = self._pdf_fuentes_fila(p, row_h)
+        fm_b, fm_t = QFontMetricsF(f_body), QFontMetricsF(f_title)
+        w = 0.0
+        for pt in partidas:
+            fm = fm_t if pt.get('es_titulo') else fm_b
+            w = max(w, fm.horizontalAdvance(self._pdf_desc_texto(pt)))
+        return w + 8
+
+    def _pdf_row_heights(self, p, partidas, col_defs, row_h) -> list:
+        """Altura de cada fila: `row_h`, o `row_h * 1.75` si su descripción
+        no cabe en una línea de la columna (se pinta en dos). La misma lista
+        la usan la tabla, las barras y la paginación: es lo que mantiene
+        alineadas tabla y barras."""
+        f_body, f_title = self._pdf_fuentes_fila(p, row_h)
+        fm_b, fm_t = QFontMetricsF(f_body), QFontMetricsF(f_title)
+        cw = col_defs[2][1] - 4 if len(col_defs) > 2 else 0
+        out = []
+        for pt in partidas:
+            fm = fm_t if pt.get('es_titulo') else fm_b
+            # Lo que el código de ítem se pasa de su columna se lo come a la
+            # descripción (ver `desc_shift` al pintar).
+            ancho = cw - self._pdf_desc_shift(fm, pt, col_defs, p.device().logicalDpiX())
+            dos = cw > 0 and fm.horizontalAdvance(self._pdf_desc_texto(pt)) > ancho
+            out.append(row_h * 1.75 if dos else row_h)
+        return out
+
+    @staticmethod
+    def _pdf_desc_shift(fm, pt, col_defs, dpi: float) -> float:
+        """Cuánto se corre la descripción cuando el código de ítem no cabe
+        en su columna (misma cuenta que al pintar; 0 si cabe). `dpi` es la
+        del dispositivo del PDF: con una aproximación a 96 dpi la cuenta
+        salía en otras unidades y filas que cabían se creían de dos líneas."""
+        if len(col_defs) < 3:
+            return 0.0
+        cw_item = col_defs[1][1]
+        w_txt = fm.horizontalAdvance(pt.get('item') or '')
+        if w_txt <= cw_item - 4:
+            return 0.0
+        return w_txt + 2 * dpi / 25.4 - (cw_item - 2)
+
+    @staticmethod
+    def _pdf_dos_lineas(fm, txt: str, w: float) -> list:
+        """Parte `txt` en hasta dos líneas de ancho `w` (por palabras); la
+        segunda se elide si sobra. Los espacios iniciales son la sangría de
+        jerarquía: se conservan en las DOS líneas (sin esto, una fila de dos
+        líneas perdía su sangría — captura de Marco, 9 sep 2026)."""
+        lead = txt[:len(txt) - len(txt.lstrip(' '))]
+        cuerpo = txt.lstrip(' ')
+        w_util = w - fm.horizontalAdvance(lead)
+        palabras = cuerpo.split(' ')
+        l1, i = '', 0
+        while i < len(palabras):
+            cand = (l1 + ' ' + palabras[i]) if l1 else palabras[i]
+            if fm.horizontalAdvance(cand) > w_util and l1:
+                break
+            l1, i = cand, i + 1
+        resto = ' '.join(palabras[i:]).strip()
+        if not resto:
+            return [lead + l1]
+        return [lead + l1, lead + fm.elidedText(resto, Qt.ElideRight, int(w_util))]
+
     def _pdf_paint_tabla_filas(self, p, x, y, w, max_h,
                                   col_defs, partidas, tasks, cmap,
-                                  r0, r1, row_h):
+                                  r0, r1, row_h, row_hs=None):
         from core.cronograma import contar_laborables, formatear_pred_es
         p.save()
         dpi = p.device().logicalDpiX()
@@ -3575,6 +3705,7 @@ class GanttWidget(QWidget):
         for r in range(r0, r1):
             pt = partidas[r]
             es_titulo = bool(pt['es_titulo'])
+            hr = row_hs[r] if row_hs else row_h      # alto REAL de esta fila
             cd = cmap.get(pt['id'], {})
             t = tasks.get(pt['id'], {})
 
@@ -3631,7 +3762,7 @@ class GanttWidget(QWidget):
                 p.setBrush(QBrush(QColor("#FAFBFC")))
             else:
                 p.setBrush(QBrush(QColor("white")))
-            p.drawRect(QRectF(x, cur_y, w, row_h))
+            p.drawRect(QRectF(x, cur_y, w, hr))
 
             # Texto por celda
             p.setFont(f_title if es_titulo else f_body)
@@ -3648,8 +3779,9 @@ class GanttWidget(QWidget):
             # Subrayar SOLO los títulos de nivel 1 (no subtítulos ni partidas).
             is_main_title = es_titulo and (pt.get('nivel') or 0) == 1
             cx = x
+            desc_shift = 0.0   # cuánto se corre la Descripción si el Ítem desborda
             for idx, (val, (label, cw, align)) in enumerate(zip(row_vals, col_defs)):
-                rect_cell = QRectF(cx + 2, cur_y, cw - 4, row_h)
+                rect_cell = QRectF(cx + 2, cur_y, cw - 4, hr)
                 # Fuente fresca por celda (evita arrastrar estado): subrayado en
                 # el código/nombre de los títulos de nivel 1; bold en críticas.
                 cell_critical = critical and not es_titulo and idx == 1
@@ -3663,28 +3795,53 @@ class GanttWidget(QWidget):
                 # Elide manual si el texto excede
                 fm = p.fontMetrics()
                 txt = val
-                if fm.horizontalAdvance(txt) > cw - 4:
+                clip = QRectF(rect_cell)
+                if idx == 1 and fm.horizontalAdvance(txt) > cw - 4 and len(col_defs) > 2:
+                    # El código de ítem no cabe: sigue de largo sobre la
+                    # Descripción (como en el árbol y en Excel) en vez de
+                    # recortarse en «01.02.…»; la descripción se corre.
+                    _w_txt = fm.horizontalAdvance(txt)
+                    rect_cell = QRectF(cx + 2, cur_y, _w_txt + 2, hr)
+                    clip = QRectF(cx + 2, cur_y, cw + col_defs[2][1] - 4, hr)
+                    desc_shift = _w_txt + mm(2) - (cw - 2)
+                elif idx == 2 and desc_shift > 0:
+                    rect_cell = QRectF(cx + 2 + desc_shift, cur_y,
+                                       max(mm(8), cw - 4 - desc_shift), hr)
+                    clip = QRectF(rect_cell)
+                    if fm.horizontalAdvance(txt) > rect_cell.width():
+                        if hr > row_h:
+                            txt = '\n'.join(self._pdf_dos_lineas(fm, txt, rect_cell.width()))
+                        else:
+                            txt = fm.elidedText(txt, Qt.ElideRight, int(rect_cell.width()))
+                elif idx == 2 and hr > row_h and fm.horizontalAdvance(txt) > cw - 4:
+                    # Fila de dos líneas: la descripción se parte por palabras.
+                    txt = '\n'.join(self._pdf_dos_lineas(fm, txt, cw - 4))
+                elif fm.horizontalAdvance(txt) > cw - 4:
                     txt = fm.elidedText(txt, Qt.ElideRight, int(cw - 4))
                 # Clip al rect de celda para evitar cualquier desbordamiento
                 p.save()
-                p.setClipRect(rect_cell)
+                p.setClipRect(clip)
                 p.drawText(rect_cell, int(align), txt)
                 p.restore()
                 cx += cw
 
             # Borde inferior de fila
             p.setPen(QPen(QColor("#E8EAED"), max(1, mm(0.1))))
-            p.drawLine(QPointF(x, cur_y + row_h), QPointF(x + w, cur_y + row_h))
+            p.drawLine(QPointF(x, cur_y + hr), QPointF(x + w, cur_y + hr))
 
-            cur_y += row_h
+            cur_y += hr
             if cur_y > y + max_h:
                 break
 
-        # Separadores verticales de columnas
+        # Separadores verticales de columnas. El de Ítem|Descripción no se
+        # pinta: cruzaría los códigos que siguen de largo sobre la
+        # Descripción, y la sangría ya separa las dos columnas.
         p.setPen(QPen(QColor("#D4D4D4"), max(1, mm(0.12))))
         cx = x
-        for _, cw, _ in col_defs[:-1]:
+        for _i, (_, cw, _) in enumerate(col_defs[:-1]):
             cx += cw
+            if _i == 1:
+                continue
             p.drawLine(QPointF(cx, y), QPointF(cx, min(cur_y, y + max_h)))
         # Borde derecho de la tabla
         p.drawLine(QPointF(x + w, y), QPointF(x + w, min(cur_y, y + max_h)))
@@ -3906,15 +4063,25 @@ class GanttWidget(QWidget):
 
     def _pdf_paint_gantt_body(self, p, x, y, w, max_h,
                                  partidas, tasks, cmap, r0, r1,
-                                 d_ini, d_fin, row_h, day_w_pdf, f_ini):
+                                 d_ini, d_fin, row_h, day_w_pdf, f_ini,
+                                 row_hs=None):
         """Pinta el slice del cuerpo del gantt para filas [r0,r1) y
-        días [d_ini,d_fin]."""
+        días [d_ini,d_fin]. `row_hs` = alto real de cada fila (la misma
+        lista que usa la tabla); `row_h` sigue siendo el alto base, del que
+        salen los tamaños de barras, rombos y letra."""
         p.save()
+        # Tope de cada fila, acumulando alturas reales: ES lo que mantiene
+        # las barras a la altura de su fila de la tabla.
+        _tops, _acc = {}, y
+        for _r in range(r0, r1):
+            _tops[_r] = _acc
+            _acc += (row_hs[_r] if row_hs else row_h)
+        _alto = (lambda _r: row_hs[_r] if row_hs else row_h)
         dpi = p.device().logicalDpiX()
         mm = lambda v: v * dpi / 25.4
 
         days_total = d_fin - d_ini + 1
-        h_total = (r1 - r0) * row_h
+        h_total = sum(_alto(_r) for _r in range(r0, r1))
         # Clip al área del gantt
         p.setClipRect(QRectF(x, y, w, h_total))
 
@@ -3960,7 +4127,7 @@ class GanttWidget(QWidget):
         # verticales. Van bajo las barras.
         p.setPen(QPen(QColor("#CDD3DB"), max(1, mm(0.08)), Qt.DotLine))
         for r in range(r0, r1):
-            ly = y + (r - r0 + 1) * row_h
+            ly = _tops[r] + _alto(r)
             p.drawLine(QPointF(x, ly), QPointF(x + w, ly))
 
         # ── Cuerpo ────────────────────────────────────────────────────────
@@ -3968,7 +4135,8 @@ class GanttWidget(QWidget):
         for r in range(r0, r1):
             pt = partidas[r]
             es_titulo = bool(pt['es_titulo'])
-            yy = y + (r - r0) * row_h
+            yy = _tops[r]
+            hr = _alto(r)
 
             virtual = pt.get('_virtual')
             # Resumen del proyecto / subpresupuesto: barra resumen del rango.
@@ -3978,7 +4146,7 @@ class GanttWidget(QWidget):
                 if b0 >= a0:
                     bx = x + (a0 - d_ini) * day_w_pdf
                     bw = (b0 - a0 + 1) * day_w_pdf
-                    by = yy + row_h / 2 - max(1, mm(0.5))
+                    by = yy + hr / 2 - max(1, mm(0.5))
                     bh = max(1.8, mm(1.1))
                     p.setPen(Qt.NoPen)
                     p.setBrush(QBrush(QColor("#0F1419")))
@@ -3988,7 +4156,7 @@ class GanttWidget(QWidget):
             # Hitos virtuales (Inicio/Fin): diamante azul/verde.
             if virtual:
                 dia = pt.get('_ES') or 1
-                cy = yy + row_h / 2
+                cy = yy + hr / 2
                 # Registrar el hito en row_info ANTES del chequeo de slice — así
                 # las flechas de predecesoras que salen del hito de Inicio (o
                 # entran al de Fin) se dibujan (espejo de la UI en pantalla).
@@ -4023,7 +4191,7 @@ class GanttWidget(QWidget):
                     if b >= a:
                         bx = x + (a - d_ini) * day_w_pdf
                         bw = (b - a + 1) * day_w_pdf
-                        by = yy + row_h / 2 - max(1, mm(0.5))
+                        by = yy + hr / 2 - max(1, mm(0.5))
                         bh = max(1.8, mm(1.1))
                         p.setRenderHint(QPainter.Antialiasing, True)
                         # Gradiente sutil slate-900 → slate-700 (look MS Project)
@@ -4062,7 +4230,7 @@ class GanttWidget(QWidget):
             critical = bool(t.get('critical'))
             if es <= 0:
                 continue
-            row_info[pt['id']] = {'y_center': yy + row_h / 2,
+            row_info[pt['id']] = {'y_center': yy + hr / 2,
                                     'ES': es, 'EF': ef, 'critical': critical}
 
             # Hito puro (sin duración): solo diamante, sin barra
@@ -4070,7 +4238,7 @@ class GanttWidget(QWidget):
                 if es < d_ini or es > d_fin:
                     continue
                 cx = x + (es - d_ini) * day_w_pdf + day_w_pdf / 2
-                cy = yy + row_h / 2
+                cy = yy + hr / 2
                 s = max(2.2, min(row_h * 0.38, mm(2.2)))
                 p.setRenderHint(QPainter.Antialiasing, True)
                 poly = QPolygonF([
@@ -4137,7 +4305,7 @@ class GanttWidget(QWidget):
                 b = min(d_e, d_fin)
                 bx = x + (a - d_ini) * day_w_pdf
                 bw = (b - a + 1) * day_w_pdf
-                by = yy + row_h * 0.18
+                by = yy + (hr - row_h * 0.64) / 2
                 bh = row_h * 0.64
                 p.setRenderHint(QPainter.Antialiasing, True)
                 rect_bar = QRectF(bx, by, bw, bh)
@@ -4203,7 +4371,7 @@ class GanttWidget(QWidget):
                 # Línea entrecortada uniendo segmentos consecutivos
                 seg_spans_pdf.sort()
                 if len(seg_spans_pdf) >= 2:
-                    cy = yy + row_h / 2
+                    cy = yy + hr / 2
                     link_col = QColor("#A10705") if critical else QColor("#94A3B8")
                     pen_link = QPen(link_col, max(0.5, mm(0.15)), Qt.DashLine)
                     pen_link.setDashPattern([2.5, 2.5])
@@ -4225,7 +4393,7 @@ class GanttWidget(QWidget):
                     if fa <= fb:
                         fx = x + (fa - d_ini) * day_w_pdf
                         fw = (fb - fa + 1) * day_w_pdf
-                        fy = yy + row_h / 2 - max(0.6, mm(0.25))
+                        fy = yy + hr / 2 - max(0.6, mm(0.25))
                         p.setPen(Qt.NoPen)
                         p.setBrush(QBrush(QColor(148, 163, 184, 140)))
                         p.drawRect(QRectF(fx, fy, fw, max(1.2, mm(0.6))))
@@ -4243,7 +4411,7 @@ class GanttWidget(QWidget):
                 m_day = es if es_hito == 2 else ef + 1
                 if d_ini <= m_day <= d_fin + 1:
                     m_x = x + (m_day - d_ini) * day_w_pdf
-                    m_y = yy + row_h / 2
+                    m_y = yy + hr / 2
                     sm = max(2.2, min(row_h * 0.36, mm(2.0)))
                     fill_m = QColor("#3689E6") if es_hito == 2 else QColor("#3A9104")
                     border_m = QColor("#1E5DA8") if es_hito == 2 else QColor("#206700")
@@ -6812,7 +6980,29 @@ class _BgFillDelegate(QStyledItemDelegate):
     Qt entre en modo QSS-rendering y descarte el BackgroundRole por
     defecto."""
 
+    # Cuadrícula pintada por el delegado (en vez de `showGrid`): la del
+    # QTableView se dibuja DESPUÉS de todas las celdas y cruzaba el código
+    # de ítem que desborda sobre la Descripción (ver `_ItemDesbordeDelegate`).
+    # Solo la usa el panel izquierdo del valorizado; None = como siempre.
+    def __init__(self, parent=None, grid: str | None = None):
+        super().__init__(parent)
+        self._grid = QColor(grid) if grid else None
+
+    def _cuadricula(self, painter, rect, *, derecha: bool = True):
+        if self._grid is None:
+            return
+        painter.save()
+        painter.setPen(QPen(self._grid, 1))
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        if derecha:
+            painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+        painter.restore()
+
     def paint(self, painter, option, index):
+        self._pintar(painter, option, index)
+        self._cuadricula(painter, option.rect)
+
+    def _pintar(self, painter, option, index):
         # Si el item está seleccionado dejamos el comportamiento default
         # (la regla `::item:selected` de QSS pinta el resaltado).
         if option.state & QStyle.State_Selected:
@@ -6828,6 +7018,88 @@ class _BgFillDelegate(QStyledItemDelegate):
             opt.backgroundBrush = QBrush(Qt.transparent)
             return super().paint(painter, opt, index)
         return super().paint(painter, option, index)
+
+
+class _ItemDesbordeDelegate(_BgFillDelegate):
+    """Columna Ítem del valorizado (fija, 60 px): si el código no cabe, esta
+    celda pinta solo su fondo y el código entero lo pinta la columna
+    Descripción de largo sobre las dos —como en el árbol del presupuesto y
+    como Excel con una celda que desborda— (Marco, 9 sep 2026). Así no hay
+    costura: el texto se dibuja UNA vez, desde una sola x."""
+
+    # Donde el estilo empieza a pintar el texto: padding-left 8 del QSS
+    # `QTableWidget::item` + el margen de texto del estilo (3). Se usa la
+    # misma cifra como margen derecho: si con eso no cabe, el estilo lo
+    # habría recortado con «…», así que se pinta de largo.
+    PAD = 11
+
+    def __init__(self, table, parent=None, grid: str | None = None, col_item: int = 0):
+        super().__init__(parent, grid)
+        self._tbl = table
+        self._col_item = col_item     # en el Gantt la columna Ítem es la 1 (la 0 es «#»)
+
+    def desborde(self, index):
+        """(texto, x, ancho, fuente, color) si el código de la columna Ítem
+        de esa fila no cabe en ella; None si cabe."""
+        idx0 = index.siblingAtColumn(self._col_item)
+        text = str(idx0.data(Qt.DisplayRole) or '')
+        if not text:
+            return None
+        font = idx0.data(Qt.FontRole) or self._tbl.font()
+        w = QFontMetrics(font).horizontalAdvance(text)
+        col_x = self._tbl.columnViewportPosition(self._col_item)
+        x = col_x + self.PAD
+        if x + w <= col_x + self._tbl.columnWidth(self._col_item) - self.PAD:
+            return None
+        fg = idx0.data(Qt.ForegroundRole)
+        color = fg.color() if isinstance(fg, QBrush) else (fg if isinstance(fg, QColor) else QColor("#273445"))
+        return text, x, w, font, color
+
+    def paint(self, painter, option, index):
+        if option.state & QStyle.State_Selected or self.desborde(index) is None:
+            return super().paint(painter, option, index)
+        bg = index.data(Qt.BackgroundRole)
+        painter.fillRect(option.rect, bg if isinstance(bg, QBrush) else QBrush(bg or QColor('#FFFFFF')))
+        self._cuadricula(painter, option.rect, derecha=False)   # sin raya sobre el código
+
+
+class _DescDesbordeDelegate(_BgFillDelegate):
+    """Columna Descripción del valorizado: pinta el código de la columna Ítem
+    cuando desborda (ver `_ItemDesbordeDelegate`) y corre la descripción lo
+    justo para no pisarlo."""
+
+    def __init__(self, table, item_delegate: _ItemDesbordeDelegate, parent=None,
+                 grid: str | None = None):
+        super().__init__(parent, grid)
+        self._tbl = table
+        self._item_del = item_delegate
+
+    def paint(self, painter, option, index):
+        des = None if option.state & QStyle.State_Selected else self._item_del.desborde(index)
+        if des is None:
+            return super().paint(painter, option, index)
+        d_text, d_x, d_w, d_font, d_color = des
+        painter.save()
+        bg = index.data(Qt.BackgroundRole)
+        painter.fillRect(option.rect, bg if isinstance(bg, QBrush) else QBrush(bg or QColor('#FFFFFF')))
+        # El código, desde su x en la columna Ítem (la celda de al lado ya
+        # pintó solo su fondo). Sin recorte a esta celda: el QTableView no
+        # recorta por celda y las pinta de izquierda a derecha.
+        painter.setFont(d_font)
+        painter.setPen(d_color)
+        painter.drawText(QRect(d_x, option.rect.top(), d_w + 4, option.rect.height()),
+                         Qt.AlignLeft | Qt.AlignVCenter, d_text)
+        # La descripción, corrida a la derecha del código.
+        font = index.data(Qt.FontRole) or option.font
+        fg = index.data(Qt.ForegroundRole)
+        painter.setFont(font)
+        painter.setPen(fg.color() if isinstance(fg, QBrush) else (fg if isinstance(fg, QColor) else QColor("#273445")))
+        left = max(option.rect.left() + _ItemDesbordeDelegate.PAD, d_x + d_w + 10)
+        painter.setClipRect(option.rect)
+        painter.drawText(QRect(left, option.rect.top(), option.rect.right() - left - 4, option.rect.height()),
+                         Qt.AlignLeft | Qt.AlignVCenter, str(index.data(Qt.DisplayRole) or ''))
+        painter.restore()
+        self._cuadricula(painter, option.rect)
 
 
 class ValorizadoWidget(QWidget):
@@ -6997,6 +7269,17 @@ class ValorizadoWidget(QWidget):
         self._bg_delegate = _BgFillDelegate(self)
         for tbl_ in (self.tbl_l, self.tbl_r, self.tbl_lf, self.tbl_rf):
             tbl_.setItemDelegate(self._bg_delegate)
+        # Ítem que no cabe en su columna: sigue de largo sobre la Descripción.
+        # El panel izquierdo pinta su cuadrícula desde los delegados (la del
+        # QTableView se dibuja encima de las celdas y cruzaba el código).
+        _GRID_L = '#E0E5EC'
+        self.tbl_l.setShowGrid(False)
+        self._bg_delegate_l = _BgFillDelegate(self, grid=_GRID_L)
+        self.tbl_l.setItemDelegate(self._bg_delegate_l)
+        self._item_delegate = _ItemDesbordeDelegate(self.tbl_l, self, grid=_GRID_L)
+        self._desc_delegate = _DescDesbordeDelegate(self.tbl_l, self._item_delegate, self, grid=_GRID_L)
+        self.tbl_l.setItemDelegateForColumn(0, self._item_delegate)
+        self.tbl_l.setItemDelegateForColumn(1, self._desc_delegate)
 
         # Padding mínimo (sin exceso) — el ancho dinámico de columna ya da
         # respiración visual cuando hay pocos períodos. Con muchas semanas,
@@ -7985,9 +8268,13 @@ class ValorizadoWidget(QWidget):
                               end_row=row_idx, end_column=3)
 
         # ── Anchos de columna ANTES del header (necesario para wrap calc) ─
-        ws.column_dimensions['A'].width = 11   # Ítem
-        ws.column_dimensions['B'].width = 18   # Descripción parte 1
-        ws.column_dimensions['C'].width = 24   # Descripción parte 2
+        _filas_w = (getattr(self, '_filas_render', None)
+                    or getattr(self._cv, '_partidas', None) or [])
+        _max_item = max((len(p.get('item') or '') for p in _filas_w), default=0)
+        _w_a = max(12, min(_max_item, 14) + 2)
+        ws.column_dimensions['A'].width = _w_a          # Ítem (12–16, hasta cinco tramos)
+        ws.column_dimensions['B'].width = 29 - _w_a     # Descripción parte 1 (A+B = 29)
+        ws.column_dimensions['C'].width = 42 - (29 - _w_a)   # Descripción parte 2 (B+C = 42)
         ws.column_dimensions['D'].width = 7    # Und
         ws.column_dimensions['E'].width = 13   # Cantidad
         ws.column_dimensions['F'].width = 14   # Precio
@@ -8121,20 +8408,41 @@ class ValorizadoWidget(QWidget):
         # sub-presupuesto): este export indexa por número de fila.
         partidas = (getattr(self, '_filas_render', None)
                     or getattr(self._cv, '_partidas', None) or [])
-        # Colores de título por nivel = espejo del PDF (_NIVEL_COL) y del
-        # programa: N1 rojo, N2 arándano, N3 morado, N4 rosa, default marrón.
-        NIVEL_COL_X = {1: 'B71C1C', 2: '0D52BF', 3: '6A1B9A', 4: 'AD1457'}
+        # Colores de título por nivel = los del esquema activo, como el PDF
+        # (nueve niveles desde el 9 sep 2026; antes una copia de cuatro).
+        from core.pdf_reports import colores_titulos as _colores_titulos, N_NIVELES as _N_NIV
+        NIVEL_COL_X = {k: v.lstrip('#').upper() for k, v in _colores_titulos().items()}
         # Profundidad para la sangría (tabs) de la columna Descripción =
         # item.count('.') - min_dots (igual que el PDF / Presupuesto).
         _dots = [(p.get('item') or '').count('.') for p in partidas if p.get('item')]
         _min_dots = min(_dots) if _dots else 0
         def _depth_of(p):
             return max(0, (p.get('item') or '').count('.') - _min_dots)
-        def _desc_align(depth):
+        # Ítem de más de cinco tramos: la descripción pasa a la col C y la B
+        # queda VACÍA y sin merge, así el código de la col A sigue de largo
+        # sobre ella (Excel solo desborda sobre una vecina vacía) — igual que
+        # el Excel del presupuesto y el árbol del programa (Marco, 9 sep
+        # 2026). La col A se ajusta al código más largo hasta cinco tramos.
+        def _desborda(p) -> bool:
+            return len((p.get('item') or '').split('.')) > ITEM_TRAMOS_POR_LINEA
+        def _col_desc(p) -> int:
+            return 3 if _desborda(p) else 2
+        # La celda del ítem lleva ajuste de texto (align_left); si desborda
+        # NO debe envolverse dentro de la col A, tiene que seguir de largo.
+        _align_item_desb = Alignment(horizontal='left', vertical='center', wrap_text=False)
+        def _align_item(p):
+            return _align_item_desb if _desborda(p) else align_left
+        def _depth_alto(p) -> int:
+            """Sangría efectiva para estimar la altura: la reducida si va en C."""
+            dp = _depth_of(p)
+            return max(0, dp - 5) if _desborda(p) else dp
+        def _desc_align(depth, p=None):
+            if p is not None and _desborda(p):
+                depth = max(0, depth - 5)
             return (Alignment(horizontal='left', vertical='center',
                                wrap_text=True, indent=depth) if depth else align_left)
 
-        def _alto_desc(texto: str, depth: int, bold: bool = False) -> float:
+        def _alto_desc(texto: str, depth: int, bold: bool = False, menos: int = 0) -> float:
             """Alto de fila (pts) para que la Descripción mergeada B+C con
             wrap_text NO se corte. Excel no auto-ajusta el alto en celdas
             MERGEADAS con wrap, así que lo estimamos: ancho útil ≈ B+C menos
@@ -8142,7 +8450,7 @@ class ValorizadoWidget(QWidget):
 
             `bold=True` (títulos/subtítulos) usa un ancho menor: el texto en
             negrita es más ancho → caben menos caracteres por línea."""
-            ancho = (38 if bold else 42) - depth * 3   # B(18)+C(24) útiles − sangría
+            ancho = (38 if bold else 42) - depth * 3 - menos   # B+C útiles − sangría
             if ancho < 12:
                 ancho = 12
             lineas = 0
@@ -8191,7 +8499,7 @@ class ValorizadoWidget(QWidget):
                     t_bdr    = border_title1
                     text_tx  = lambda s: (s or '').upper()
                 else:
-                    t_color  = NIVEL_COL_X.get(niv, '92400E')
+                    t_color  = NIVEL_COL_X.get(min(niv, _N_NIV), NIVEL_COL_X[_N_NIV])
                     t_size   = 10
                     t_bdr    = border_title2
                     text_tx  = lambda s: (s or '')
@@ -8202,17 +8510,21 @@ class ValorizadoWidget(QWidget):
                 # Col 1 = Ítem; col 2 = Descripción (merged con col 3); resto
                 # vacío; col n_cols = parcial del título.
                 cell = ws.cell(row=row, column=1, value=text_tx(p.get('item') or ''))
-                cell.font = t_font_u; cell.alignment = align_left; cell.border = t_bdr
+                cell.font = t_font_u; cell.alignment = _align_item(p); cell.border = t_bdr
                 _desc_txt = text_tx(p.get('descripcion') or '')
-                cell = ws.cell(row=row, column=2, value=_desc_txt)
-                cell.font = t_font_u; cell.alignment = _desc_align(_depth_of(p))
+                cell = ws.cell(row=row, column=_col_desc(p), value=_desc_txt)
+                cell.font = t_font_u; cell.alignment = _desc_align(_depth_of(p), p)
                 cell.border = t_bdr
-                ws.row_dimensions[row].height = _alto_desc(_desc_txt, _depth_of(p), bold=True)
-                # Cols 3..n_cols vacías (col 3 ya parte del merge B+C)
-                for c in range(3, n_cols + 1):
+                ws.row_dimensions[row].height = _alto_desc(
+                    _desc_txt, _depth_alto(p), bold=True, menos=14 if _desborda(p) else 0)
+                # El resto de cols vacías (la otra col de descripción incluida)
+                for c in range(2, n_cols + 1):
+                    if c == _col_desc(p):
+                        continue
                     cell = ws.cell(row=row, column=c, value='')
                     cell.font = t_font; cell.alignment = align_right; cell.border = t_bdr
-                _merge_desc(row)
+                if not _desborda(p):
+                    _merge_desc(row)
                 # En títulos/subtítulos la columna Total va vacía (solo las
                 # partidas llevan total) — espejo del PDF. La col n_cols ya
                 # quedó vacía en el loop de arriba.
@@ -8229,9 +8541,10 @@ class ValorizadoWidget(QWidget):
                 cell.border = border_grid
                 if zebra_fill:
                     cell.fill = zebra_fill
+            _p_desb = partidas[r] if r < len(partidas) else {}
             for c in range(n_left_logical):
                 val = _txt(self.tbl_l.item(r, c))
-                cell = ws.cell(row=row, column=_phys(c))
+                cell = ws.cell(row=row, column=_col_desc(_p_desb) if c == 1 else _phys(c))
                 if c in (3, 4):                   # Cantidad / Precio
                     n = _num(val)
                     cell.value = n if isinstance(n, (int, float)) else val
@@ -8252,11 +8565,12 @@ class ValorizadoWidget(QWidget):
                 elif c == 1:                      # Descripción — con sangría
                     cell.value = val
                     p_row = partidas[r] if r < len(partidas) else {}
-                    cell.alignment = _desc_align(_depth_of(p_row))
-                else:
+                    cell.alignment = _desc_align(_depth_of(p_row), p_row)
+                else:                             # Ítem
                     cell.value = val
-                    cell.alignment = align_left
-            _merge_desc(row)
+                    cell.alignment = _align_item(_p_desb)
+            if not _desborda(_p_desb):
+                _merge_desc(row)
 
             for c in range(n_right):
                 val  = _txt(self.tbl_r.item(r, c))
@@ -8274,7 +8588,8 @@ class ValorizadoWidget(QWidget):
             # wrap) no se corte — Excel no lo auto-ajusta en celdas mergeadas.
             _p_row = partidas[r] if r < len(partidas) else {}
             ws.row_dimensions[row].height = _alto_desc(
-                _txt(self.tbl_l.item(r, 1)), _depth_of(_p_row))
+                _txt(self.tbl_l.item(r, 1)), _depth_alto(_p_row),
+                menos=14 if _desborda(_p_row) else 0)
             row += 1
 
         # ── Filas de resumen (footer) ─────────────────────────────────────

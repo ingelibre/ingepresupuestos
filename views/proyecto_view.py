@@ -56,7 +56,8 @@ from utils.icons import icon as load_icon, icon_colored
 from utils import partidas_clipboard as _pclip
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
-from utils.theme import C as _C, nivel_fg as _nivel_fg
+from utils.theme import C as _C, nivel_fg as _nivel_fg, nivel_bg as _nivel_bg, NIVEL_MAX as _NIVEL_MAX
+from utils.formatting import ITEM_TRAMOS_POR_LINEA
 
 BLUE_500  = _C.brand            # naranja marca (legacy name)
 BLUE_700  = _C.brand_hover
@@ -153,13 +154,9 @@ def profundidad_titulos(root) -> int:
 # Los títulos usan texto coloreado + tinte de fondo muy suave. El COLOR sale de
 # `utils.theme.nivel_fg`, que es su único dueño: el Gantt y el cronograma
 # valorizado pintan con el mismo, y así no vuelven a divergir.
-NIVEL_ESTILO = {
-    1: (_nivel_fg(1), "#FFF5F5", 9),   # Rojo oscuro       — capítulos principales
-    2: (_nivel_fg(2), "#F5F8FF", 9),   # Arándano (Blueberry) — sub-capítulos
-    3: (_nivel_fg(3), "#F9F5FF", 9),   # Morado            — secciones
-    4: (_nivel_fg(4), "#FFF5FA", 9),   # Rosa oscuro       — sub-secciones
-    5: (_nivel_fg(5), "#FFFBF5", 9),   # Ámbar oscuro      — sub-sub-secciones
-}
+# Nueve niveles (`theme.NIVEL_MAX`), todos a 9 pt: rojo, arándano, morado,
+# rosa, ámbar, verde azulado, índigo, oliva, gris azulado.
+NIVEL_ESTILO = {n: (_nivel_fg(n), _nivel_bg(n), 9) for n in range(1, _NIVEL_MAX + 1)}
 BG_PARTIDA = _C.surface
 
 # ── Colores ACU por tipo ───────────────────────────────────────────────────────
@@ -967,6 +964,7 @@ class _TreeColorDelegate(QStyledItemDelegate):
 
     _SEL_BG   = QColor('#FDEBD0')
     _DEF_TEXT = QColor('#273445')
+    _MARGEN_DER = 4   # la columna Ítem lo pone en 0 para que el desborde no deje costura
 
     def paint(self, painter, option, index):
         painter.save()
@@ -1002,9 +1000,31 @@ class _TreeColorDelegate(QStyledItemDelegate):
         align = index.data(Qt.TextAlignmentRole)
         if align is None:
             align = Qt.AlignLeft | Qt.AlignVCenter
-        painter.drawText(option.rect.adjusted(4, 0, -4, 0), align, text)
+        painter.drawText(option.rect.adjusted(4, 0, -self._MARGEN_DER, 0), align, text)
 
         painter.restore()
+
+
+class _ItemColDelegate(_TreeColorDelegate):
+    """Columna Ítem. Los códigos de más de cinco tramos NO ensanchan la
+    columna: `sizeHint` los mide como si tuvieran dos, así
+    `resizeColumnToContents` ajusta la columna a los ítems normales y el
+    código hondo sigue de largo sobre la zona sangrada de la descripción,
+    que lo pinta `_DescripcionDelegate` (como una celda de Excel que
+    desborda sobre la vecina). El texto se queda en la columna Ítem:
+    `text(0)` no cambia. Antes la columna crecía hasta el código más largo y
+    dejaba un hueco entre el ítem y la descripción (Marco, 9 sep 2026)."""
+
+    TRAMOS_ANCHO = ITEM_TRAMOS_POR_LINEA
+    _MARGEN_DER = 0   # se pinta hasta el borde: la descripción continúa el texto
+
+    def sizeHint(self, option, index):
+        text = str(index.data(Qt.DisplayRole) or '')
+        tramos = text.split('.')
+        if len(tramos) > self.TRAMOS_ANCHO:
+            text = '.'.join(tramos[:2])
+        fm = QFontMetrics(index.data(Qt.FontRole) or option.font)
+        return QSize(fm.horizontalAdvance(text) + 10, fm.height() + 6)
 
 
 class _PresupuestoTree(QTreeWidget):
@@ -1122,16 +1142,55 @@ class _DescripcionDelegate(QStyledItemDelegate):
         self._tree = tree
         self._col  = col
 
-    def _indent_px(self, index) -> int:
-        """Sangría horizontal según la profundidad del ítem en el árbol,
-        para reflejar la jerarquía (igual que la columna ÍTEM). Usa el mismo
-        paso de indentación del árbol."""
+    def _depth(self, index) -> int:
         depth = 0
         p = index.parent()
         while p.isValid():
             depth += 1
             p = p.parent()
-        return depth * self._tree.indentation()
+        return depth
+
+    def _indent_px(self, index) -> int:
+        """Sangría que el ÁRBOL ya aplica a esta celda (la columna
+        Descripción es la del árbol, `setTreePosition(1)`): profundidad más
+        el hueco de la flecha. El delegado NO la vuelve a sumar; sirve para
+        medir el ancho útil en `sizeHint` y la x del ítem que desborda."""
+        niveles = self._depth(index) + (1 if self._tree.rootIsDecorated() else 0)
+        return niveles * self._tree.indentation()
+
+    def _desborde_item(self, index, fallback_font):
+        """Si el código de la columna Ítem no cabe en su columna, devuelve
+        (texto, x, ancho, fuente, color) para pintarlo de largo sobre esta
+        celda —como Excel con una celda que desborda—; si cabe, None. La x
+        se calcula desde la cabecera, no con `visualRect`, porque esto
+        también se llama desde `sizeHint` en pleno layout. La columna Ítem
+        es plana (el árbol sangra la Descripción), así que la x no depende
+        de la profundidad."""
+        idx0 = index.siblingAtColumn(0)
+        text = str(idx0.data(Qt.DisplayRole) or '')
+        if not text:
+            return None
+        hdr = self._tree.header()
+        x = hdr.sectionViewportPosition(0) + 4
+        derecha = hdr.sectionViewportPosition(0) + hdr.sectionSize(0) - 4
+        font = idx0.data(Qt.FontRole) or fallback_font
+        w = QFontMetrics(font).horizontalAdvance(text)
+        if x + w <= derecha:
+            return None
+        fg = idx0.data(Qt.ForegroundRole)
+        color = fg.color() if hasattr(fg, 'color') else QColor('#273445')
+        return text, x, w, font, color
+
+    def _sangria(self, index, left: int, fallback_font) -> int:
+        """Sangría EXTRA de la descripción respecto a `left` (el borde
+        izquierdo de la celda, que el árbol ya sangró por jerarquía): cero,
+        o lo que haga falta para no pisar un ítem que desborda."""
+        sangria = 0
+        des = self._desborde_item(index, fallback_font)
+        if des is not None:
+            _t, x, w, _f, _c = des
+            sangria = max(sangria, x + w + 10 - left - 4)
+        return sangria
 
     # ── Pintar ────────────────────────────────────────────────────────────────
 
@@ -1165,8 +1224,29 @@ class _DescripcionDelegate(QStyledItemDelegate):
         else:
             painter.setPen(QColor("#273445"))
 
+        # Código de ítem que desborda desde la columna de al lado: se pinta
+        # aquí, encima del fondo de esta celda, con su fuente y su color.
+        des = self._desborde_item(index, option.font)
+        if des is not None:
+            d_text, d_x, d_w, d_font, d_color = des
+            painter.save()
+            # El rectángulo de la celda empieza DESPUÉS de la sangría y la
+            # flecha del árbol (esta es la columna del árbol); el código
+            # tiene que poder pintarse también sobre esa franja, que Qt ya
+            # rellenó con el fondo de la fila. Se recorta al ancho entero de
+            # la columna, no al de la celda.
+            col_izq = self._tree.header().sectionViewportPosition(self._col)
+            painter.setClipRect(QRect(col_izq, option.rect.top(),
+                                      option.rect.right() - col_izq + 1, option.rect.height()))
+            painter.setFont(d_font)
+            painter.setPen(d_color)
+            painter.drawText(QRect(d_x, option.rect.top(), d_w + 4, option.rect.height()),
+                             Qt.AlignLeft | Qt.AlignVCenter, d_text)
+            painter.restore()
+
         text = index.data(Qt.DisplayRole) or ""
-        rect = option.rect.adjusted(4 + self._indent_px(index), 3, -4, -2)
+        rect = option.rect.adjusted(4 + self._sangria(index, option.rect.left(), option.font),
+                                    3, -4, -2)
         painter.drawText(rect,
                          Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
                          text)
@@ -1213,8 +1293,13 @@ class _DescripcionDelegate(QStyledItemDelegate):
 
         font = index.data(Qt.FontRole) or option.font
         fm   = QFontMetrics(font)
-        col_w = max(self._tree.header().sectionSize(self._col) - 8
-                    - self._indent_px(index), 60)
+        hdr  = self._tree.header()
+        # Borde izquierdo real de la celda: la columna menos lo que el árbol
+        # le quita por jerarquía.
+        left = hdr.sectionViewportPosition(self._col) + self._indent_px(index)
+        col_w = max(hdr.sectionSize(self._col) - 8 - self._indent_px(index)
+                    - self._sangria(index, left, option.font),
+                    60)
 
         br = fm.boundingRect(QRect(0, 0, col_w, 5000),
                              Qt.AlignLeft | Qt.TextWordWrap,
@@ -2219,6 +2304,12 @@ class ProyectoView(QWidget):
         self.tree.currentItemChanged.connect(self._on_partida_seleccionada)
         self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree.setIndentation(14)
+        # Las flechas y la sangría del árbol van en la columna Descripción:
+        # así la columna Ítem queda PLANA, todos los códigos al mismo margen
+        # (idea de Marco, 9 sep 2026; es como lo muestra S10). La jerarquía se
+        # sigue viendo en la descripción, que Qt sangra solo — el delegado de
+        # la descripción ya no le suma su propia sangría.
+        self.tree.setTreePosition(1)
         # Zebra manual: aplicada solo a partidas no-título alternadas
         # (ver bucle de carga del árbol). El alt nativo de Qt cuenta TODAS
         # las filas — con títulos intercalados produce un patrón caótico
@@ -2245,8 +2336,11 @@ class ProyectoView(QWidget):
         # Delegate que preserva el color de fuente al seleccionar (cols numéricas)
         # Col 3 queda con _metrado_delegate; col 1 con _desc_delegate
         _color_del = _TreeColorDelegate(self.tree)
-        for _c in (0, 2, 4, 5):
+        for _c in (2, 4, 5):
             self.tree.setItemDelegateForColumn(_c, _color_del)
+        # Col 0 (Ítem): igual, pero parte los códigos hondos en dos líneas.
+        self._item_delegate = _ItemColDelegate(self.tree)
+        self.tree.setItemDelegateForColumn(0, self._item_delegate)
         # Cuando el usuario redimensiona la columna, recalcular alturas de filas
         self.tree.header().sectionResized.connect(
             lambda: self.tree.scheduleDelayedItemsLayout()
@@ -5100,7 +5194,7 @@ class ProyectoView(QWidget):
                 # Con un `.get(niv, default)` un título de nivel 5 caía a un
                 # fallback negro de 10 pt — más grande que su propio padre de
                 # nivel 4 (reporte de David Ramos, 5 sep 2026).
-                txt_col, _bg_tinte_ignored, pt = NIVEL_ESTILO[min(max(niv, 1), 5)]
+                txt_col, _bg_tinte_ignored, pt = NIVEL_ESTILO[min(max(niv, 1), _NIVEL_MAX)]
                 fg = QBrush(QColor(txt_col))
                 font = QFont()
                 font.setBold(True)

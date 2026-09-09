@@ -357,15 +357,18 @@ class FormatoReporteDialog(QDialog):
         return pagina
 
     # ── Sección: Colores de títulos ──
+    # Sub-presupuesto + los nueve niveles de título (`pdf_reports.N_NIVELES`).
     NIVEL_EJEMPLO = ("SUB-PRESUPUESTO: ESTRUCTURAS",
                      "01  OBRAS PROVISIONALES", "01.01  Trabajos preliminares",
                      "01.01.01  Movilización", "01.01.01.01  Equipos",
-                     "01.01.01.01.01  Detalle")
-    NIVEL_ROTULO = ("Sub-presupuesto:", "Nivel 1:", "Nivel 2:", "Nivel 3:",
-                    "Nivel 4:", "Nivel 5:")
+                     "01.01.01.01.01  Detalle", "01.01.01.01.01.01  Nivel 6",
+                     "01.01.01.01.01.01.01  Nivel 7", "…01.01  Nivel 8",
+                     "…01.01.01  Nivel 9")
+    NIVEL_ROTULO = ("Sub-presupuesto:",) + tuple(
+        f"Nivel {n}:" for n in range(1, pdf_reports.N_NIVELES + 1))
 
     def _pagina_titulos(self) -> QWidget:
-        """Esquemas de colores para los cinco niveles de título de los
+        """Esquemas de colores para los nueve niveles de título de los
         reportes. Los de fábrica no se editan: tocar un color crea (o
         actualiza) el esquema «Personalizado»; «Guardar como…» lo guarda
         con nombre propio. Solo afecta al PDF y al Excel; en pantalla el
@@ -398,41 +401,47 @@ class FormatoReporteDialog(QDialog):
         fila.addStretch(1)
         lay.addLayout(fila)
 
-        cuerpo = QHBoxLayout()
-        cuerpo.setSpacing(18)
+        cuerpo = QVBoxLayout()
+        cuerpo.setSpacing(10)
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
         self._sw_nivel, self._inp_nivel = [], []
-        for i in range(6):          # 0 = sub-presupuesto, 1..5 = niveles
-            grid.addWidget(QLabel(self.NIVEL_ROTULO[i]), i, 0)
+        # 0 = sub-presupuesto, 1..N = niveles. Diez filas no caben en la
+        # altura del diálogo: van en dos columnas de cinco.
+        n_filas = (len(self.NIVEL_ROTULO) + 1) // 2
+        for i in range(len(self.NIVEL_ROTULO)):
+            fila, col0 = i % n_filas, (i // n_filas) * 5
+            grid.addWidget(QLabel(self.NIVEL_ROTULO[i]), fila, col0)
             sw = QFrame()
-            sw.setFixedSize(36, 22)
-            grid.addWidget(sw, i, 1)
+            sw.setFixedSize(28, 22)
+            grid.addWidget(sw, fila, col0 + 1)
             inp = QLineEdit()
             inp.setMaxLength(7)
-            inp.setFixedWidth(84)
+            inp.setFixedWidth(76)
             inp.setStyleSheet(self._le_ss())
             inp.editingFinished.connect(lambda i=i: self._on_nivel_texto(i))
-            grid.addWidget(inp, i, 2)
+            grid.addWidget(inp, fila, col0 + 2)
             b = QPushButton("Elegir…")
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(self._btn_ss())
             b.clicked.connect(lambda _=False, i=i: self._on_nivel_elegir(i))
-            grid.addWidget(b, i, 3)
+            grid.addWidget(b, fila, col0 + 3)
+            if col0 == 0:
+                grid.setColumnMinimumWidth(4, 14)   # aire entre columnas
             self._sw_nivel.append(sw)
             self._inp_nivel.append(inp)
         cuerpo.addLayout(grid)
 
-        # Vista previa: cómo se ven los cinco niveles con el esquema.
+        # Vista previa: cómo se ven los niveles con el esquema. Va DEBAJO de
+        # la grilla (con nueve niveles, a la derecha no cabía en 780 px).
         self.lbl_previa = QLabel()
         self.lbl_previa.setTextFormat(Qt.RichText)
-        self.lbl_previa.setMinimumWidth(240)
         self.lbl_previa.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.lbl_previa.setStyleSheet(
             f"background:{WHITE}; border:1px solid {SLATE_100}; border-radius:6px;"
-            " padding:10px 12px; font-size:11px;")
-        cuerpo.addWidget(self.lbl_previa, 1)
+            " padding:6px 12px; font-size:10px;")
+        cuerpo.addWidget(self.lbl_previa)
         lay.addLayout(cuerpo)
 
         lay.addWidget(self._hint(
@@ -473,16 +482,16 @@ class FormatoReporteDialog(QDialog):
             self._inp_nivel[i].blockSignals(True)
             self._inp_nivel[i].setText(c.upper())
             self._inp_nivel[i].blockSignals(False)
-        tam = (12, 13, 12, 11, 11, 11)
+        tam = (11, 12, 11, 10, 10, 10, 10, 10, 10, 10)
         cols = [esq['sub']] + list(esq['colores'])
         lineas = []
         for i, txt in enumerate(self.NIVEL_EJEMPLO):
-            estilo = "font-style:italic;" if i == 5 else ""
+            estilo = "font-style:italic;" if i >= 5 else ""     # como el PDF
             sub = "text-decoration:underline;" if i in (0, 1) else ""
             lineas.append(
                 f'<div style="color:{cols[i]};font-weight:700;'
-                f'font-size:{tam[i]}px;margin-left:{max(0, i - 1) * 10}px;'
-                f'margin-bottom:{6 if i == 0 else 0}px;{estilo}{sub}">{txt}</div>')
+                f'font-size:{tam[i]}px;margin-left:{max(0, i - 1) * 8}px;'
+                f'margin-bottom:{4 if i == 0 else 0}px;{estilo}{sub}">{txt}</div>')
         self.lbl_previa.setText("".join(lineas))
         self.btn_esq_eliminar.setEnabled(not esq['fabrica'])
 

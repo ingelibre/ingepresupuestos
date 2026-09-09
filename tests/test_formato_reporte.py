@@ -283,12 +283,15 @@ def _esquema(activo=None, propios=None):
 def test_clasico_es_el_color_de_siempre():
     """Clásico = theme.NIVEL_FG: la pantalla y el papel coinciden por defecto,
     y una instalación sin las claves imprime igual que antes."""
-    from utils.theme import NIVEL_FG
+    from utils.theme import NIVEL_FG, NIVEL_MAX
     _esquema()
     cols = pr.colores_titulos()
-    assert {n: cols[n] for n in range(1, 6)} == {n: NIVEL_FG[n].upper() for n in range(1, 6)}, cols
+    N = NIVEL_MAX
+    assert N == pr.N_NIVELES == 9
+    assert {n: cols[n] for n in range(1, N + 1)} == {n: NIVEL_FG[n].upper() for n in range(1, N + 1)}, cols
     assert cols[0] == '#1F2A38', cols      # sub-presupuesto: el slate-800 de siempre del PDF
-    assert pr.ESQUEMAS_FABRICA['clasico']['colores'] == [NIVEL_FG[n] for n in range(1, 6)]
+    assert pr.ESQUEMAS_FABRICA['clasico']['colores'] == [NIVEL_FG[n] for n in range(1, N + 1)]
+    assert all(len(v['colores']) == N for v in pr.ESQUEMAS_FABRICA.values())
 
 
 def test_esquema_activo_desconocido_cae_a_clasico():
@@ -312,6 +315,11 @@ def test_esquemas_propios_se_leen_y_lo_roto_se_ignora():
     assert cols[1] == '#111111' and cols[2] == '#222222' and cols[5] == '#555555', cols
     assert cols[3] == '#6A1B9A' and cols[4] == '#AD1457', cols   # inválidos → Clásico
     assert cols[0] == '#1F2A38', cols                              # sin 'sub' → el de Clásico
+    # Guardado con cinco colores (antes del 9 sep 2026): del 6 al 9 toma
+    # los de Clásico, así el reporte de un proyecto hondo no se queda sin color.
+    from utils.theme import NIVEL_FG
+    assert {n: cols[n] for n in range(6, 10)} == {n: NIVEL_FG[n].upper() for n in range(6, 10)}, cols
+    assert len(todos['mio']['colores']) == pr.N_NIVELES
     # JSON ilegible: como si no hubiera propios
     d.set_config('rep_esquemas_titulos', '{no json')
     assert all(v['fabrica'] for v in pr.esquemas_titulos().values())
@@ -372,3 +380,23 @@ if __name__ == "__main__":
     if os.path.exists(_tmpdb):
         os.unlink(_tmpdb)
     sys.exit(1 if fallos else 0)
+
+
+def test_los_nueve_colores_de_nivel_tienen_un_solo_dueno():
+    """Árbol del presupuesto, metrados, control de obra, Gantt y el esquema
+    Clásico de los reportes pintan los títulos con `theme.NIVEL_FG`. Hasta
+    el 9 sep 2026 metrados y control de obra llevaban su copia (de 5 y de 4)
+    y del 6 en adelante todo repetía el ámbar (reporte de David Ramos)."""
+    from utils.theme import NIVEL_FG, NIVEL_MAX, nivel_fg
+    import views.proyecto_view as PV
+    import views.metrados_view as MV
+    import views.control_obra_view as CO
+    assert NIVEL_MAX == 9 and len(set(NIVEL_FG.values())) == 9   # nueve, distintos
+    assert nivel_fg(10) == nivel_fg(9) == NIVEL_FG[9]           # se acota, no cae a negro
+    assert {n: PV.NIVEL_ESTILO[n][0] for n in NIVEL_FG} == NIVEL_FG
+    assert MV.NIVEL_COL is NIVEL_FG
+    assert {n: CO.NIVEL_ESTILO[n][0] for n in NIVEL_FG} == NIVEL_FG
+    # El CSS del PDF y el Excel tienen una clase/fuente para cada nivel.
+    css = pr._base_css()
+    for n in range(1, NIVEL_MAX + 1):
+        assert f"tr.titulo{n} td" in css, n

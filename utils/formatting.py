@@ -188,3 +188,25 @@ def num_importado(val, default: float = 0.0) -> float:
         return float(val)
     n = parse_num_opt(val)
     return default if n is None else n
+
+
+# Tramos del código de ítem que caben cómodos en la columna Ítem (del árbol
+# y del PDF del presupuesto) sin ensancharla: «01.02.02.03.06». Con títulos
+# a 9 niveles el código llega a 26 caracteres y la columna crecía hasta él,
+# dejando un hueco enorme entre el ítem y la descripción de las filas
+# superficiales (Marco, 9 sep 2026).
+ITEM_TRAMOS_POR_LINEA = 5
+
+
+def partir_item(item, sep: str = "\n", max_tramos: int = ITEM_TRAMOS_POR_LINEA) -> str:
+    """Parte un código de ítem largo en líneas de `max_tramos` tramos:
+    «01.02.02.03.06.01.01.01.01» → «01.02.02.03.06.» + sep + «01.01.01.01».
+    El punto se queda al final de la línea para que se lea que sigue. Un
+    ítem de hasta `max_tramos` tramos vuelve intacto."""
+    txt = str(item or "")
+    tramos = txt.split(".")
+    if len(tramos) <= max_tramos:
+        return txt
+    lineas = [".".join(tramos[i:i + max_tramos])
+              for i in range(0, len(tramos), max_tramos)]
+    return (("." + sep).join(lineas[:-1]) + "." + sep + lineas[-1]) if len(lineas) > 1 else txt
