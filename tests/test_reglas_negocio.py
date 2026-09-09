@@ -917,3 +917,34 @@ if __name__ == "__main__":
     if _tmpdb and os.path.exists(_tmpdb):
         os.unlink(_tmpdb)
     sys.exit(1 if fallos else 0)
+
+
+def test_cuadrilla_en_reporte_va_en_blanco_cuando_no_aplica():
+    """Reporte de David Ramos, 9 sep 2026: el ACU impreso escribía «0.0000»
+    en la cuadrilla de materiales, subcontratos y herramientas en %MO."""
+    # Lleva cuadrilla: MO y equipo por hora o por día, con valor
+    assert d.cuadrilla_reporte('MO', 'hh', 1) == 1.0
+    assert d.cuadrilla_reporte('EQ', 'hm', 0.5) == 0.5
+    assert d.cuadrilla_reporte('EQ', 'he', 2) == 2.0
+    assert d.cuadrilla_reporte('EQ', 'día', 1) == 1.0
+    # Vacío: materiales, subcontratos, subpartidas y equipo por cantidad
+    assert d.cuadrilla_reporte('MAT', 'bol', 0) is None
+    assert d.cuadrilla_reporte('MAT', 'bol', None) is None
+    assert d.cuadrilla_reporte('SC', 'mes', 0) is None
+    assert d.cuadrilla_reporte('EQ', 'glb', 1) is None    # un resto no se imprime
+    # Vacío: herramientas manuales en %MO (cuadrilla 0)
+    assert d.cuadrilla_reporte('EQ', '%MO', 0) is None
+    assert d.cuadrilla_reporte('EQ', '%mo', '') is None
+    # Vacío: MO sin cuadrilla (partida global)
+    assert d.cuadrilla_reporte('MO', 'hh', 0) is None
+
+
+def test_los_reportes_usan_la_misma_regla_de_cuadrilla():
+    """PDF, Excel de ACU, reporte completo y PDF por reportlab: una sola
+    regla para decidir si la cuadrilla se imprime."""
+    import core.pdf_reports as PR
+    import core.exporter as EX
+    assert PR.cuadrilla_reporte is d.cuadrilla_reporte
+    assert EX.cuadrilla_reporte is d.cuadrilla_reporte
+    assert PR._fmt_cuadrilla({'tipo': 'MAT', 'unidad': 'bol', 'cuadrilla': 0}) == ""
+    assert PR._fmt_cuadrilla({'tipo': 'MO', 'unidad': 'hh', 'cuadrilla': 1}) == "1.0000"

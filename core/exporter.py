@@ -9,7 +9,7 @@ from openpyxl.worksheet.properties import WorksheetProperties, PageSetupProperti
 from openpyxl.worksheet.page import PageMargins
 import os
 import io
-from core.database import get_db, calcular_totales, get_acu_items, get_decimales_metrado
+from core.database import get_db, calcular_totales, get_acu_items, get_decimales_metrado, cuadrilla_reporte
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
 # contiene todos los pesos y variantes (italic en su propio archivo).
@@ -1284,7 +1284,11 @@ def exportar_acus(proyecto_id):
                 num_font = Font(name='Inter', size=10, color=C_SLATE_900)
                 c_u = ws.cell(r, 4, it['unidad'] or ''); c_u.font = num_font
                 c_u.alignment = Alignment(horizontal='center', vertical='top')
-                c_cu = ws.cell(r, 5, it['cuadrilla'] or 0); c_cu.font = num_font
+                # Cuadrilla en blanco cuando no aplica (MAT/SC, %MO) — antes
+                # salía «0.0000» (reporte de David Ramos, 9 sep 2026).
+                _cuad = cuadrilla_reporte(tipo, it['unidad'], it['cuadrilla'])
+                c_cu = ws.cell(r, 5, _cuad if _cuad is not None else None)
+                c_cu.font = num_font
                 c_cu.number_format = fmt_4
                 c_cu.alignment = Alignment(horizontal='right', vertical='top')
                 c_ca = ws.cell(r, 6, cant); c_ca.font = num_font
@@ -2625,7 +2629,8 @@ def exportar_reporte_completo(proyecto_id):
                 ws_a.merge_cells(start_row=ra, start_column=2, end_row=ra, end_column=3)
                 ws_a.cell(ra, 2, it['rdesc']).font = Font(name='Inter', size=11)
                 ws_a.cell(ra, 4, it['unidad']).font = Font(name='Inter', size=11)
-                ws_a.cell(ra, 5, it['cuadrilla']).number_format = '[$-0409]#,##0.0000'
+                _cuad = cuadrilla_reporte(tipo, it['unidad'], it['cuadrilla'])
+                ws_a.cell(ra, 5, _cuad).number_format = '[$-0409]#,##0.0000'
                 ws_a.cell(ra, 6, cant).number_format = '[$-0409]#,##0.0000'
                 ws_a.cell(ra, 7, precio).number_format = '[$-0409]#,##0.00'
                 ws_a.merge_cells(start_row=ra, start_column=8, end_row=ra, end_column=10)
@@ -2889,6 +2894,10 @@ def exportar_pdf(proyecto_id):
         try:    return f"{float(v or 0):,.{dec}f}"
         except: return '0.00'
 
+    def _fmt_cuadrilla(tipo, unidad, cuadrilla):
+        v = cuadrilla_reporte(tipo, unidad, cuadrilla)
+        return '' if v is None else f"{v:,.4f}"
+
     def _encabezado(titulo_seccion):
         nombre   = proyecto['nombre']          or ''
         sub_ppto = proyecto['sub_presupuesto'] or proyecto['nombre'] or ''
@@ -3068,7 +3077,7 @@ def exportar_pdf(proyecto_id):
                 subtipo += parcial
                 acu_data.append([
                     it['codigo'], it['rdesc'], it['unidad'] or '',
-                    _fmt(it['cuadrilla'], 4), _fmt(cant, 4),
+                    _fmt_cuadrilla(tipo, it['unidad'], it['cuadrilla']), _fmt(cant, 4),
                     _fmt(precio), _fmt(parcial)
                 ])
             row_subtot.append(len(acu_data))

@@ -35,7 +35,7 @@ from PySide6.QtGui import (
 )
 
 from core.database import (
-    calcular_totales, get_acu_items, get_config, get_db,
+    calcular_totales, cuadrilla_reporte, get_acu_items, get_config, get_db,
     get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
     get_insumos_para_partidas, set_config, _orden_mo,
 )
@@ -352,6 +352,13 @@ def _fmt(v, dec=2) -> str:
     except (TypeError, ValueError):
         return "0.00"
     return f"{n:,.{dec}f}"
+
+
+def _fmt_cuadrilla(it: dict) -> str:
+    """Cuadrilla de una fila de ACU: número a 4 decimales o vacío si esa fila
+    no lleva cuadrilla (ver `core.database.cuadrilla_reporte`)."""
+    v = cuadrilla_reporte(it.get('tipo'), it.get('unidad'), it.get('cuadrilla'))
+    return "" if v is None else f"{v:,.4f}"
 
 
 def _proyecto_info(pid: int) -> dict:
@@ -1034,7 +1041,7 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
                 f'<td><span class="pill {pill_cls}">{escape(tipo)}</span></td>'
                 f'<td>{escape(it.get("descripcion") or "")}</td>'
                 f'<td class="c">{escape(it.get("unidad") or "")}</td>'
-                f'<td class="r">{_fmt(it.get("cuadrilla"), 4)}</td>'
+                f'<td class="r">{_fmt_cuadrilla(it)}</td>'
                 f'<td class="r">{_fmt(it.get("cantidad"), 6)}</td>'
                 f'<td class="r">{_fmt(it.get("precio"), dec)}</td>'
                 f'<td class="r">{_fmt(it.get("parcial"), dec)}</td>'

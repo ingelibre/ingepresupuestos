@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QLabel,
     QPushButton, QFrame, QTreeWidget, QTreeWidgetItem, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QAbstractItemDelegate,
-    QMenu, QMessageBox, QLineEdit, QSizePolicy, QTextEdit,
+    QMenu, QWidgetAction, QMessageBox, QLineEdit, QSizePolicy, QTextEdit,
     QScrollArea, QGridLayout, QSpacerItem, QStyledItemDelegate, QStyle,
     QStyleOptionViewItem,
     QComboBox, QDialog, QFormLayout, QProgressBar, QCheckBox, QInputDialog,
@@ -88,6 +88,65 @@ def _norm_lead_zero(t: str) -> str:
     return t
 # QMenu styling — el filter global `install_global_popup_styles(app)` aplica
 # `_MENU_QSS` a TODOS los QMenu de la app. No se necesita setStyleSheet local.
+
+# ── Mostrar el árbol hasta un nivel ──────────────────────────────────────────
+def expandir_hasta_nivel(root, nivel):
+    """Deja el árbol abierto hasta `nivel` (1 = solo los capítulos, con sus
+    montos) y cerrado de ahí para abajo; `None` lo abre entero.
+
+    Es la forma rápida de ver los montos agrupados por título sin plegar
+    rama por rama (pedido de David Ramos, 9 sep 2026). `root` es el
+    `invisibleRootItem`; los hijos sin descendencia (partidas) se saltan.
+    """
+    def _rec(item, prof):
+        for i in range(item.childCount()):
+            hijo = item.child(i)
+            if hijo.childCount():
+                hijo.setExpanded(nivel is None or prof < nivel)
+                _rec(hijo, prof + 1)
+
+    _rec(root, 1)
+
+
+class _FilaNivelMenu(QLabel):
+    """Fila «Nivel n» del menú «≡», con el texto del COLOR del título de ese
+    nivel (el mismo que pinta el árbol, `nivel_fg`), para que se sepa qué
+    se va a ver antes de elegir (pedido de Marco, 9 sep 2026). Un QAction
+    normal no admite color por fila, por eso va como QWidgetAction."""
+
+    def __init__(self, texto: str, color: str, activo: bool, al_elegir, menu):
+        super().__init__(("✓  " if activo else "    ") + texto)
+        self._al_elegir = al_elegir
+        self._menu = menu
+        self.setStyleSheet(
+            f"QLabel {{ color:{color}; font-weight:700; font-size:12px;"
+            f" padding:6px 18px 6px 10px; border:none; border-radius:5px; background:transparent; }}"
+            f"QLabel:hover {{ background:#FEF5EB; }}"
+        )
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self._menu.close()
+            self._al_elegir()
+        super().mouseReleaseEvent(ev)
+
+
+def profundidad_titulos(root) -> int:
+    """Cuántos niveles de título anida el árbol (0 si no hay ninguno)."""
+    max_prof = 0
+
+    def _rec(item, prof):
+        nonlocal max_prof
+        for i in range(item.childCount()):
+            hijo = item.child(i)
+            if hijo.childCount():
+                max_prof = max(max_prof, prof)
+                _rec(hijo, prof + 1)
+
+    _rec(root, 1)
+    return max_prof
+
 
 # ── Colores jerárquicos del presupuesto ──────────────────────────────────────
 # Cada nivel: (color_texto, color_fondo_tinte, tamaño_pt)
@@ -2091,6 +2150,24 @@ class ProyectoView(QWidget):
         )
         btn_recalc.clicked.connect(self.recalcular)
         hl.addWidget(btn_recalc)
+
+        # Niveles: abre el árbol hasta el nivel elegido (Todos · Nivel 1 · 2 …).
+        # El menú se arma al abrirse, porque cuántos niveles hay depende del
+        # sub-presupuesto que esté a la vista.
+        self._nivel_visible = None
+        self._btn_niveles = QPushButton("≡")
+        self._btn_niveles.setFixedSize(26, 26)
+        self._btn_niveles.setToolTip(_tr_b("Mostrar hasta el nivel…"))
+        self._btn_niveles.setStyleSheet(
+            f"QPushButton {{ background:rgba(255,255,255,0.12); color:white; border:none;"
+            f" border-radius:4px; font-size:14px; font-weight:700; min-height:0; padding:0; }}"
+            f"QPushButton:hover {{ background:rgba(255,255,255,0.25); }}"
+            f"QPushButton::menu-indicator {{ width:0; }}"
+        )
+        self._menu_niveles = QMenu(self._btn_niveles)
+        self._menu_niveles.aboutToShow.connect(self._armar_menu_niveles)
+        self._btn_niveles.setMenu(self._menu_niveles)
+        hl.addWidget(self._btn_niveles)
 
         self._btn_layout = QPushButton("↕")
         self._btn_layout.setFixedSize(26, 26)
@@ -5085,6 +5162,10 @@ class ProyectoView(QWidget):
 
         self.tree.blockSignals(False)
         self._calcular_totales_titulos(self.tree.invisibleRootItem())
+        # El nivel elegido en «≡» sobrevive a la recarga: si no, cada edición
+        # (o el botón recalcular) volvía a abrir el árbol entero.
+        if getattr(self, '_nivel_visible', None) is not None:
+            expandir_hasta_nivel(self.tree.invisibleRootItem(), self._nivel_visible)
         self.tree.resizeColumnToContents(0)   # ajustar col Ítem al contenido
         self.actualizar_total()
         # Reaplicar bloqueos tras recargar (flags pueden haberse perdido)
@@ -6189,6 +6270,38 @@ class ProyectoView(QWidget):
     # Recalcular
     # ══════════════════════════════════════════════════════════════════════════
 
+    def _armar_menu_niveles(self):
+        """Todos · Nivel 1 … Nivel N, con N = los niveles de título que
+        tiene el árbol a la vista. Marca el activo."""
+        from utils.i18n import tr
+        m = self._menu_niveles
+        m.clear()
+        n_max = profundidad_titulos(self.tree.invisibleRootItem())
+        act = m.addAction(tr("Todos"))
+        act.setCheckable(True)
+        act.setChecked(self._nivel_visible is None)
+        act.triggered.connect(lambda: self.mostrar_hasta_nivel(None))
+        if n_max:
+            m.addSeparator()
+        for n in range(1, n_max + 1):
+            texto = f"{tr('Nivel')} {n}"
+            a = QWidgetAction(m)
+            a.setText(texto)
+            a.setCheckable(True)
+            a.setChecked(self._nivel_visible == n)
+            a.setDefaultWidget(_FilaNivelMenu(
+                texto, _nivel_fg(n), self._nivel_visible == n,
+                lambda n=n: self.mostrar_hasta_nivel(n), m))
+            m.addAction(a)
+
+    def mostrar_hasta_nivel(self, nivel):
+        """Abre el árbol hasta `nivel` (None = todo) y lo recuerda para las
+        recargas. Si la partida seleccionada queda oculta, se mantiene
+        seleccionada: la búsqueda y la edición ya expanden sus ancestros."""
+        self._nivel_visible = nivel
+        expandir_hasta_nivel(self.tree.invisibleRootItem(), nivel)
+        self.tree.resizeColumnToContents(0)
+
     def recalcular(self):
         conn = get_db()
         partidas = conn.execute(
@@ -6959,7 +7072,38 @@ class ProyectoView(QWidget):
         nodo_nuevo = self._id_to_item.get(new_id)
         if nodo_nuevo is not None:
             self.tree.setCurrentItem(nodo_nuevo)
-        self._editar_partida(new_id)
+
+        # La ficha se abre para renombrar la copia. Si se CANCELA, la copia se
+        # descarta: antes quedaba insertada igual, con el nombre del original,
+        # y el usuario tenía que ir a borrarla (reporte de David Ramos, 9 sep
+        # 2026). Se graba primero y se borra al cancelar —y no al revés—
+        # porque la ficha edita una partida que ya existe en la BD.
+        from views.partida_form_dialog import PartidaFormDialog
+        dlg = PartidaFormDialog(self.pid, new_id, self.usuario, parent=self)
+        if dlg.exec():
+            self.recargar_partidas()
+            self.cargar_acu(new_id)
+        else:
+            self._descartar_duplicado(new_id, part_id)
+
+    def _descartar_duplicado(self, new_id: int, orig_id: int):
+        """Borra la copia recién insertada (sus `acu_items` caen en cascada),
+        cierra el hueco en la numeración y vuelve a la partida original."""
+        from utils.i18n import tr
+        conn = get_db()
+        conn.execute("DELETE FROM partidas WHERE id=?", (new_id,))
+        conn.commit()
+        conn.close()
+        if self._partida_actual_id == new_id:
+            self._partida_actual_id = None
+            self.tbl_acu.setRowCount(0)
+            self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+        self.recargar_partidas()
+        self.tree._renumerar()
+        self.actualizar_total()
+        nodo_orig = self._id_to_item.get(orig_id)
+        if nodo_orig is not None:
+            self.tree.setCurrentItem(nodo_orig)
 
     # ── Wrappers para atajos de teclado ──────────────────────────────────────
 

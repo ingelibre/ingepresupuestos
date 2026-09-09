@@ -89,6 +89,29 @@ def recurso_por_hora(tipo, unidad) -> bool:
             or 'hora' in u)
 
 
+def cuadrilla_reporte(tipo, unidad, cuadrilla):
+    """Cuadrilla que se IMPRIME en un reporte de ACU, o None si la celda va
+    en blanco.
+
+    Solo la llevan los insumos cuya cantidad se deriva de ella (MO y equipo
+    por hora o por día, ver `recurso_por_hora` / `recurso_por_dia`) y solo si
+    vale algo: un material, un subcontrato o una subpartida no tienen
+    cuadrilla, y las herramientas manuales en %MO tampoco. Antes el PDF y el
+    Excel escribían «0.0000» en todas esas filas, que se leía como un dato
+    (reporte de David Ramos, 9 sep 2026). La vista del programa ya lo hacía
+    bien: pinta esas celdas en gris sin número.
+    """
+    try:
+        v = float(cuadrilla or 0)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    if not (recurso_por_dia(tipo, unidad) or recurso_por_hora(tipo, unidad)):
+        return None
+    return v
+
+
 def recurso_por_dia(tipo, unidad) -> bool:
     """True si la cantidad se deriva de la cuadrilla SIN jornada: MO/EQ con
     unidad día/jor (el rendimiento ya es por día): cant = cuadrilla / rend."""

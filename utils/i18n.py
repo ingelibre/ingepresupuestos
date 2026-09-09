@@ -345,6 +345,8 @@ _TRADUCCIONES: dict[str, dict[str, str]] = {
 
     # ── Tooltips ──────────────────────────────────────────────────────────
     "Recalcular": {"en": "Recalculate"},
+    "Mostrar hasta el nivel…": {"en": "Show down to level…"},
+    "Nivel": {"en": "Level"},
     "Generar especificaciones para todas las partidas del proyecto":
         {"en": "Generate specifications for all project items"},
     "Generar especificación con IA para la partida seleccionada":
