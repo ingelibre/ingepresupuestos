@@ -74,7 +74,9 @@ def test_la_plantilla_vacia_no_se_ofrece(tmp_path, monkeypatch):
     nombres = " ".join(f["nombre"] for f in filas)
     assert "ESTRUCTURAS" in nombres and "ARQUITECTURA" in nombres
     assert "Nuevo Proyecto" not in nombres, "ofreció la plantilla vacía"
-    assert elegido == ("PR0000000009", "PP0000000077")
+    # La obra con dos especialidades encabeza la lista como OBRA COMPLETA,
+    # así que la primera opción importa el proyecto entero (presupuesto None).
+    assert elegido == ("PR0000000009", None)
 
 
 def test_cancelar_no_importa_nada(tmp_path, monkeypatch):
@@ -189,3 +191,79 @@ def test_el_modo_unico_restringe_y_esconde_seleccionar_todos(qapp):
         assert dlg.lst.count() == 2
     finally:
         dlg.deleteLater()
+
+
+# ---- una obra, sus especialidades como SUB-presupuestos ---------------------
+#
+# «Se supone que todo es de un solo proyecto, supongo que cada uno debería ser
+# un subpresupuesto» (Marco). Lo es: Delphin guarda la obra con un presupuesto
+# por especialidad. guardar_importacion() ya crea la fila en sub_presupuestos
+# en cuanto la partida trae `sub_ref`; el importador de Delphin no lo mandaba.
+
+@pytest.mark.skipif(not os.path.isfile(REAL), reason="base real no disponible")
+def test_la_obra_completa_etiqueta_cada_partida_con_su_especialidad():
+    from core.delphin_sqlite_importer import import_delphin_sqlite
+
+    _i, partidas, acus, recursos, _m = import_delphin_sqlite(
+        REAL, "PR0000000011", None)          # sin presupuesto = obra entera
+    subs = {p["sub_ref"] for p in partidas if p.get("sub_ref")}
+    assert len(subs) == 9, sorted(subs)
+    assert "ESTRUCTURAS" in subs and "INSTALACIONES SANITARIAS" in subs
+    # Ninguna se queda huérfana: todas las partidas llevan especialidad.
+    assert all(p.get("sub_ref") for p in partidas)
+    assert len([p for p in partidas if not p["es_titulo"]]) == 879
+    assert len(acus) == 879 and recursos
+
+
+@pytest.mark.skipif(not os.path.isfile(REAL), reason="base real no disponible")
+def test_una_sola_especialidad_no_se_etiqueta():
+    """Con un único sub-presupuesto todo va al Principal, como siempre."""
+    from core.delphin_sqlite_importer import import_delphin_sqlite
+
+    _i, partidas, *_ = import_delphin_sqlite(
+        REAL, "PR0000000009", "PP0000000077")     # solo ESTRUCTURAS
+    assert partidas
+    assert not any(p.get("sub_ref") for p in partidas)
+
+
+def test_el_selector_ofrece_la_obra_completa(tmp_path, monkeypatch):
+    """Una obra con varias especialidades se ofrece entera y también suelta."""
+    from views import importar_view
+
+    ruta = tmp_path / "obra.sqlite"
+    con = sqlite3.connect(ruta)
+    con.executescript(
+        """
+        CREATE TABLE proyecto (id_proyecto TEXT PRIMARY KEY,
+                               nombre_proyecto TEXT, fecha_proyecto TEXT);
+        CREATE TABLE presupuesto (id_presupuesto TEXT PRIMARY KEY,
+                                  nombre_presupuesto TEXT, id_proyecto TEXT,
+                                  costo_directo REAL, total_presupuesto REAL);
+        INSERT INTO proyecto VALUES ('PR9','COLEGIO','30/01/2026');
+        INSERT INTO presupuesto VALUES ('PPa','ESTRUCTURAS','PR9', 10, 100);
+        INSERT INTO presupuesto VALUES ('PPb','SANITARIAS','PR9', 5, 50);
+        """
+    )
+    con.commit(); con.close()
+
+    capturado = {}
+
+    class _DlgFalso:
+        def __init__(self, filas, parent=None, **kw):
+            capturado["filas"] = filas
+            self.ids_seleccionados = [1]      # la primera = obra completa
+
+        def exec(self):
+            return importar_view.QDialog.Accepted
+
+    monkeypatch.setattr(importar_view, "_SelectPptoDialog", _DlgFalso)
+    vista = importar_view.ImportarView.__new__(importar_view.ImportarView)
+    vista._archivos = {"db": str(ruta)}
+    elegido = importar_view.ImportarView._elegir_presupuesto_delphin(vista)
+
+    nombres = [f["nombre"] for f in capturado["filas"]]
+    assert "OBRA COMPLETA" in nombres[0]
+    assert "2 sub-presupuestos" in nombres[0]
+    assert any("ESTRUCTURAS" in n for n in nombres[1:])
+    # id_presupuesto None = importar la obra entera
+    assert elegido == ("PR9", None)

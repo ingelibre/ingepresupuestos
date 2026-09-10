@@ -208,6 +208,26 @@ def import_delphin_sqlite(filepath: str,
                 ).fetchall()
         cus_by_id = {r['id_costounitario']: dict(r) for r in cus}
 
+        # Nombre del sub-presupuesto de cada partida. Un proyecto Delphin es
+        # UNA obra con un presupuesto por especialidad —estructuras,
+        # arquitectura, sanitarias…—, que aquí son sub-presupuestos, no obras
+        # sueltas. guardar_importacion() ya crea la fila en sub_presupuestos
+        # y cuelga la partida en cuanto ve `sub_ref`; solo faltaba mandarlo
+        # (Marco, 2026-09-10: «se supone que todo es de un solo proyecto…
+        # cada uno debería ser un subpresupuesto»).
+        #
+        # Con UN solo sub-presupuesto no se etiqueta nada: todo al Principal,
+        # exactamente como antes.
+        nombre_sub: dict = {}
+        if len({r.get('id_presupuesto') for r in cus_by_id.values()}) > 1:
+            nombre_sub = {
+                r['id_presupuesto']: _str(r['nombre_presupuesto'])
+                for r in src.execute(
+                    "SELECT id_presupuesto, nombre_presupuesto FROM presupuesto "
+                    "WHERE id_proyecto=?", (proy['id_proyecto'],)
+                ).fetchall()
+            }
+
         # Identificar quién es padre (es título) — los que aparecen como id_costopadre
         padres_set = set()
         for r in cus_by_id.values():
@@ -258,7 +278,7 @@ def import_delphin_sqlite(filepath: str,
             if not es_titulo and not und:
                 und = 'und'
 
-            partidas_data.append({
+            entrada = {
                 'item':            item,
                 'descripcion':     _str(row['descripcion_costo']),
                 'unidad':          und,
@@ -266,7 +286,11 @@ def import_delphin_sqlite(filepath: str,
                 'precio_unitario': _num(row['costo_unitario']),
                 'nivel':           min(nivel(cuid) + 1, 4),
                 'es_titulo':       1 if es_titulo else 0,
-            })
+            }
+            sub = nombre_sub.get(row.get('id_presupuesto'))
+            if sub:
+                entrada['sub_ref'] = sub
+            partidas_data.append(entrada)
 
             for child in hijos_de(cuid):
                 emit(child)

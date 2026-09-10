@@ -969,52 +969,75 @@ class ImportarView(QWidget):
 
     def _elegir_presupuesto_delphin(self):
         """``(id_proyecto, id_presupuesto)`` elegidos, o ``None`` si el usuario
-        cancela o la base no sirve.
+        cancela o la base no sirve. ``id_presupuesto`` en ``None`` significa
+        **el proyecto entero**: sus especialidades entran como
+        sub-presupuestos de una sola obra, que es como Delphin las guarda.
 
-        Una base de Delphin no guarda UN presupuesto: guarda el proyecto
-        entero con un presupuesto por especialidad —estructuras, arquitectura,
-        sanitarias…— y suele arrastrar varias versiones de cada una, más la
-        plantilla vacía «Nuevo Proyecto» que Delphin crea al instalarse. El
-        archivo de prueba trae 33, y la vacía es la primera de la tabla.
+        Una base de Delphin no contiene UN presupuesto. Contiene obras, cada
+        una con un presupuesto por especialidad —estructuras, arquitectura,
+        sanitarias…— y suele arrastrar la obra base, su OFERTA, copias
+        posteriores y la plantilla vacía «Nuevo Proyecto» que Delphin crea al
+        instalarse. La del reporte trae 5 obras reales y 33 presupuestos, y
+        la plantilla vacía es la primera de la tabla: sin preguntar, se
+        importaba esa y salían cero partidas.
         """
         from core.delphin_sqlite_importer import listar_proyectos_delphin
         try:
-            proys = listar_proyectos_delphin(self._archivos["db"])
+            filas_db = listar_proyectos_delphin(self._archivos["db"])
         except Exception as e:                        # noqa: BLE001 — al usuario
             QMessageBox.critical(
                 self, "Error al leer la base",
                 f"No se pudo abrir el archivo:\n\n{e}")
             return None
-        # Los presupuestos sin importe son plantillas y restos; si hay alguno
-        # con dinero, no se ofrecen los vacíos.
-        con_monto = [p for p in proys if float(p.get("total") or 0) > 0]
-        utiles = con_monto or proys
-        if not utiles:
+
+        # Agrupar por obra; los presupuestos sin importe son restos.
+        obras: dict = {}
+        for p in filas_db:
+            if float(p.get("total") or 0) <= 0:
+                continue
+            obras.setdefault(p["id_proyecto"], {
+                "nombre": p["nombre_proyecto"], "fecha": p.get("fecha") or "",
+                "pptos": [],
+            })["pptos"].append(p)
+        if not obras:
             QMessageBox.warning(
                 self, "Importar",
-                "La base de Delphin no contiene presupuestos.")
+                "La base de Delphin no contiene presupuestos con importe.")
             return None
-        if len(utiles) == 1:
-            return (utiles[0]["id_proyecto"], utiles[0]["id_presupuesto"])
 
-        # El diálogo compartido pide otras claves; el índice hace de id para
-        # que la fila se lea «#  1  ESTRUCTURAS — …» y no un PP0000000076.
-        filas = []
-        for i, p in enumerate(utiles, 1):
-            filas.append({
-                "id_ppto": i,
-                "nombre": f"{p['nombre_presupuesto']}  —  {p['nombre_proyecto']}",
-                "fecha": p.get("fecha") or "",
-                "cd": float(p.get("cd") or 0),
-                "localidad": (f"Total S/ {float(p['total']):,.2f}"
-                              if float(p.get("total") or 0) else ""),
-            })
+        opciones: list = []      # (id_proyecto, id_presupuesto|None)
+        filas: list = []
+        for pid, obra in sorted(
+                obras.items(),
+                key=lambda kv: -sum(float(x["total"]) for x in kv[1]["pptos"])):
+            total = sum(float(x["total"]) for x in obra["pptos"])
+            n = len(obra["pptos"])
+            if n > 1:
+                opciones.append((pid, None))
+                filas.append({
+                    "id_ppto": len(opciones),
+                    "nombre": f"{obra['nombre']}   —   OBRA COMPLETA "
+                              f"({n} sub-presupuestos)",
+                    "fecha": obra["fecha"], "cd": 0.0,
+                    "localidad": f"Total S/ {total:,.2f}",
+                })
+            for q in sorted(obra["pptos"], key=lambda x: -float(x["total"])):
+                opciones.append((pid, q["id_presupuesto"]))
+                filas.append({
+                    "id_ppto": len(opciones),
+                    "nombre": (f"      · {q['nombre_presupuesto']}"
+                               if n > 1 else q["nombre_presupuesto"]),
+                    "fecha": q.get("fecha") or "", "cd": float(q.get("cd") or 0),
+                    "localidad": f"Total S/ {float(q['total']):,.2f}",
+                })
+
+        if len(opciones) == 1:
+            return opciones[0]
         dlg = _SelectPptoDialog(filas, self, origen_texto="Delphin (.sqlite)",
                                 seleccion_unica=True)
         if dlg.exec() != QDialog.Accepted or not dlg.ids_seleccionados:
             return None
-        elegido = utiles[dlg.ids_seleccionados[0] - 1]
-        return (elegido["id_proyecto"], elegido["id_presupuesto"])
+        return opciones[dlg.ids_seleccionados[0] - 1]
 
     def _on_pedir_descarga_ingeconverter(self, url: str):
         """IngeConverter no instalado → ofrecer abrir landing en navegador."""
