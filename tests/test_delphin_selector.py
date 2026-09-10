@@ -267,3 +267,31 @@ def test_el_selector_ofrece_la_obra_completa(tmp_path, monkeypatch):
     assert any("ESTRUCTURAS" in n for n in nombres[1:])
     # id_presupuesto None = importar la obra entera
     assert elegido == ("PR9", None)
+
+
+@pytest.mark.skipif(not os.path.isfile(REAL), reason="base real no disponible")
+def test_la_obra_entera_no_bautiza_el_principal_con_una_especialidad():
+    """La vista antepone una pestaña «Principal» nombrada con el campo
+    legacy `proyectos.sub_presupuesto` (views/proyecto_view.py). Si el
+    importador lo dejaba con el nombre del primer presupuesto, salía una
+    pestaña ESTRUCTURAS vacía delante de la ESTRUCTURAS real — «aparecen dos
+    subpresupuestos de estructuras, una está en blanco» (Marco)."""
+    from core.delphin_sqlite_importer import import_delphin_sqlite
+
+    info, partidas, *_ = import_delphin_sqlite(REAL, "PR0000000011", None)
+    subs = {p["sub_ref"] for p in partidas if p.get("sub_ref")}
+    assert len(subs) == 9
+    assert info["sub_presupuesto"] == "", info["sub_presupuesto"]
+    assert info["sub_presupuesto"] not in subs
+
+
+@pytest.mark.skipif(not os.path.isfile(REAL), reason="base real no disponible")
+def test_una_sola_especialidad_sigue_nombrando_el_principal():
+    """Sin sub-presupuestos, el nombre del presupuesto ES el del proyecto y
+    la pestaña única debe seguir llamándose como siempre."""
+    from core.delphin_sqlite_importer import import_delphin_sqlite
+
+    info, partidas, *_ = import_delphin_sqlite(REAL, "PR0000000009",
+                                               "PP0000000077")
+    assert not any(p.get("sub_ref") for p in partidas)
+    assert info["sub_presupuesto"] == "ESTRUCTURAS"

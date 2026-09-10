@@ -227,6 +227,15 @@ def import_delphin_sqlite(filepath: str,
                     "WHERE id_proyecto=?", (proy['id_proyecto'],)
                 ).fetchall()
             }
+            # Con varias especialidades el proyecto YA NO es una de ellas. El
+            # campo legacy `proyectos.sub_presupuesto` nombra la pestaña
+            # «Principal» de la vista (views/proyecto_view.py), así que
+            # dejarlo con el nombre del primer presupuesto pintaba una
+            # pestaña ESTRUCTURAS vacía delante de la ESTRUCTURAS de verdad
+            # — «aparecen dos subpresupuestos de estructuras, una está en
+            # blanco» (Marco, 2026-09-10). Vacío = la pestaña dice
+            # «Principal», que es lo que es.
+            info['sub_presupuesto'] = ''
 
         # Identificar quién es padre (es título) — los que aparecen como id_costopadre
         padres_set = set()
