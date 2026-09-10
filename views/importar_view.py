@@ -323,6 +323,7 @@ class _ImportWorker(QThread):
                  id_ppto: int | None = None,
                  ids_ppto: list[int] | None = None,
                  cods_s10: list[str] | None = None,
+                 delphin_ids: tuple[str, str] | None = None,
                  parent=None):
         super().__init__(parent)
         self.formato = formato
@@ -330,6 +331,11 @@ class _ImportWorker(QThread):
         self.id_ppto = id_ppto       # solo para powercost_prs (1 proyecto)
         self.ids_ppto = ids_ppto     # solo para powercost_prs (varios)
         self.cods_s10 = cods_s10     # solo para s10_s2k (cods elegidos en el diálogo)
+        # solo para delphin_sqlite: (id_proyecto, id_presupuesto) elegidos.
+        # Sin ellos el importador cae en `SELECT * FROM proyecto LIMIT 1`, y
+        # una base real trae decenas de presupuestos con la plantilla vacía
+        # «Nuevo Proyecto» de primera — que importa cero partidas.
+        self.delphin_ids = delphin_ids
 
     def run(self):
         # Caso especial: backup S10 nativo — delega al bridge de IngeConverter
@@ -375,8 +381,9 @@ class _ImportWorker(QThread):
             elif self.formato == "delphin_sqlite":
                 self.progreso.emit("Leyendo base de datos Delphin…")
                 from core.delphin_sqlite_importer import import_delphin_sqlite
+                pid_d, ppto_d = self.delphin_ids or (None, None)
                 info, partidas, acus, recursos, metrados = (
-                    import_delphin_sqlite(f["db"])
+                    import_delphin_sqlite(f["db"], pid_d, ppto_d)
                 )
 
             elif self.formato == "ingepresupuestos_db":
@@ -893,6 +900,16 @@ class ImportarView(QWidget):
             self._worker.start()
             return
 
+        # Pre-paso para la base nativa de Delphin: trae un presupuesto por
+        # especialidad (y a menudo varias VERSIONES de cada una), así que hay
+        # que preguntar cuál. Sin preguntar se importaba el primero de la
+        # tabla, que suele ser la plantilla vacía «Nuevo Proyecto».
+        delphin_ids = None
+        if self._formato_id == "delphin_sqlite":
+            delphin_ids = self._elegir_presupuesto_delphin()
+            if delphin_ids is None:
+                return
+
         # Pre-paso para formatos multi-proyecto: si la base tiene varios
         # proyectos, pedirle al usuario que elija uno o varios.
         id_ppto = None
@@ -941,13 +958,63 @@ class ImportarView(QWidget):
         self.lbl_estado.setText("Iniciando importación…")
         self._worker = _ImportWorker(
             self._formato_id, dict(self._archivos),
-            id_ppto=id_ppto, ids_ppto=ids_ppto, parent=self
+            id_ppto=id_ppto, ids_ppto=ids_ppto,
+            delphin_ids=delphin_ids, parent=self
         )
         self._worker.progreso.connect(self.lbl_estado.setText)
         self._worker.finished_ok.connect(self._on_ok)
         self._worker.finished_multi.connect(self._on_ok_multi)
         self._worker.failed.connect(self._on_fail)
         self._worker.start()
+
+    def _elegir_presupuesto_delphin(self):
+        """``(id_proyecto, id_presupuesto)`` elegidos, o ``None`` si el usuario
+        cancela o la base no sirve.
+
+        Una base de Delphin no guarda UN presupuesto: guarda el proyecto
+        entero con un presupuesto por especialidad —estructuras, arquitectura,
+        sanitarias…— y suele arrastrar varias versiones de cada una, más la
+        plantilla vacía «Nuevo Proyecto» que Delphin crea al instalarse. El
+        archivo de prueba trae 33, y la vacía es la primera de la tabla.
+        """
+        from core.delphin_sqlite_importer import listar_proyectos_delphin
+        try:
+            proys = listar_proyectos_delphin(self._archivos["db"])
+        except Exception as e:                        # noqa: BLE001 — al usuario
+            QMessageBox.critical(
+                self, "Error al leer la base",
+                f"No se pudo abrir el archivo:\n\n{e}")
+            return None
+        # Los presupuestos sin importe son plantillas y restos; si hay alguno
+        # con dinero, no se ofrecen los vacíos.
+        con_monto = [p for p in proys if float(p.get("total") or 0) > 0]
+        utiles = con_monto or proys
+        if not utiles:
+            QMessageBox.warning(
+                self, "Importar",
+                "La base de Delphin no contiene presupuestos.")
+            return None
+        if len(utiles) == 1:
+            return (utiles[0]["id_proyecto"], utiles[0]["id_presupuesto"])
+
+        # El diálogo compartido pide otras claves; el índice hace de id para
+        # que la fila se lea «#  1  ESTRUCTURAS — …» y no un PP0000000076.
+        filas = []
+        for i, p in enumerate(utiles, 1):
+            filas.append({
+                "id_ppto": i,
+                "nombre": f"{p['nombre_presupuesto']}  —  {p['nombre_proyecto']}",
+                "fecha": p.get("fecha") or "",
+                "cd": float(p.get("cd") or 0),
+                "localidad": (f"Total S/ {float(p['total']):,.2f}"
+                              if float(p.get("total") or 0) else ""),
+            })
+        dlg = _SelectPptoDialog(filas, self, origen_texto="Delphin (.sqlite)",
+                                seleccion_unica=True)
+        if dlg.exec() != QDialog.Accepted or not dlg.ids_seleccionados:
+            return None
+        elegido = utiles[dlg.ids_seleccionados[0] - 1]
+        return (elegido["id_proyecto"], elegido["id_presupuesto"])
 
     def _on_pedir_descarga_ingeconverter(self, url: str):
         """IngeConverter no instalado → ofrecer abrir landing en navegador."""
@@ -1269,9 +1336,11 @@ class _SelectPptoDialog(QDialog):
     cientos. Incluye búsqueda incremental por nombre."""
 
     def __init__(self, proys: list[dict], parent=None, *,
-                 origen_texto: str = "base de datos"):
+                 origen_texto: str = "base de datos",
+                 seleccion_unica: bool = False):
         super().__init__(parent)
         self.proys = proys
+        self.seleccion_unica = seleccion_unica
         self.ids_seleccionados: list = []  # int (.prs/.db) o str (S10 cod)
 
         from utils.i18n import tr
@@ -1296,8 +1365,10 @@ class _SelectPptoDialog(QDialog):
         root.addWidget(ttl)
         sub = QLabel(
             f"El archivo {origen_texto} contiene <b>{len(proys)} proyectos</b>. "
-            "Selecciona uno o varios (Ctrl+Click o Shift+Click), o usa "
-            "<b>Seleccionar todos</b>. Doble clic importa solo ese proyecto."
+            + ("Elige el que quieras importar. Doble clic también vale."
+               if seleccion_unica else
+               "Selecciona uno o varios (Ctrl+Click o Shift+Click), o usa "
+               "<b>Seleccionar todos</b>. Doble clic importa solo ese proyecto.")
         )
         sub.setWordWrap(True)
         sub.setStyleSheet(f"color:{SLATE_300}; font-size:12px;")
@@ -1327,6 +1398,7 @@ class _SelectPptoDialog(QDialog):
             f"  border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
         )
         self.btn_all.clicked.connect(self._seleccionar_todos_visibles)
+        self.btn_all.setVisible(not seleccion_unica)
         top.addWidget(self.btn_all)
 
         self.btn_none = QPushButton(self._tr("Deseleccionar"))
@@ -1340,7 +1412,9 @@ class _SelectPptoDialog(QDialog):
         # Lista (multi-selección)
         from PySide6.QtWidgets import QAbstractItemView
         self.lst = QListWidget()
-        self.lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.lst.setSelectionMode(
+            QAbstractItemView.SingleSelection if seleccion_unica
+            else QAbstractItemView.ExtendedSelection)
         self.lst.setStyleSheet(
             f"QListWidget {{ background:white; border:1px solid {SILVER_300}; "
             f"  border-radius:8px; padding:4px; font-size:12px; }}"
