@@ -15,6 +15,7 @@ esos porcentajes son del proyecto completo.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 
 from PySide6.QtCore import Qt
@@ -133,12 +134,31 @@ class ImprimirSeleccionDialog(QDialog):
         return [c for c, _e, _d in REPORTES if self._checks[c].isChecked()]
 
 
-class VistaPreviaDialog(QDialog):
-    """Vista previa del PDF con opción de guardarlo o mandarlo a imprimir."""
+def nombre_archivo_pdf(titulo: str) -> str:
+    """«Análisis de Costos» → «analisis-de-costos.pdf»: nombre propuesto al
+    guardar desde la vista previa."""
+    import unicodedata
+    base = unicodedata.normalize('NFKD', titulo or 'reporte')
+    base = ''.join(c for c in base if not unicodedata.combining(c))
+    base = re.sub(r'[^a-z0-9]+', '-', base.lower()).strip('-') or 'reporte'
+    return f"{base}.pdf"
 
-    def __init__(self, parent, pdf_path: str, titulo: str):
+
+class VistaPreviaDialog(QDialog):
+    """Vista previa del PDF con opción de guardarlo o mandarlo a imprimir.
+
+    Es la vista previa de TODA la app desde el 15 sep 2026 (Ctrl+P, Hoja de
+    Metrados e Imprimir selección): el `QPrintPreviewDialog` de Qt dibuja su
+    barra con los iconos del tema y en Windows el de imprimir salía casi
+    invisible (David Ramos). Aquí los botones son texto, y «Guardar PDF…»
+    responde a su otro pedido: exportar desde la vista previa.
+    """
+
+    def __init__(self, parent, pdf_path: str, titulo: str,
+                 nombre_archivo: str = "partidas-seleccionadas.pdf"):
         super().__init__(parent)
         self._pdf_path = pdf_path
+        self._nombre_archivo = nombre_archivo
         self.setWindowTitle(f"Vista previa — {titulo}")
         self.setWindowModality(Qt.WindowModal)
         self.resize(880, 720)
@@ -196,7 +216,7 @@ class VistaPreviaDialog(QDialog):
 
     def _guardar(self):
         destino, _ = QFileDialog.getSaveFileName(
-            self, "Guardar PDF", "partidas-seleccionadas.pdf", "PDF (*.pdf)")
+            self, "Guardar PDF", self._nombre_archivo, "PDF (*.pdf)")
         if not destino:
             return
         if not destino.lower().endswith('.pdf'):
@@ -211,6 +231,9 @@ class VistaPreviaDialog(QDialog):
 
     def _imprimir(self):
         printer = QPrinter(QPrinter.HighResolution)
+        # Papel y orientación del PDF (los cronogramas van apaisados).
+        from utils.impresion import ajustar_printer_al_pdf
+        ajustar_printer_al_pdf(printer, self._pdf_path)
         dlg = QPrintDialog(printer, self)
         dlg.setWindowTitle("Imprimir")
         if dlg.exec() != QDialog.Accepted:

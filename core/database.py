@@ -98,8 +98,10 @@ def cuadrilla_reporte(tipo, unidad, cuadrilla):
     vale algo: un material, un subcontrato o una subpartida no tienen
     cuadrilla, y las herramientas manuales en %MO tampoco. Antes el PDF y el
     Excel escribían «0.0000» en todas esas filas, que se leía como un dato
-    (reporte de David Ramos, 9 sep 2026). La vista del programa ya lo hacía
-    bien: pinta esas celdas en gris sin número.
+    (reporte de David Ramos, 9 sep 2026). La pantalla pintaba la celda en
+    gris pero CON el «0.000» encima; desde el 15 sep 2026 (segundo reporte
+    de David) `proyecto_view._texto_cuadrilla` la deja vacía cuando no se
+    edita.
     """
     try:
         v = float(cuadrilla or 0)
@@ -1197,7 +1199,7 @@ def _pu_desde_items(items) -> float:
     """Suma el costo unitario a partir de filas (cantidad, precio, unidad, tipo)
     del ACU. Mismas reglas que la app: parciales redondeados a decimales de
     montos; overhead %MO/%MAT al final sobre el subtotal de su tipo."""
-    totales_tipo = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0}
+    totales_tipo = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
     pct_pending = []
     for it in items:
         if (it['unidad'] or '').startswith('%'):
@@ -1284,7 +1286,16 @@ def _siguiente_codigo_inei(conn, indice: str) -> str:
 
 
 def get_acu_items(conn, part_id: int) -> list[dict]:
-    """Devuelve los ACU items de una partida con parciales calculados (incluyendo overhead %)."""
+    """Devuelve los ACU items de una partida con parciales calculados (incluyendo overhead %).
+
+    `totales_tipo` trae las CUATRO claves MO/MAT/EQ/SC. Hasta la 3.0.10 no
+    existía la de SC: un subcontrato se sumaba como material, el chip «SC»
+    de la pantalla marcaba siempre 0 y el PDF del ACU lo llamaba
+    «Materiales» (reporte de David Ramos, 15 sep 2026). EQ y SC también
+    compartían rango de orden y se intercalaban por descripción, con lo que
+    el banner de sección se repetía. Un tipo desconocido sigue cayendo en
+    MAT (o en EQ si es un %).
+    """
     items = conn.execute(
         """SELECT ai.id, ai.recurso_id, ai.cuadrilla, ai.cantidad,
                   r.codigo, r.descripcion, r.tipo, r.unidad, r.indice_inei,
@@ -1293,14 +1304,15 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
            FROM acu_items ai
            JOIN recursos r ON r.id = ai.recurso_id
            WHERE ai.partida_id = ?
-           ORDER BY CASE r.tipo WHEN 'MO' THEN 1 WHEN 'MAT' THEN 2 ELSE 3 END,
+           ORDER BY CASE r.tipo WHEN 'MO' THEN 1 WHEN 'MAT' THEN 2
+                                WHEN 'EQ' THEN 3 ELSE 4 END,
                     CASE WHEN r.tipo='MO' THEN mo_rank(r.descripcion) ELSE 0 END,
                     r.descripcion""",
         (part_id,)
     ).fetchall()
 
     result = [dict(i) for i in items]
-    totales_tipo = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0}
+    totales_tipo = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
     pct_pending = []
 
     for it in result:

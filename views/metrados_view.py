@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QFileDialog, QMessageBox, QSizePolicy, QMenu, QStackedWidget,
 )
-from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 
 from core.database import (get_db, get_decimales_ppto, get_decimales_metrado,
                            _rn, parcial_wysiwyg, partida_usa_acero)
@@ -1427,14 +1426,9 @@ class MetradosView(QWidget):
             tmp_pdf.close()
             generar_pdf_archivo("metrados", self.pid, tmp_pdf.name)
 
-            printer = QPrinter(QPrinter.HighResolution)
-            dlg = QPrintPreviewDialog(printer, self)
-            dlg.setWindowTitle("Vista previa — Hoja de Metrados")
-            dlg.resize(900, 700)
-            dlg.paintRequested.connect(
-                lambda p: self._paint_pdf_a_printer(p, tmp_pdf.name)
-            )
-            dlg.exec()
+            from views.imprimir_seleccion_dialog import VistaPreviaDialog
+            VistaPreviaDialog(self, tmp_pdf.name, "Hoja de Metrados",
+                              nombre_archivo="hoja-de-metrados.pdf").exec()
             try:
                 os.unlink(tmp_pdf.name)
             except Exception:
@@ -1444,11 +1438,3 @@ class MetradosView(QWidget):
             QMessageBox.critical(self, "Error",
                                  f"No se pudo preparar la impresión:\n{e}")
 
-    def _paint_pdf_a_printer(self, printer, pdf_path: str):
-        """Renderiza el PDF temporal página por página al QPrinter."""
-        try:
-            from utils.impresion import pintar_pdf_en_printer
-            pintar_pdf_en_printer(printer, pdf_path)
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            QMessageBox.warning(self, "Error de impresión", str(e))

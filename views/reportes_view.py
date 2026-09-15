@@ -22,7 +22,7 @@ from PySide6.QtCore import QPointF, QRectF, QMimeData
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
-from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
@@ -2534,23 +2534,24 @@ class ReportesView(QWidget):
         if not self._tmp_pdf or not os.path.exists(self._tmp_pdf):
             QMessageBox.warning(self, "Reportes", "Aún no hay un PDF generado.")
             return
+        # El PDF ya está a la vista en el propio Centro: se va directo al
+        # diálogo de impresión, con el papel y la orientación de la primera
+        # página (Gantt apaisado). Antes abría el QPrintPreviewDialog de Qt,
+        # cuyo icono de imprimir no se veía en Windows (David Ramos, 15 sep 2026).
         printer = QPrinter(QPrinter.HighResolution)
-        # Papel y orientación de la primera página del PDF (Gantt apaisado)
-        from utils.impresion import ajustar_printer_al_pdf
+        from utils.impresion import ajustar_printer_al_pdf, pintar_pdf_en_printer
         ajustar_printer_al_pdf(printer, self._tmp_pdf)
-        # Renderiza páginas del PDF temporal en el QPainter
-        dlg = QPrintPreviewDialog(printer, self)
-        dlg.setWindowTitle("Vista previa de impresión")
-        dlg.resize(900, 700)
-        dlg.paintRequested.connect(lambda p: self._paint_pdf_a_printer(p))
-        dlg.exec()
-
-    def _paint_pdf_a_printer(self, printer: QPrinter):
-        """Renderiza el PDF temporal sobre el QPrinter (helper compartido)."""
-        if not self._tmp_pdf:
+        dlg = QPrintDialog(printer, self)
+        dlg.setWindowTitle("Imprimir")
+        if dlg.exec() != QPrintDialog.Accepted:
             return
-        from utils.impresion import pintar_pdf_en_printer
-        pintar_pdf_en_printer(printer, self._tmp_pdf)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            pintar_pdf_en_printer(printer, self._tmp_pdf)
+        except Exception as e:                      # noqa: BLE001
+            QMessageBox.warning(self, "Error de impresión", str(e))
+        finally:
+            QApplication.restoreOverrideCursor()
 
     # ─── Cleanup ─────────────────────────────────────────────────────────────
 

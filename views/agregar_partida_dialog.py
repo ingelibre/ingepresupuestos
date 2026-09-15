@@ -740,7 +740,7 @@ class AgregarPartidaDialog(QDialog):
             return
 
         # Subtotales por tipo (parcial real, igual criterio que _pu_desde_items)
-        tot = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0}
+        tot = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
         pct = []
         normales = []
         for it in items:
@@ -937,6 +937,11 @@ class AgregarPartidaDialog(QDialog):
 
     def _siguiente_item(self, conn) -> str:
         """Devuelve el siguiente código de ítem disponible según el contexto.
+
+        Es el PRIMER código libre del nivel (rellena huecos), no una posición:
+        desde el 15 sep 2026 la vista coloca la partida nueva justo debajo de
+        la selección y renumera (`ProyectoView._on_partidas_agregadas`), así
+        que este código es provisional cuando hay algo seleccionado.
 
         Reglas:
         - Título seleccionado "01"   → hijo: "01.01", "01.02"… (dentro del título)

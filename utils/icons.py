@@ -27,6 +27,21 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import QSize, Qt
 
 _ICON_DIR = Path(__file__).parent.parent / "resources" / "icons" / "elementary" / "24"
+_QSS_ICON_DIR = Path(__file__).parent.parent / "resources" / "icons"
+
+
+def qss_icon_url(nombre: str) -> str:
+    """Ruta ABSOLUTA de `resources/icons/<nombre>` para un `url(...)` de QSS.
+
+    Un `url(resources/icons/x.svg)` relativo solo se resuelve si el directorio
+    de trabajo es la carpeta del programa: en el instalador de Windows no lo
+    es, y los radios y casillas del diálogo «Exportar Gantt» salían sin
+    indicador, como si nada estuviera marcado (reporte de David Ramos,
+    15 sep 2026). Con PyInstaller `__file__` vive bajo `_MEIPASS`, donde el
+    .spec copia `resources/icons/*.svg`. Siempre con barras «/», que es lo
+    que entiende QSS también en Windows.
+    """
+    return (_QSS_ICON_DIR / nombre).as_posix()
 
 # Mapa de aliases: nombre semántico → archivo SVG
 _ALIAS: dict[str, str] = {

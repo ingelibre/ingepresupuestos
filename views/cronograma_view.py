@@ -45,6 +45,7 @@ from core.pdf_reports import (
     _rect_logo,
 )
 from utils.formatting import fmt, parse_num, ITEM_TRAMOS_POR_LINEA
+from utils.icons import qss_icon_url
 from utils.theme import nivel_fg as _nivel_fg
 
 
@@ -652,17 +653,17 @@ class _DialogExportarGanttPdf(QDialog):
             "QRadioButton::indicator { width:16px; height:16px;"
             "  background:transparent; border:none; }"
             "QRadioButton::indicator:unchecked {"
-            "  image: url(resources/icons/radio_orange_off.svg); }"
+            f"  image: url({qss_icon_url('radio_orange_off.svg')}); }}"
             "QRadioButton::indicator:checked {"
-            "  image: url(resources/icons/radio_orange_on.svg); }"
+            f"  image: url({qss_icon_url('radio_orange_on.svg')}); }}"
             "QCheckBox { color:#273445; font-size:12px; padding:2px 0;"
             "  background:transparent; spacing:8px; }"
             "QCheckBox::indicator { width:16px; height:16px;"
             "  background:transparent; border:none; }"
             "QCheckBox::indicator:unchecked {"
-            "  image: url(resources/icons/check_orange_off.svg); }"
+            f"  image: url({qss_icon_url('check_orange_off.svg')}); }}"
             "QCheckBox::indicator:checked {"
-            "  image: url(resources/icons/check_orange_on.svg); }"
+            f"  image: url({qss_icon_url('check_orange_on.svg')}); }}"
             "QGroupBox { font-weight:bold; color:#485A6C; margin-top:8px;"
             "  background:transparent; }"
         )
@@ -3234,6 +3235,13 @@ class GanttWidget(QWidget):
             _desc_need = self._pdf_desc_width(painter, partidas, mm(5.0))
             _desc_w = max(mm(50), min(PG_W * 0.34, _desc_need))
             col_defs[2] = ('Descripción', _desc_w, Qt.AlignLeft | Qt.AlignVCenter)
+            # Las columnas ocultas en pantalla van a ancho CERO y no se
+            # pintan (cabecera, celdas ni separadores): el PDF muestra las
+            # mismas columnas que la tabla (David Ramos, 15 sep 2026, que
+            # ocultaba Inicio/Fin y le salían igual en el PDF).
+            ocultas = self._pdf_columnas_ocultas()
+            col_defs = [(l, 0.0 if i in ocultas else w, a)
+                        for i, (l, w, a) in enumerate(col_defs)]
             TABLE_W = sum(w for _, w, _ in col_defs)
 
             gantt_x = TABLE_W
@@ -3567,6 +3575,24 @@ class GanttWidget(QWidget):
         p.drawLine(QPointF(x + margin, sep_y), QPointF(x + w - margin, sep_y))
         p.restore()
 
+    def _pdf_columnas_ocultas(self) -> set:
+        """Índices de columnas de la tabla ocultas en pantalla (clic derecho
+        en el encabezado) que el PDF también omite. Descripción nunca se
+        oculta; Pred. la decide la casilla del diálogo de exportar, no la
+        pantalla."""
+        tbl = getattr(self, 'tbl', None)
+        if tbl is None:
+            return set()
+        return {c for c in range(min(7, tbl.columnCount()))
+                if c != 2 and tbl.isColumnHidden(c)}
+
+    @staticmethod
+    def _pdf_separadores(col_defs) -> list:
+        """Índices tras los que va un separador vertical: columnas visibles
+        que no son la última visible."""
+        vis = [i for i, (_, cw, _) in enumerate(col_defs) if cw > 0]
+        return vis[:-1]
+
     def _pdf_paint_tabla_header(self, p, x, y, h, col_defs):
         """Header de la tabla estilo Centro de Reportes: fondo sutil silver,
         texto slate-900 (casi negro), bordes slate arriba/abajo, separadores
@@ -3595,8 +3621,9 @@ class GanttWidget(QWidget):
         for label, cw, _align in col_defs:
             # AlignCenter + WordWrap: respeta los '\n' de encabezados de 2
             # líneas (p.ej. "Días\ncal.") y evita que se recorten.
-            p.drawText(QRectF(cx + 2, y, cw - 4, h),
-                        Qt.AlignCenter | Qt.TextWordWrap, label)
+            if cw > 0:
+                p.drawText(QRectF(cx + 2, y, cw - 4, h),
+                           Qt.AlignCenter | Qt.TextWordWrap, label)
             cx += cw
 
         # Borde superior + inferior (1.5pt arriba / 0.8pt abajo, estilo reportes)
@@ -3609,10 +3636,12 @@ class GanttWidget(QWidget):
 
         # Separadores verticales suaves
         p.setPen(QPen(QColor(SLATE_300), max(1, mm(0.10))))
+        seps = self._pdf_separadores(col_defs)
         cx = x
-        for _, cw, _ in col_defs[:-1]:
+        for _i, (_, cw, _) in enumerate(col_defs):
             cx += cw
-            p.drawLine(QPointF(cx, y + h * 0.18), QPointF(cx, y + h * 0.82))
+            if _i in seps:
+                p.drawLine(QPointF(cx, y + h * 0.18), QPointF(cx, y + h * 0.82))
         p.restore()
 
     # ── Descripción del PDF: ancho medido y filas de dos líneas ───────────
@@ -3679,6 +3708,8 @@ class GanttWidget(QWidget):
         if len(col_defs) < 3:
             return 0.0
         cw_item = col_defs[1][1]
+        if cw_item <= 0:            # Ítem oculto: no hay nada que desborde
+            return 0.0
         w_txt = fm.horizontalAdvance(pt.get('item') or '')
         if w_txt <= cw_item - 4:
             return 0.0
@@ -3804,6 +3835,8 @@ class GanttWidget(QWidget):
             cx = x
             desc_shift = 0.0   # cuánto se corre la Descripción si el Ítem desborda
             for idx, (val, (label, cw, align)) in enumerate(zip(row_vals, col_defs)):
+                if cw <= 0:         # columna oculta en pantalla
+                    continue
                 rect_cell = QRectF(cx + 2, cur_y, cw - 4, hr)
                 # Fuente fresca por celda (evita arrastrar estado): subrayado en
                 # el código/nombre de los títulos de nivel 1; bold en críticas.
@@ -3860,10 +3893,11 @@ class GanttWidget(QWidget):
         # pinta: cruzaría los códigos que siguen de largo sobre la
         # Descripción, y la sangría ya separa las dos columnas.
         p.setPen(QPen(QColor("#D4D4D4"), max(1, mm(0.12))))
+        seps = self._pdf_separadores(col_defs)
         cx = x
-        for _i, (_, cw, _) in enumerate(col_defs[:-1]):
+        for _i, (_, cw, _) in enumerate(col_defs):
             cx += cw
-            if _i == 1:
+            if _i == 1 or _i not in seps:
                 continue
             p.drawLine(QPointF(cx, y), QPointF(cx, min(cur_y, y + max_h)))
         # Borde derecho de la tabla
@@ -6807,17 +6841,17 @@ class _DialogExportarReportePdf(QDialog):
             "QRadioButton::indicator { width:16px; height:16px;"
             "  background:transparent; border:none; }"
             "QRadioButton::indicator:unchecked {"
-            "  image: url(resources/icons/radio_orange_off.svg); }"
+            f"  image: url({qss_icon_url('radio_orange_off.svg')}); }}"
             "QRadioButton::indicator:checked {"
-            "  image: url(resources/icons/radio_orange_on.svg); }"
+            f"  image: url({qss_icon_url('radio_orange_on.svg')}); }}"
             "QCheckBox { color:#273445; font-size:12px; padding:2px 0;"
             "  background:transparent; spacing:8px; }"
             "QCheckBox::indicator { width:16px; height:16px;"
             "  background:transparent; border:none; }"
             "QCheckBox::indicator:unchecked {"
-            "  image: url(resources/icons/check_orange_off.svg); }"
+            f"  image: url({qss_icon_url('check_orange_off.svg')}); }}"
             "QCheckBox::indicator:checked {"
-            "  image: url(resources/icons/check_orange_on.svg); }"
+            f"  image: url({qss_icon_url('check_orange_on.svg')}); }}"
         )
 
         vl = QVBoxLayout(self)
@@ -9064,13 +9098,9 @@ class CurvaSWidget(QWidget):
             ["#", "Período", f"Avance ({sym})", "% Período",
              f"Acumulado ({sym})", "% Acumulado"]
         )
-        # Anchos cómodos
-        self.tbl.setColumnWidth(0, 36)
-        self.tbl.setColumnWidth(1, 130)
-        self.tbl.setColumnWidth(2, 110)
-        self.tbl.setColumnWidth(3, 80)
-        self.tbl.setColumnWidth(4, 130)
-        self.tbl.setColumnWidth(5, 88)
+        # Anchos de arranque (los de montos se ajustan al contenido al final)
+        for c, w in enumerate(self._ANCHOS_BASE):
+            self.tbl.setColumnWidth(c, w)
         self.tbl.horizontalHeader().setStretchLastSection(False)
         self.tbl.setRowCount(n_periods)
 
@@ -9101,7 +9131,7 @@ class CurvaSWidget(QWidget):
 
         # ── Footer sticky con TOTAL ──
         self.tbl_ftr.setColumnCount(6)
-        for c, w in enumerate([36, 130, 110, 80, 130, 88]):
+        for c, w in enumerate(self._ANCHOS_BASE):
             self.tbl_ftr.setColumnWidth(c, w)
         self.tbl_ftr.setRowCount(1)
         ftr_vals = [
@@ -9120,6 +9150,7 @@ class CurvaSWidget(QWidget):
             it.setForeground(QBrush(QColor(SLATE_700)))
             self.tbl_ftr.setItem(0, c, it)
         self.tbl_ftr.setFixedHeight(self.tbl_ftr.verticalHeader().defaultSectionSize() + 2)
+        self._ajustar_anchos_montos()
 
         # Sincronizar scroll horizontal de tabla y footer — UNA sola vez:
         # cargar() corre en cada recarga y apilaba una conexión más por pasada.
@@ -9130,6 +9161,20 @@ class CurvaSWidget(QWidget):
 
         # ── Dibujar gráfico ──
         self._dibujar_chart()
+
+    # Anchos de arranque de la tabla; los de Período y los dos montos crecen
+    # hasta lo que mida el texto más largo (tabla y TOTAL) — con 110/130 px
+    # fijos un «S/ 758,000.00» se leía «S/ …» (David Ramos, 15 sep 2026).
+    _ANCHOS_BASE = (36, 130, 110, 80, 130, 88)
+    _COLS_ELASTICAS = (1, 2, 4)
+
+    def _ajustar_anchos_montos(self):
+        for c in self._COLS_ELASTICAS:
+            w = max(self.tbl.sizeHintForColumn(c),
+                    self.tbl_ftr.sizeHintForColumn(c)) + 20
+            w = max(w, self._ANCHOS_BASE[c])
+            self.tbl.setColumnWidth(c, w)
+            self.tbl_ftr.setColumnWidth(c, w)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

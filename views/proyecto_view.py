@@ -29,7 +29,7 @@ from PySide6.QtCore import Qt, Signal, QSettings, QTimer, QSize, QRect, QEvent, 
 from PySide6.QtGui import (
     QFont, QColor, QBrush, QKeySequence, QShortcut, QIcon, QKeyEvent,
     QFontMetrics, QPainter, QTextCharFormat, QTextListFormat,
-    QTextBlockFormat, QTextCursor, QImage, QCursor
+    QTextBlockFormat, QTextCursor, QImage, QCursor, QPen
 )
 from PySide6.QtWidgets import QFileDialog as _QFileDialog
 
@@ -747,8 +747,15 @@ class _InputCellDelegate(QStyledItemDelegate):
             painter.setFont(option.font)
             painter.drawText(field.adjusted(4, 0, -6, 0),
                              Qt.AlignRight | Qt.AlignVCenter, index.data() or '')
+        elif not (index.data() or ''):
+            # Celda no editable y VACÍA (cuadrilla de un material, un
+            # subcontrato o un %MO): va como el resto de la fila, sin el
+            # bloque gris, que sin número encima se leía como un hueco
+            # (captura de Marco, 15 sep 2026).
+            painter.fillRect(option.rect,
+                             QColor('#FEF0E0') if sel else QColor('#FFFFFF'))
         else:
-            # Celda no editable: fondo neutro gris — no aplica ese tipo
+            # Celda no editable con valor calculado: fondo neutro gris
             painter.fillRect(option.rect,
                              QColor('#FEF0E0') if sel else _NEUTRAL_BG)
             painter.setPen(QColor('#B0BEC5'))
@@ -3649,7 +3656,11 @@ class ProyectoView(QWidget):
             f = QFrame(); f.setStyleSheet("border:none; background:transparent;")
             hl = QHBoxLayout(f); hl.setContentsMargins(0, 0, 0, 0)
             ln = QLabel(nombre); lv = QLabel(fmt(monto, self._moneda))
-            lv.setAlignment(Qt.AlignRight)
+            # AlignRight a secas pierde el centrado vertical: el monto subía
+            # al borde y el nombre quedaba centrado, cada uno a su altura
+            # (David Ramos, 15 sep 2026).
+            ln.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            lv.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             fs = "12px" if bold else "11px"; fw = "700" if bold else "500"
             for lbl in (ln, lv):
                 lbl.setStyleSheet(
@@ -5303,6 +5314,19 @@ class ProyectoView(QWidget):
             total = cd
         self.lbl_total.setText(fmt(total, self._moneda))
 
+    def _texto_cuadrilla(self, tipo, unidad, cuadrilla) -> str:
+        """Texto de la celda Cuadrilla del ACU en pantalla: el número solo
+        cuando la celda se edita (MO y equipo por hora o por día, la misma
+        regla que `_InputCellDelegate._editable`); un material, un
+        subcontrato o un %MO la llevan vacía. Antes se pintaba «0.000» en
+        gris y se leía como un dato (David Ramos, 15 sep 2026). Los reportes
+        usan `database.cuadrilla_reporte`, que además oculta el 0 de MO."""
+        if getattr(self, '_acu_partida_global', False):
+            return ''
+        if not (_recurso_por_dia(tipo, unidad) or _recurso_por_hora(tipo, unidad)):
+            return ''
+        return f"{float(cuadrilla or 0):.3f}"
+
     def cargar_acu(self, part_id: int):
         from utils.i18n import tr
         self._partida_actual_id = part_id
@@ -5400,7 +5424,7 @@ class ProyectoView(QWidget):
             vals = [
                 it['descripcion'] or '',
                 it['unidad'] or '',
-                f"{cuad:.3f}",
+                self._texto_cuadrilla(tipo, it['unidad'], cuad),
                 f"{cant:.{get_decimales_cant_acu()}f}",
                 f"{precio:.4f}",
                 fmt(it['parcial'] or 0, self._moneda),
@@ -6227,8 +6251,61 @@ class ProyectoView(QWidget):
         if not getattr(self, '_ed_presupuesto', True):
             self._strip_table_editable_flags(self.tbl_met)
 
+    # El tab Resumen suma TODO el proyecto (todos los sub-presupuestos). Con
+    # la casilla «Solo el sub-presupuesto a la vista» se limita al que está
+    # abierto en la pestaña del presupuesto (David Ramos, 15 sep 2026: quería
+    # el resumen y la distribución de UN sub sin sacar un reporte). Solo se
+    # ofrece cuando el proyecto tiene sub-presupuestos.
+    _resumen_solo_sub: bool = False
+
+    def _filtro_sub_resumen(self) -> tuple[str, tuple]:
+        """(condición SQL sobre el alias `p`, parámetros) del sub a la vista."""
+        if self._sub_ppto_id is None:
+            return " AND p.sub_presupuesto_id IS NULL", ()
+        return " AND p.sub_presupuesto_id = ?", (self._sub_ppto_id,)
+
+    def _nombre_sub_actual(self) -> str:
+        if self._sub_ppto_id is None:
+            return self._proy.get('sub_presupuesto') or 'Principal'
+        conn = get_db()
+        row = conn.execute("SELECT nombre FROM sub_presupuestos WHERE id=?",
+                           (self._sub_ppto_id,)).fetchone()
+        conn.close()
+        return (row['nombre'] if row else '') or 'Principal'
+
+    def _distribucion_cd(self, cond_sub: str, par_sub: tuple, cd: float) -> dict:
+        """Montos MO/MAT/EQ/SC del costo directo. Se suman por partida con
+        `get_acu_items` (así los % —herramientas en %MO— van a su tipo, cosa
+        que la consulta directa sobre `acu_items` no podía hacer) y se
+        reparten a prorrata para que sumen EXACTAMENTE `cd`: el CD sale de
+        precios unitarios redondeados partida a partida y quedaba a
+        centavos, y la tarjeta se llama «Distribución CD» — un Total
+        distinto del Costo Directo de al lado se leería como error
+        (David Ramos, 15 sep 2026, al pedir los montos en la leyenda)."""
+        conn = get_db()
+        dm = get_decimales_metrado()
+        rows = conn.execute(
+            "SELECT p.id, p.metrado FROM partidas p"
+            " WHERE p.proyecto_id=? AND p.es_titulo=0" + cond_sub,
+            (self.pid, *par_sub)).fetchall()
+        tot = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
+        for r in rows:
+            _, tt = get_acu_items(conn, r['id'])
+            m = round(r['metrado'] or 0, dm)
+            for k, v in tt.items():
+                tot[k] = tot.get(k, 0.0) + (v or 0) * m
+        conn.close()
+        suma = sum(tot.values())
+        if suma > 0 and cd > 0:
+            tot = {k: v * cd / suma for k, v in tot.items()}
+        return tot
+
+    def _toggle_resumen_solo_sub(self, on: bool):
+        self._resumen_solo_sub = bool(on)
+        self.cargar_resumen()
+
     def cargar_resumen(self):
-        _, totales = calcular_totales(self.pid)
+        from utils.i18n import tr
 
         # Limpiar layout
         while self._resumen_layout.count():
@@ -6236,34 +6313,41 @@ class ProyectoView(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        # ── Datos MO/MAT/EQ ──────────────────────────────────────────
         conn = get_db()
-        tipos = conn.execute(
-            """SELECT r.tipo,
-                      SUM(ai.cantidad * p.metrado * COALESCE(ai.precio, r.precio, 0)) as total
-               FROM acu_items ai
-               JOIN recursos r ON r.id = ai.recurso_id
-               JOIN partidas p ON p.id = ai.partida_id
-               WHERE p.proyecto_id = ? AND p.es_titulo = 0
-                 AND SUBSTR(r.unidad,1,1) != '%'
-               GROUP BY r.tipo""",
-            (self.pid,)
-        ).fetchall()
+        hay_subs = conn.execute(
+            "SELECT COUNT(*) FROM sub_presupuestos WHERE proyecto_id=?",
+            (self.pid,)).fetchone()[0] > 0
+        solo_sub = bool(self._resumen_solo_sub and hay_subs)
+        cond_sub, par_sub = self._filtro_sub_resumen() if solo_sub else ("", ())
+
+        if hay_subs:
+            chk = QCheckBox(tr("Solo el sub-presupuesto a la vista") +
+                            f": «{self._nombre_sub_actual()}»")
+            chk.setObjectName("chkResumenSoloSub")
+            chk.setChecked(solo_sub)
+            chk.setCursor(Qt.PointingHandCursor)
+            chk.setStyleSheet(
+                f"QCheckBox {{ color:{SLATE_700}; font-size:11px; border:none;"
+                f" background:transparent; spacing:6px; }}")
+            chk.toggled.connect(self._toggle_resumen_solo_sub)
+            self._resumen_layout.addWidget(chk)
+
+        # ── Datos MO/MAT/EQ/SC ───────────────────────────────────────
+        cd = self._total_proyecto(all_subs=not solo_sub)
+        dist = self._distribucion_cd(cond_sub, par_sub, cd)
         _dec = get_decimales_ppto()
         _dm  = get_decimales_metrado()
         top5 = conn.execute(
             f"""SELECT item, descripcion,
                        ROUND(ROUND(COALESCE(metrado,0), {_dm}) * COALESCE(precio_unitario,0), {_dec}) as total
-               FROM partidas WHERE proyecto_id=? AND es_titulo=0
+               FROM partidas p WHERE proyecto_id=? AND es_titulo=0""" + cond_sub + """
                ORDER BY total DESC LIMIT 5""",
-            (self.pid,)
+            (self.pid, *par_sub)
         ).fetchall()
         conn.close()
 
-        mo_val  = next((r['total'] or 0 for r in tipos if r['tipo'] == 'MO'),  0)
-        mat_val = next((r['total'] or 0 for r in tipos if r['tipo'] == 'MAT'), 0)
-        eq_val  = next((r['total'] or 0 for r in tipos if r['tipo'] == 'EQ'),  0)
-        sc_val  = next((r['total'] or 0 for r in tipos if r['tipo'] == 'SC'),  0)
+        mo_val, mat_val = dist['MO'], dist['MAT']
+        eq_val, sc_val = dist['EQ'], dist['SC']
 
         # ── Fila top: Resumen izq + Donut der ────────────────────────
         top_row = QWidget()
@@ -6272,28 +6356,18 @@ class ProyectoView(QWidget):
         hl_top.setContentsMargins(0, 0, 0, 0)
         hl_top.setSpacing(12)
 
-        # Card Resumen de costos
-        card = QFrame()
-        card.setStyleSheet(
-            f"QFrame {{ background:white; border:1px solid {SILVER_300}; border-radius:8px; }}"
-        )
-        vl = QVBoxLayout(card)
-        vl.setContentsMargins(14, 12, 14, 12)
-        vl.setSpacing(6)
-
-        lbl_sec = QLabel("RESUMEN DE COSTOS")
-        lbl_sec.setStyleSheet(
-            f"color:{SLATE_500}; font-size:10px; font-weight:700; letter-spacing:0.8px; border:none;"
-        )
-        vl.addWidget(lbl_sec)
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
         # Card de costos dinámica según pie_rubros activos — project-wide
         # (suma todos los subpresupuestos; el resto del tab Resumen también
-        # consulta WHERE proyecto_id=? sin filtro de sub)
-        card, _ = self._build_resumen_card(all_subs=True)
-        hl_top.addWidget(card, stretch=3)
-
-        cd = totales.get('cd', 0)
+        # consulta WHERE proyecto_id=? sin filtro de sub). Va pegada arriba:
+        # si se estira al alto del donut, las filas se reparten el hueco y el
+        # resumen queda con espacios enormes (David Ramos, 15 sep 2026).
+        if solo_sub:
+            card, _ = self._build_resumen_card(
+                title=f"RESUMEN DE COSTOS — {self._nombre_sub_actual().upper()}",
+                all_subs=False)
+        else:
+            card, _ = self._build_resumen_card(all_subs=True)
+        hl_top.addWidget(card, stretch=3, alignment=Qt.AlignTop)
 
         # Card Gráfico donut
         if mo_val + mat_val + eq_val + sc_val > 0:
@@ -6319,7 +6393,7 @@ class ProyectoView(QWidget):
             ]
             if sc_val > 0:
                 slices.append(("Sub-contratos", sc_val, "#7A36B1"))
-            self._donut = _DonutChart(slices)
+            self._donut = _DonutChart(slices, moneda=self._moneda)
             vl_c.addWidget(self._donut, stretch=1)
             hl_top.addWidget(card_chart, stretch=2)
 
@@ -6882,6 +6956,7 @@ class ProyectoView(QWidget):
                                     "El portapapeles de partidas está vacío.")
             return
         ctx_item, ctx_es_titulo = self._contexto_seleccion()
+        ancla = self._nueva_ancla_insercion()
         conn = get_db()
         try:
             nuevos = _pclip.pegar(conn, self.pid, self._sub_ppto_id,
@@ -6896,6 +6971,9 @@ class ProyectoView(QWidget):
             return
         conn.close()
         self.recargar_partidas()
+        # Las raíces pegadas van justo debajo de la selección (mismo criterio
+        # que «Agregar partida»); `pegar` las graba con el primer código libre.
+        self._mover_debajo_del_ancla(nuevos, ancla)
         self.tree._renumerar()
         self.actualizar_total()
         win = self.window()
@@ -7049,6 +7127,7 @@ class ProyectoView(QWidget):
             return
         from views.agregar_partida_dialog import AgregarPartidaDialog
         ctx_item, ctx_es_titulo = self._contexto_seleccion()
+        self._ancla_insercion = self._nueva_ancla_insercion()
         dlg = AgregarPartidaDialog(
             self.pid, self.usuario,
             tab_inicial=0,
@@ -7059,6 +7138,7 @@ class ProyectoView(QWidget):
         )
         dlg.partidas_agregadas.connect(self._on_partidas_agregadas)
         dlg.exec()
+        self._ancla_insercion = None
 
     def _nuevo_titulo(self):
         if not self._require_editable("agregar títulos"):
@@ -7075,8 +7155,76 @@ class ProyectoView(QWidget):
         dlg.partidas_agregadas.connect(self._on_partidas_agregadas)
         dlg.exec()
 
+    # ── Insertar DEBAJO de la selección ──────────────────────────────────
+    # Pedido de David Ramos (15 sep 2026): una partida nueva entra justo
+    # debajo de lo seleccionado —primer hijo si es un título, hermana
+    # siguiente si es una partida— y el resto se renumera. Los diálogos
+    # graban la fila con el primer código libre de su nivel (rellenando
+    # huecos, o sea casi siempre al final), así que la posición la pone la
+    # vista, con el mismo patrón que `_duplicar_partida`: mover el nodo en
+    # el árbol y `_renumerar`. Los títulos NO cambian: David dijo que su
+    # inserción «está excelente».
+
+    _ancla_insercion: dict | None = None
+
+    def _nueva_ancla_insercion(self) -> dict | None:
+        """Selección real del árbol (id, es_titulo) más la foto de los ids
+        que ya existen, para saber luego cuáles son los nuevos. Sin selección
+        → None y la partida cuelga del último título, como siempre."""
+        sel = self.tree.selectedItems()
+        if not sel:
+            return None
+        pid = sel[0].data(0, Qt.UserRole)
+        if pid is None:
+            return None
+        return {'id': pid, 'es_titulo': bool(sel[0].data(0, Qt.UserRole + 1)),
+                'antes': set(self._id_to_item)}
+
+    def _mover_debajo_del_ancla(self, ids_nuevos, ancla) -> bool:
+        """Coloca los nodos `ids_nuevos` (en el orden de su código) justo
+        debajo del ancla: como primeros hijos de un título, o como hermanos
+        siguientes de una partida. Solo mueve nodos del árbol; el llamador
+        debe `_renumerar()` después. Devuelve True si movió algo."""
+        if not ancla:
+            return False
+        nodo_ancla = self._id_to_item.get(ancla['id'])
+        nodos = [self._id_to_item[i] for i in ids_nuevos if i in self._id_to_item]
+        if nodo_ancla is None or not nodos:
+            return False
+        nodos = [n for n in nodos if n is not nodo_ancla]
+        root = self.tree.invisibleRootItem()
+
+        def _clave(n):
+            return [int(t) if t.isdigit() else 0 for t in (n.text(0) or '').split('.')]
+        nodos.sort(key=_clave)
+        if ancla['es_titulo']:
+            destino, pos = nodo_ancla, 0
+        else:
+            destino = nodo_ancla.parent() or root
+            pos = destino.indexOfChild(nodo_ancla) + 1
+        for n in nodos:
+            p = n.parent() or root
+            p.takeChild(p.indexOfChild(n))
+            destino.insertChild(pos, n)
+            pos += 1
+        if destino is not root:
+            destino.setExpanded(True)
+        return True
+
     def _on_partidas_agregadas(self):
         self.recargar_partidas()
+        ancla = self._ancla_insercion
+        if ancla:
+            nuevos = [i for i in self._id_to_item if i not in ancla['antes']]
+            if self._mover_debajo_del_ancla(nuevos, ancla):
+                # Renumera el sub-presupuesto y reconstruye el árbol
+                # (`partidas_reordenadas`); `_id_to_item` se rehace.
+                self.tree._renumerar()
+            # La siguiente que agregue este mismo diálogo entra debajo de la
+            # última: así una tanda de la biblioteca queda en orden.
+            if nuevos:
+                self._ancla_insercion = {'id': nuevos[-1], 'es_titulo': False,
+                                         'antes': set(self._id_to_item)}
         # Sin selección tras agregar → la próxima partida cuelga del ÚLTIMO título
         # (evita que quede "pegada" al primer título por una selección fantasma).
         self.tree.blockSignals(True)
@@ -9819,7 +9967,7 @@ class ProyectoView(QWidget):
             QListWidgetItem, QPushButton, QApplication, QMessageBox,
             QProgressDialog,
         )
-        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+        from views.imprimir_seleccion_dialog import VistaPreviaDialog, nombre_archivo_pdf
 
         opciones = self.opciones_impresion()
         if not opciones:
@@ -9896,24 +10044,14 @@ class ProyectoView(QWidget):
         if not pdf_path:
             return      # el panel ya avisó (nada que imprimir / cancelado)
 
-        # Vista previa con el papel y la orientación del PDF: el presupuesto
-        # sale vertical y los cronogramas apaisados.
-        from utils.impresion import ajustar_printer_al_pdf
-        printer = QPrinter(QPrinter.HighResolution)
-        ajustar_printer_al_pdf(printer, pdf_path)
-        preview = QPrintPreviewDialog(printer, self)
-        preview.setWindowTitle(f"Vista previa de impresión — {nombre}")
-        preview.resize(940, 760)
-        preview.paintRequested.connect(
-            lambda p, pdf=pdf_path: self._paint_pdf_to_printer(pdf, p)
-        )
-        preview.exec()
-
-    def _paint_pdf_to_printer(self, pdf_path: str, printer):
-        """Renderiza cada página del PDF al QPrinter (vista previa de
-        impresión): el helper compartido gira cada página a su orientación."""
-        from utils.impresion import pintar_pdf_en_printer
-        pintar_pdf_en_printer(printer, pdf_path)
+        # Vista previa PROPIA (visor PDF + «Guardar PDF…» + «Imprimir…»), la
+        # misma de «Imprimir selección». El QPrintPreviewDialog de Qt usaba
+        # los iconos del tema y en Windows el de imprimir salía casi blanco
+        # (David Ramos, 15 sep 2026); además pedía poder guardar el PDF desde
+        # aquí sin pasar por el Centro. Imprimir toma papel y orientación del
+        # PDF, como antes.
+        VistaPreviaDialog(self, pdf_path, nombre,
+                          nombre_archivo=nombre_archivo_pdf(nombre)).exec()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Centro de Reportes — vista anclada (page del root_stack)
@@ -11624,15 +11762,64 @@ class ProyectoView(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _DonutChart(QWidget):
-    """Gráfico de donut con leyenda. datos = [(label, valor, color_hex), ...]"""
+    """Gráfico de donut con leyenda. datos = [(label, valor, color_hex), ...]
 
-    def __init__(self, datos: list, titulo: str = "", parent=None):
+    Con `moneda` la leyenda lleva el monto además del porcentaje
+    («S/ 12,345.00 · 45.3 %»): David Ramos (15 sep 2026) quería leer
+    cuánto es la mano de obra sin ir a calcularlo desde el porcentaje."""
+
+    def __init__(self, datos: list, titulo: str = "", parent=None,
+                 moneda: str | None = None):
         super().__init__(parent)
         self._datos  = [(l, v, QColor(c)) for l, v, c in datos if v > 0]
         self._titulo = titulo
+        self._moneda = moneda
         self.setMinimumSize(160, 200)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAttribute(Qt.WA_TranslucentBackground)
+
+    def _leyenda_textos(self) -> list:
+        """[(etiqueta, monto, porcentaje)] tal como se pintan, en TRES
+        columnas: el monto va vacío si no hay moneda. Monto y porcentaje son
+        columnas de verdad (alineadas a la derecha cada una) para que la
+        fila Total caiga bajo los montos — con un solo texto «monto · %»
+        el Total quedaba corrido (captura de Marco, 15 sep 2026)."""
+        total = sum(v for _, v, _ in self._datos)
+        out = []
+        for label, value, _c in self._datos:
+            pct = (value / total * 100) if total > 0 else 0.0
+            monto = fmt(value, self._moneda) if self._moneda is not None else ''
+            out.append((label, monto, f"{pct:.1f}%"))
+        return out
+
+    _FILA_1L, _FILA_2L = 20, 34     # alto de una entrada de la leyenda
+    _GAP = 12                       # separación entre columnas
+
+    def _columnas_leyenda(self, fm) -> tuple:
+        """(ancho de la columna de montos, ancho de la de porcentajes)."""
+        textos = self._leyenda_textos()
+        w_pct = max([fm.horizontalAdvance(p) for _l, _m, p in textos] or [0])
+        montos = [m for _l, m, _p in textos if m] + \
+                 ([self._texto_total()] if self._moneda is not None else [])
+        w_amt = max([fm.horizontalAdvance(m) for m in montos] or [0])
+        return w_amt, w_pct
+
+    def _filas_leyenda(self, W: int, fm) -> list:
+        """[(etiqueta, monto, pct, dos_lineas)]: una entrada va en dos líneas
+        (monto y porcentaje debajo, en sus columnas) cuando la etiqueta no
+        cabe junto a ellas en el ancho `W`. En la laptop de Marco «Mano de
+        Obra» salía «Mano de O…» (15 sep 2026)."""
+        w_amt, w_pct = self._columnas_leyenda(fm)
+        w_cols = w_pct + ((w_amt + self._GAP) if w_amt else 0)
+        out = []
+        for label, monto, pct in self._leyenda_textos():
+            cabe = 28 + fm.horizontalAdvance(label) + 8 + w_cols + 10 <= W
+            out.append((label, monto, pct, not cabe))
+        return out
+
+    def _texto_total(self) -> str:
+        total = sum(v for _, v, _ in self._datos)
+        return fmt(total, self._moneda) if self._moneda is not None else ''
 
     def actualizar(self, datos: list, titulo: str = ""):
         self._datos  = [(l, v, QColor(c)) for l, v, c in datos if v > 0]
@@ -11653,8 +11840,18 @@ class _DonutChart(QWidget):
 
         W, H = self.width(), self.height()
 
-        # Área del donut: cuadrado centrado en la mitad superior
-        leyenda_h = len(self._datos) * 20 + 10
+        # Área del donut: cuadrado centrado en la mitad superior. La leyenda
+        # mide según sus filas (una o dos líneas) más la del total.
+        f_ley = QFont(); f_ley.setPointSize(8)
+        fm_ley = QFontMetrics(f_ley)
+        filas = self._filas_leyenda(W, fm_ley)
+        leyenda_h = sum(self._FILA_2L if dos else self._FILA_1L
+                        for _l, _m, _p, dos in filas) + 10
+        if self._moneda is not None:
+            leyenda_h += self._FILA_1L
+        minimo = max(200, 110 + leyenda_h)
+        if self.minimumHeight() != minimo:
+            self.setMinimumHeight(minimo)
         donut_h   = max(80, H - leyenda_h - 10)
         size      = min(W - 20, donut_h)
         cx        = W // 2
@@ -11693,26 +11890,50 @@ class _DonutChart(QWidget):
             painter.drawText(QRect(cx - r_int, cy + 2, r_int * 2, 14),
                              Qt.AlignCenter, self._titulo)
 
-        # Leyenda debajo del donut
+        # Leyenda debajo del donut: etiqueta a la izquierda, monto y
+        # porcentaje a la derecha; si no caben juntos, el monto baja a una
+        # segunda línea.
         y_ley = 10 + size + 10
-        f_ley = QFont(); f_ley.setPointSize(8)
         painter.setFont(f_ley)
-        for label, value, color in self._datos:
-            pct = value / total * 100
+        fm = fm_ley
+        w_amt, w_pct = self._columnas_leyenda(fm)
+        # Columnas, de derecha a izquierda: porcentaje y monto.
+        r_pct = QRect(W - 10 - w_pct, 0, w_pct, 18)
+        r_amt = QRect(W - 10 - w_pct - self._GAP - w_amt, 0, w_amt, 18)
+        w_cols = w_pct + ((w_amt + self._GAP) if w_amt else 0)
+        for (label, monto, pct, dos), (_l, _v, color) in zip(filas, self._datos):
             # Cuadrito de color
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
             painter.drawRoundedRect(10, y_ley + 3, 12, 12, 3, 3)
-            # Texto
+            # Etiqueta: si cabe, hasta las columnas; si no, toda la línea.
+            w_lbl = (W - 38) if dos else (W - 38 - w_cols - 8)
             painter.setPen(QColor("#485A6C"))
-            painter.drawText(QRect(28, y_ley, W - 38, 18),
+            painter.drawText(QRect(28, y_ley, w_lbl, 18),
                              Qt.AlignLeft | Qt.AlignVCenter,
-                             f"{label}")
+                             fm.elidedText(label, Qt.ElideRight, w_lbl))
+            y_num = y_ley + 16 if dos else y_ley
             painter.setPen(QColor("#273445"))
-            pct_txt = f"{pct:.1f}%"
-            painter.drawText(QRect(28, y_ley, W - 38, 18),
-                             Qt.AlignRight | Qt.AlignVCenter, pct_txt)
-            y_ley += 20
+            if monto:
+                painter.drawText(r_amt.translated(0, y_num),
+                                 Qt.AlignRight | Qt.AlignVCenter, monto)
+            painter.drawText(r_pct.translated(0, y_num),
+                             Qt.AlignRight | Qt.AlignVCenter, pct)
+            y_ley += self._FILA_2L if dos else self._FILA_1L
+        # Suma total al pie (David Ramos, 15 sep 2026: «incluyendo la suma
+        # total»), separada por una línea fina.
+        if self._moneda is not None:
+            painter.setPen(QPen(QColor("#D6DCE8"), 1))
+            painter.drawLine(28, y_ley + 1, W - 10, y_ley + 1)
+            f_tot = QFont(f_ley); f_tot.setBold(True)
+            painter.setFont(f_tot)
+            painter.setPen(QColor("#485A6C"))
+            painter.drawText(QRect(28, y_ley + 2, W - 38, 18),
+                             Qt.AlignLeft | Qt.AlignVCenter, "Total")
+            painter.setPen(QColor("#273445"))
+            painter.drawText(r_amt.translated(0, y_ley + 2),
+                             Qt.AlignRight | Qt.AlignVCenter,
+                             self._texto_total())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
