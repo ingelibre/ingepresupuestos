@@ -11774,9 +11774,32 @@ class _DonutChart(QWidget):
         self._datos  = [(l, v, QColor(c)) for l, v, c in datos if v > 0]
         self._titulo = titulo
         self._moneda = moneda
-        self.setMinimumSize(160, 200)
+        self.setMinimumWidth(160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAttribute(Qt.WA_TranslucentBackground)
+
+    # El alto mínimo depende de la leyenda (cuántas entradas y cuántas van
+    # en dos líneas, que depende del ancho): se declara por `minimumSizeHint`
+    # y se vuelve a pedir en cada resize. Con un mínimo fijo de 200 px la
+    # leyenda de cuatro tipos más el Total quedaba cortada.
+    def _alto_necesario(self, W: int) -> int:
+        f_ley = QFont(); f_ley.setPointSize(8)
+        filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley))
+        ley = sum(self._FILA_2L if dos else self._FILA_1L
+                  for *_r, dos in filas) + 10
+        if self._moneda is not None:
+            ley += self._FILA_1L
+        return max(200, 110 + ley)
+
+    def minimumSizeHint(self):
+        return QSize(160, self._alto_necesario(self.width()))
+
+    def sizeHint(self):
+        return QSize(240, self._alto_necesario(self.width()))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.updateGeometry()
 
     def _leyenda_textos(self) -> list:
         """[(etiqueta, monto, porcentaje)] tal como se pintan, en TRES
@@ -11849,9 +11872,6 @@ class _DonutChart(QWidget):
                         for _l, _m, _p, dos in filas) + 10
         if self._moneda is not None:
             leyenda_h += self._FILA_1L
-        minimo = max(200, 110 + leyenda_h)
-        if self.minimumHeight() != minimo:
-            self.setMinimumHeight(minimo)
         donut_h   = max(80, H - leyenda_h - 10)
         size      = min(W - 20, donut_h)
         cx        = W // 2
