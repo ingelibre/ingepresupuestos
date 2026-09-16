@@ -42,6 +42,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="3.0.14" date="2026-09-16">
+      <description>
+        <p>Gracias a los usuarios por sus reportes y pedidos. Errores corregidos: en el pie de presupuesto la ✕ borraba siempre la última línea; el Resumen limitado a un sub-presupuesto no seguía al cambiar de sub-presupuesto; la fila Total de la distribución del costo directo se montaba sobre el monto en tarjetas angostas; la pestaña Insumos mezclaba subcontratos con materiales; el PDF del Gantt traía Predecesoras aunque estuviera oculta. Nuevo: Insumos ordena por columna con clic en el encabezado; la línea nueva del pie entra debajo de la seleccionada; «Editar formato» permite quitar la línea sobre el pie para sellos y firmas; el menú de columnas del Gantt muestra todas o deja solo id y Descripción; título corto por sub-presupuesto en el Resumen; «Tipo», «COSTO DIRECTO» y «Guardar en Biblioteca» como rótulos.</p>
+      </description>
+    </release>
     <release version="3.0.12" date="2026-09-15">
       <description>
         <p>Gracias a los usuarios por sus reportes y pedidos. Errores corregidos: los subcontratos se sumaban como materiales en el análisis de costos, en pantalla y en el reporte; en Windows los radios y casillas de «Exportar Gantt» no mostraban qué estaba elegido y el botón de imprimir de la vista previa no se veía; la Curva S recortaba los montos; el Resumen de costos desalineaba nombre y monto y dejaba huecos. Nuevo: una partida nueva entra justo debajo de la seleccionada y se renumera; vista previa propia con «Guardar PDF…» e «Imprimir…» para Ctrl+P, la hoja de metrados e imprimir selección; la distribución del costo directo muestra montos y total; el Resumen puede limitarse al sub-presupuesto a la vista; el PDF del Gantt sale con las mismas columnas que la pantalla; la cuadrilla va en blanco donde no aplica, también en pantalla.</p>
