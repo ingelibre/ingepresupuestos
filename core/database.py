@@ -1425,12 +1425,15 @@ def get_insumos_para_partidas(conn, partida_ids: list[int],
             mayor = max(insumos.values(), key=lambda r: r['parcial_total'])
             mayor['parcial_total'] = _r2(mayor['parcial_total'] + delta)
 
-    # Ordenar: MO=1 (por jerarquía: capataz>operario>oficial>peón), EQ=2,
-    # otros=3, luego por descripcion.
-    tipo_orden = {'MO': 1, 'EQ': 2}
+    # Ordenar por tipo MO → MAT → EQ → SC (MO por jerarquía: capataz >
+    # operario > oficial > peón) y luego por descripción. Es el mismo orden
+    # del ACU y de los reportes de insumos (PDF y Excel); hasta el 16 sep
+    # 2026 solo conocía MO y EQ, y en la pestaña Insumos los subcontratos
+    # salían mezclados con los materiales (David Ramos).
+    tipo_orden = {'MO': 1, 'MAT': 2, 'EQ': 3, 'SC': 4}
     return sorted(
         insumos.values(),
-        key=lambda r: (tipo_orden.get(r['tipo'], 3),
+        key=lambda r: (tipo_orden.get(r['tipo'], 5),
                        _orden_mo(r['descripcion']) if r['tipo'] == 'MO' else 0,
                        (r['descripcion'] or '').lower()),
     )

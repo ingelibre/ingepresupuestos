@@ -627,7 +627,7 @@ class _DialogExportarGanttPdf(QDialog):
         ("Tabloide / Ledger (279 × 432 mm)", "Tabloid"),
     ]
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, pred_visible: bool = True):
         super().__init__(parent)
         self.setWindowTitle("Exportar Gantt")
         self.setMinimumWidth(560)
@@ -772,8 +772,12 @@ class _DialogExportarGanttPdf(QDialog):
 
         # Incluir columna Pred.
         from PySide6.QtWidgets import QCheckBox
+        # Arranca como la pantalla: si Pred. está oculta en la tabla, la
+        # casilla sale apagada (David Ramos, 16 sep 2026: la ocultaba y el
+        # PDF la traía igual, al revés que Inicio/Fin). Sigue pudiendo
+        # marcarla aquí solo para esta exportación.
         self.chk_pred = QCheckBox("Incluir columna de Predecesoras")
-        self.chk_pred.setChecked(True)   # importante en un Gantt → activa por defecto
+        self.chk_pred.setChecked(bool(pred_visible))
         self.chk_pred.setStyleSheet("color:#273445; font-size:12px;")
         vl.addWidget(self.chk_pred)
 
@@ -908,8 +912,9 @@ class _DialogExportarGanttPdf(QDialog):
         self.imagen_solicitada.emit(self._opts())
 
     @classmethod
-    def preguntar(cls, parent=None, on_preview=None, on_imagen=None):
-        dlg = cls(parent)
+    def preguntar(cls, parent=None, on_preview=None, on_imagen=None,
+                  pred_visible: bool = True):
+        dlg = cls(parent, pred_visible=pred_visible)
         if on_preview is not None:
             dlg.preview_solicitado.connect(on_preview)
         if on_imagen is not None:
@@ -2103,11 +2108,29 @@ class GanttWidget(QWidget):
         _QS("ingePresupuestos", "layout").setValue("gantt_tbl_col_widths", widths)
 
     # ── Mostrar / ocultar columnas (clic derecho en el encabezado) ───────
+    # Lo mínimo que queda al «ocultar todas»: id y Descripción (David Ramos,
+    # 16 sep 2026: pidió que la primera opción del menú alternara entre
+    # mostrar todas y dejar solo esas dos, como el «Todos» de los niveles).
+    _COLS_MINIMAS = (0, 2)
+
+    def _hay_columnas_ocultas(self) -> bool:
+        return any(self.tbl.isColumnHidden(c) for c in range(self.tbl.columnCount()))
+
+    def _alternar_todas_las_columnas(self):
+        """Con alguna oculta → mostrar todas; con todas a la vista → dejar
+        solo id y Descripción."""
+        mostrar = self._hay_columnas_ocultas()
+        for c in range(self.tbl.columnCount()):
+            self.tbl.setColumnHidden(c, not mostrar and c not in self._COLS_MINIMAS)
+        self._save_col_hidden()
+
     def _on_header_ctx_menu(self, pos):
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-        hdr = menu.addAction("Mostrar / ocultar columnas")
-        hdr.setEnabled(False)
+        hdr = menu.addAction("Mostrar todas las columnas"
+                             if self._hay_columnas_ocultas()
+                             else "Ocultar columnas (dejar id y Descripción)")
+        hdr.triggered.connect(self._alternar_todas_las_columnas)
         menu.addSeparator()
         for c in range(self.tbl.columnCount()):
             item = self.tbl.horizontalHeaderItem(c)
@@ -2882,6 +2905,7 @@ class GanttWidget(QWidget):
         opts = _DialogExportarGanttPdf.preguntar(
             self, on_preview=self._vista_previa_pdf,
             on_imagen=self._exportar_imagen,
+            pred_visible=not self.tbl.isColumnHidden(7),
         )
         if opts is None:
             return
@@ -3578,8 +3602,8 @@ class GanttWidget(QWidget):
     def _pdf_columnas_ocultas(self) -> set:
         """Índices de columnas de la tabla ocultas en pantalla (clic derecho
         en el encabezado) que el PDF también omite. Descripción nunca se
-        oculta; Pred. la decide la casilla del diálogo de exportar, no la
-        pantalla."""
+        oculta; Pred. la decide la casilla del diálogo de exportar, que
+        arranca como la pantalla (`pred_visible`)."""
         tbl = getattr(self, 'tbl', None)
         if tbl is None:
             return set()
@@ -4759,16 +4783,18 @@ class GanttWidget(QWidget):
         row1_on = incluir_footer or incluir_page
         row2_on = incluir_legend
 
-        # Separador superior (solo si hay algo que pintar)
-        p.setPen(QPen(QColor(SLATE_100), max(1, mm(0.18))))
-        p.drawLine(QPointF(x + mm(4), y), QPointF(x + w - mm(4), y))
-
         # Cargar formato (pie izq/cen/der custom)
         fmt_ = {}
         try:
             fmt_ = _get_formato_reportes() or {}
         except Exception:
             pass
+
+        # Separador superior, salvo que el formato lo apague
+        from core.pdf_reports import pie_linea_oculta as _linea_oc
+        if not _linea_oc(fmt_):
+            p.setPen(QPen(QColor(SLATE_100), max(1, mm(0.18))))
+            p.drawLine(QPointF(x + mm(4), y), QPointF(x + w - mm(4), y))
 
         if row1_on and row2_on:
             row1_h = h * 0.50
@@ -9805,9 +9831,11 @@ class CurvaSWidget(QWidget):
                 # ── Footer tripartito estilo Resumen Ejecutivo ───────────────
                 # IZQ Cliente · CENTRO fecha · DER Página X de N. Línea slate-100
                 # de separador arriba. Espejo de `_draw_footer` del PDF principal.
-                painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
-                painter.drawLine(QPointF(mm(2), page_h - mm(6)),
-                                    QPointF(page_w - mm(2), page_h - mm(6)))
+                from core.pdf_reports import pie_linea_oculta as _linea_oc
+                if not _linea_oc():
+                    painter.setPen(QPen(QColor("#CBD5E1"), 0.5))
+                    painter.drawLine(QPointF(mm(2), page_h - mm(6)),
+                                     QPointF(page_w - mm(2), page_h - mm(6)))
                 painter.setPen(QColor(SLATE_300))
                 f.setPointSizeF(7); f.setBold(False); painter.setFont(f)
                 cliente_txt = (f"Cliente: {proy['cliente']}"

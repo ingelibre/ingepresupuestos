@@ -74,6 +74,10 @@ FORMATO_CLAVES = {
     # El pie entero (línea + tres textos). Marco, 8 sep 2026: «debería haber
     # una opción para desactivar todo el pie así como con el encabezado».
     'rep_pie_oculto': '0',
+    # Solo la línea que separa el pie del cuerpo. '1' = los textos del pie
+    # siguen, la línea no: David Ramos (16 sep 2026) la quería fuera para
+    # que sellos y firmas no la crucen cuando el margen no alcanza.
+    'rep_pie_linea_oculta': '0',
     # Leyenda del Gantt (Tarea / Crítica / Hito / Dependencia / Hoy / Fin
     # plazo) bajo el pie del PDF del Gantt. '1' = no imprimirla.
     'rep_gantt_leyenda_oculta': '0',
@@ -255,6 +259,12 @@ def encabezado_oculto(formato: dict | None = None) -> bool:
 def pie_oculto(formato: dict | None = None) -> bool:
     """¿El usuario apagó «Imprimir el pie en cada página»? (ver `encabezado_oculto`)."""
     return _oculto(formato if formato is not None else get_formato(), 'rep_pie_oculto')
+
+
+def pie_linea_oculta(formato: dict | None = None) -> bool:
+    """¿El usuario apagó la línea sobre el pie? Los textos del pie siguen.
+    La miran el PDF principal, el Gantt y la Curva S."""
+    return _oculto(formato if formato is not None else get_formato(), 'rep_pie_linea_oculta')
 
 
 def _oculto(formato: dict, clave: str) -> bool:
@@ -4301,12 +4311,13 @@ class _PdfRenderer:
             return  # el usuario lo apagó en «Editar formato»
 
         y = self.page_h - self.footer_h + 6 - self.footer_dy   # margen inferior configurable
-        # Línea separadora
-        pen = QPen(QColor(SLATE_100))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        painter.drawLine(self.margin_x, y,
-                         self.page_w - self.margin_r, y)
+        # Línea separadora (opcional: «Editar formato → Encabezado y pie»)
+        if not _oculto(self.formato, 'rep_pie_linea_oculta'):
+            pen = QPen(QColor(SLATE_100))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.drawLine(self.margin_x, y,
+                             self.page_w - self.margin_r, y)
 
         f = QFont('Inter', 7)
         painter.setFont(f)

@@ -709,6 +709,12 @@ class FormatoReporteDialog(QDialog):
         self.inp_pie_der, self.chk_pie_der = self._fila_pie(
             form, "Texto derecho:", "Por defecto: Página X de N")
         lay.addLayout(form)
+        self.chk_pie_linea = QCheckBox("Imprimir la línea que separa el pie del cuerpo")
+        self.chk_pie_linea.setCursor(Qt.PointingHandCursor)
+        self.chk_pie_linea.setToolTip(
+            "Quítala si necesitas ese espacio limpio para sellos y firmas; "
+            "los textos del pie se imprimen igual.")
+        lay.addWidget(self.chk_pie_linea)
         lay.addWidget(self._hint(
             "Dejar el texto en blanco usa el valor por defecto. Marca «Vacío» "
             "para que ese hueco no se imprima — por ejemplo, vacío a la "
@@ -730,7 +736,8 @@ class FormatoReporteDialog(QDialog):
 
     def _on_pie_toggled(self, on: bool):
         for w in (self.inp_pie_izq, self.chk_pie_izq, self.inp_pie_cen,
-                  self.chk_pie_cen, self.inp_pie_der, self.chk_pie_der):
+                  self.chk_pie_cen, self.inp_pie_der, self.chk_pie_der,
+                  self.chk_pie_linea):
             w.setEnabled(on)
         if on:
             for casilla, campo in ((self.chk_pie_izq, self.inp_pie_izq),
@@ -828,6 +835,8 @@ class FormatoReporteDialog(QDialog):
         self.chk_encabezado.setChecked(
             str(f.get('rep_encabezado_oculto') or '0') != '1')
         self.chk_pie.setChecked(str(f.get('rep_pie_oculto') or '0') != '1')
+        self.chk_pie_linea.setChecked(
+            str(f.get('rep_pie_linea_oculta') or '0') != '1')
         self.chk_gantt_leyenda.setChecked(
             str(f.get('rep_gantt_leyenda_oculta') or '0') != '1')
         self._on_pie_toggled(self.chk_pie.isChecked())
@@ -983,6 +992,7 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_derecho']       = self.inp_pie_der.text().strip()
         self._formato['rep_encabezado_oculto'] = '0' if self.chk_encabezado.isChecked() else '1'
         self._formato['rep_pie_oculto']        = '0' if self.chk_pie.isChecked() else '1'
+        self._formato['rep_pie_linea_oculta']  = '0' if self.chk_pie_linea.isChecked() else '1'
         self._formato['rep_gantt_leyenda_oculta'] = '0' if self.chk_gantt_leyenda.isChecked() else '1'
         self._formato['rep_pie_izq_oculto']    = '1' if self.chk_pie_izq.isChecked() else '0'
         self._formato['rep_pie_cen_oculto']    = '1' if self.chk_pie_cen.isChecked() else '0'

@@ -34,6 +34,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFileDialog as _QFileDialog
 
 from core.config import DB_PATH
+from widgets.num_item import NumItem
 from core.database import (
     get_db, _r2, _rn, _recalcular_pu, calcular_totales,
     get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
@@ -184,8 +185,8 @@ _NEUTRAL_BG = QColor('#F0F2F5')   # fondo neutro para celdas no editables
 
 def _cols_acu():
     from utils.i18n import tr
-    return ["Tip", tr("Descripción"), "Und.", tr("Cuadrilla"), tr("Cantidad"), tr("Precio"), tr("Parcial")]
-COLS_ACU  = ["Tip", "Descripción", "Und.", "Cuadrilla", "Cantidad", "Precio", "Parcial"]
+    return [tr("Tipo"), tr("Descripción"), "Und.", tr("Cuadrilla"), tr("Cantidad"), tr("Precio"), tr("Parcial")]
+COLS_ACU  = ["Tipo", "Descripción", "Und.", "Cuadrilla", "Cantidad", "Precio", "Parcial"]
 
 
 
@@ -652,6 +653,16 @@ class _AcuTable(QTableWidget):
         if self._key_handler and self._key_handler(event):
             return
         super().keyPressEvent(event)
+
+
+class _TipoItem(QTableWidgetItem):
+    """Badge MO/MAT/EQ/SC que al ordenar por la columna Tipo respeta la
+    jerarquía MO → MAT → EQ → SC en vez del alfabeto (EQ, MAT, MO, SC).
+    Ordenar dentro de un tipo lo deja como estaba (el orden es estable)."""
+    _ORD = {'MO': 1, 'MAT': 2, 'EQ': 3, 'SC': 4}
+
+    def __lt__(self, other):
+        return self._ORD.get(self.text(), 9) < self._ORD.get(other.text(), 9)
 
 
 class _AcuBadgeDelegate(QStyledItemDelegate):
@@ -2644,9 +2655,12 @@ class ProyectoView(QWidget):
         btn_add.clicked.connect(self._agregar_recurso)
         hl.addWidget(btn_add)
 
-        btn_bib = QPushButton("Guardar")
+        # Dice a qué guarda: el ACU se guarda solo, celda a celda, y David
+        # Ramos (16 sep 2026) creyó que este botón era el «Guardar» del ACU
+        # y pidió verlo en gris cuando no hubiera cambios.
+        btn_bib = QPushButton("Guardar en Biblioteca")
         btn_bib.setFixedHeight(22)
-        btn_bib.setToolTip("Guardar en Biblioteca")
+        btn_bib.setToolTip("Guardar este análisis de costo unitario en la Biblioteca")
         btn_bib.setCursor(QCursor(Qt.PointingHandCursor))
         btn_bib.setStyleSheet(
             f"QPushButton {{ background:{GREEN_500}; color:white; border:none; border-radius:4px;"
@@ -2696,7 +2710,7 @@ class ProyectoView(QWidget):
         self.tbl_acu = _AcuTable(0, len(COLS_ACU))
         self.tbl_acu.setHorizontalHeaderLabels(_cols_acu())
         self.tbl_acu.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tbl_acu.setColumnWidth(0, 38)   # Tip badge
+        self.tbl_acu.setColumnWidth(0, 42)   # badge de tipo (como en Insumos)
         self.tbl_acu.setColumnWidth(2, 40)
         self.tbl_acu.setColumnWidth(3, 70)
         self.tbl_acu.setColumnWidth(4, 80)
@@ -2907,6 +2921,13 @@ class ProyectoView(QWidget):
         self.tbl_ins.setItemDelegateForColumn(0, _AcuBadgeDelegate(self))
         self.tbl_ins.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl_ins.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # Ordenar con clic en el encabezado, como el catálogo (David Ramos,
+        # 16 sep 2026). Sin indicador (-1) la tabla sale agrupada por tipo,
+        # que es el orden de siempre; Cantidad, Precio y Parcial ordenan por
+        # el número (`NumItem`) y Tipo por la jerarquía (`_TipoItem`). El
+        # orden elegido sobrevive a las recargas (ver `cargar_insumos`).
+        self.tbl_ins.horizontalHeader().setSortIndicator(-1, Qt.AscendingOrder)
+        self.tbl_ins.setSortingEnabled(True)
 
         def _ins_key(event):
             if event.key() == Qt.Key_Escape:
@@ -3596,7 +3617,9 @@ class ProyectoView(QWidget):
         conn.close()
 
         cd = self._total_proyecto(all_subs=all_subs)
-        filas = [("Costo Directo", cd, SLATE_700, False)]
+        # En mayúsculas como el resto de filas y como lo imprimen PDF, Excel
+        # y Word (David Ramos, 16 sep 2026).
+        filas = [("COSTO DIRECTO", cd, SLATE_700, False)]
         acum = cd; last_sub = cd
 
         for rub in rubros:
@@ -4653,10 +4676,10 @@ class ProyectoView(QWidget):
                     sp = QWidget(); sp.setFixedWidth(58)
                     row_hl.addWidget(sp)
 
-                # Botón eliminar
-                def _del_row(idx=i):
-                    self._pl_data.pop(idx); _save_all()
-
+                # Botón eliminar. El índice va ATADO en la lambda: con
+                # `lambda: _del_row()` todas las ✕ resolvían el `_del_row`
+                # de la última vuelta del bucle y borraban siempre la última
+                # línea (David Ramos, 16 sep 2026).
                 btn_x = QPushButton("✕")
                 btn_x.setFixedSize(20, 20)
                 btn_x.setCursor(Qt.PointingHandCursor)
@@ -4667,7 +4690,7 @@ class ProyectoView(QWidget):
                     f"QPushButton:hover {{ color:{RED_500}; background:transparent; border:none;"
                     f" padding:0px; min-height:0px; min-width:0px; }}"
                 )
-                btn_x.clicked.connect(lambda: _del_row())
+                btn_x.clicked.connect(lambda _=False, idx=i: _del(idx))
                 row_hl.addWidget(btn_x)
 
                 # Crear item y asignar widget
@@ -4681,6 +4704,16 @@ class ProyectoView(QWidget):
                 list_w.setItemWidget(item, row_f)
 
         rebuild()
+        # Tras insertar una línea, dejarla seleccionada y con el nombre
+        # listo para escribir (la lista se reconstruye entera al guardar).
+        _sel = getattr(self, '_pl_seleccionar', None)
+        self._pl_seleccionar = None
+        if _sel is not None and 0 <= _sel < list_w.count():
+            list_w.setCurrentRow(_sel)
+            _w = list_w.itemWidget(list_w.item(_sel))
+            _inp = _w.findChild(QLineEdit) if _w is not None else None
+            if _inp is not None:
+                QTimer.singleShot(0, lambda w=_inp: (w.setFocus(), w.selectAll()))
 
         # Altura fija del QListWidget — sin scroll interno
         list_w.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -4712,12 +4745,17 @@ class ProyectoView(QWidget):
         add_hl.setContentsMargins(0, 0, 0, 0)
 
         def _agregar(tipo):
+            # La línea nueva va DEBAJO de la seleccionada, como «insertar
+            # partida»; sin selección, al final (David Ramos, 16 sep 2026).
             mp = 0 if tipo == 'rubro' else 1
-            self._pl_data.append({
-                'id': 0, 'codigo': f'CUSTOM_{len(self._pl_data)}',
+            fila = list_w.currentRow()
+            pos = fila + 1 if 0 <= fila < len(self._pl_data) else len(self._pl_data)
+            self._pl_data.insert(pos, {
+                'id': 0, 'codigo': self._codigo_linea_pie_nuevo(),
                 'nombre': 'Nueva línea', 'pct': 0.0, 'activo': 1,
-                'orden': len(self._pl_data), 'tipo': tipo, 'mostrar_pct': mp,
+                'orden': pos, 'tipo': tipo, 'mostrar_pct': mp,
             })
+            self._pl_seleccionar = pos
             _save_all()
 
         for lbl_t, tipo in [
@@ -4741,6 +4779,24 @@ class ProyectoView(QWidget):
         # Fijar altura total de la card para evitar expansión en el scroll
         card.setFixedHeight(_HDR_H + _LIST_H + _FOOT_H + 2)
         return card
+
+    def _codigo_linea_pie_nuevo(self) -> str:
+        """`CUSTOM_n` que no exista ni en las líneas del pie ni en los
+        detalles guardados (`gastos_generales.rubro`). Antes era
+        `CUSTOM_{len(lineas)}`: al borrar una línea y agregar otra se
+        repetía el código y la nueva heredaba los ítems de detalle de la
+        borrada."""
+        usados = {str(r.get('codigo') or '') for r in getattr(self, '_pl_data', [])}
+        conn = get_db()
+        usados |= {r[0] or '' for r in conn.execute(
+            "SELECT DISTINCT rubro FROM gastos_generales WHERE proyecto_id=?",
+            (self.pid,)).fetchall()}
+        conn.close()
+        n = 0
+        for c in usados:
+            if c.startswith('CUSTOM_') and c[7:].isdigit():
+                n = max(n, int(c[7:]) + 1)
+        return f'CUSTOM_{n}'
 
     # ── Tab Resumen ───────────────────────────────────────────────────────────
 
@@ -5541,6 +5597,10 @@ class ProyectoView(QWidget):
         dec = get_decimales_ppto()
         totales_tipo: dict[str, float] = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
 
+        # Recargar con el orden apagado (insertar filas con orden activo las
+        # va reordenando una a una) y volver a encenderlo al final, que
+        # reaplica la columna elegida por el usuario o ninguna (-1).
+        self.tbl_ins.setSortingEnabled(False)
         self.tbl_ins.setRowCount(0)
         for row in rows:
             desc = row['descripcion'] or ''
@@ -5567,7 +5627,7 @@ class ProyectoView(QWidget):
             tip_ins = (f"{tr('Código')}: {codigo or '—'}   ·   "
                        f"{row['unidad'] or '—'}   ·   {fmt(precio, self._moneda)}")
 
-            badge = QTableWidgetItem(tipo)
+            badge = _TipoItem(tipo)
             badge.setBackground(QColor("#FFFFFF"))
             badge.setData(Qt.UserRole,     rid_row)                 # recurso_id
             badge.setData(Qt.UserRole + 1, desc)                   # descripción
@@ -5589,8 +5649,9 @@ class ProyectoView(QWidget):
 
             vals = [desc, row['unidad'] or '', f"{cant:.2f}",
                     fmt(precio, self._moneda), fmt(parcial, self._moneda)]
+            nums = {3: cant, 4: precio, 5: parcial}
             for c, v in enumerate(vals, start=1):
-                it = QTableWidgetItem(str(v))
+                it = NumItem(str(v), nums[c]) if c in nums else QTableWidgetItem(str(v))
                 it.setBackground(bg)
                 if c in (3, 4, 5):
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -5603,6 +5664,7 @@ class ProyectoView(QWidget):
                 else:
                     it.setToolTip(tip_ins)
                 self.tbl_ins.setItem(ri, c, it)
+        self.tbl_ins.setSortingEnabled(True)
 
         es_total = estado is None
 
@@ -5726,10 +5788,16 @@ class ProyectoView(QWidget):
             nuevo = parse_num_opt(ed.text())
             if nuevo is not None:
                 dec = get_decimales_ppto()
-                it_precio.setText(fmt(nuevo, self._moneda))
+                # Tomar el Parcial ANTES de tocar el precio: si la tabla
+                # está ordenada por Precio, cambiarlo mueve la fila y `ri`
+                # ya no apunta a ella. Las celdas viajan con su fila.
                 it_p = tbl.item(ri, 5)
+                it_precio.setData(Qt.UserRole, float(nuevo))
+                it_precio.setText(fmt(nuevo, self._moneda))
                 if it_p:
-                    it_p.setText(fmt(_rn(cant * nuevo, dec), self._moneda))
+                    parcial_n = _rn(cant * nuevo, dec)
+                    it_p.setData(Qt.UserRole, float(parcial_n))
+                    it_p.setText(fmt(parcial_n, self._moneda))
                 QTimer.singleShot(0, lambda: self._guardar_precio_insumo_inline(rec_id, nuevo))
             if delta:
                 QTimer.singleShot(20, lambda: self._abrir_editor_precio_ins(ri + delta))
@@ -6273,6 +6341,18 @@ class ProyectoView(QWidget):
         conn.close()
         return (row['nombre'] if row else '') or 'Principal'
 
+    def _posicion_sub_actual(self) -> tuple[int, int]:
+        """(n, total) del sub-presupuesto a la vista, en el orden de las
+        pestañas: el principal es el 1. Es la misma cuenta que el rótulo
+        «Sub-presupuesto 1/3» encima del árbol."""
+        conn = get_db()
+        ids = [None] + [r[0] for r in conn.execute(
+            "SELECT id FROM sub_presupuestos WHERE proyecto_id=? ORDER BY orden, id",
+            (self.pid,)).fetchall()]
+        conn.close()
+        n = ids.index(self._sub_ppto_id) + 1 if self._sub_ppto_id in ids else 1
+        return n, len(ids)
+
     def _distribucion_cd(self, cond_sub: str, par_sub: tuple, cd: float) -> dict:
         """Montos MO/MAT/EQ/SC del costo directo. Se suman por partida con
         `get_acu_items` (así los % —herramientas en %MO— van a su tipo, cosa
@@ -6362,8 +6442,12 @@ class ProyectoView(QWidget):
         # si se estira al alto del donut, las filas se reparten el hueco y el
         # resumen queda con espacios enormes (David Ramos, 15 sep 2026).
         if solo_sub:
+            # Título corto «SUB-PRESUPUESTO 1/3»: el nombre completo ya está
+            # en la casilla de arriba, y con nombres largos la tarjeta pedía
+            # tanto ancho que aplastaba la del donut (David Ramos, 16 sep 2026).
+            _n, _tot = self._posicion_sub_actual()
             card, _ = self._build_resumen_card(
-                title=f"RESUMEN DE COSTOS — {self._nombre_sub_actual().upper()}",
+                title=f"RESUMEN DE COSTOS — {tr('SUB-PRESUPUESTO')} {_n}/{_tot}",
                 all_subs=False)
         else:
             card, _ = self._build_resumen_card(all_subs=True)
@@ -11195,6 +11279,13 @@ class ProyectoView(QWidget):
         self._cargar_sub_pptos()   # redibuja tabs con nuevo activo
         self.recargar_partidas()
         self.actualizar_total()
+        # El Resumen a la vista sigue al sub nuevo: con «Solo el
+        # sub-presupuesto a la vista» marcado se quedaba con el anterior
+        # hasta pulsar recalcular (David Ramos, 16 sep 2026). Si no está a
+        # la vista, `_on_tab_cambiado` lo recarga al entrar.
+        tabs = getattr(self, 'tabs', None)
+        if tabs is not None and tabs.currentIndex() == 4:
+            self.cargar_resumen()
 
     def _nuevo_sub_ppto(self):
         if not self._require_editable("crear sub-presupuestos"):
@@ -11774,7 +11865,6 @@ class _DonutChart(QWidget):
         self._datos  = [(l, v, QColor(c)) for l, v, c in datos if v > 0]
         self._titulo = titulo
         self._moneda = moneda
-        self.setMinimumWidth(160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -11782,6 +11872,21 @@ class _DonutChart(QWidget):
     # en dos líneas, que depende del ancho): se declara por `minimumSizeHint`
     # y se vuelve a pedir en cada resize. Con un mínimo fijo de 200 px la
     # leyenda de cuatro tipos más el Total quedaba cortada.
+    # El ANCHO mínimo también sale de la leyenda: el que necesita la fila
+    # Total (etiqueta + columna de montos + porcentaje). Con 160 px fijos,
+    # `setMinimumWidth` mandaba sobre el hint y en un panel apretado la
+    # tarjeta se encogía hasta ahí: «Total» y «S/ 1,560,717.29» se pisaban
+    # (David Ramos, 16 sep 2026).
+    def _ancho_necesario(self) -> int:
+        f_ley = QFont(); f_ley.setPointSize(8)
+        w_amt, w_pct = self._columnas_leyenda(QFontMetrics(f_ley))
+        w_cols = w_pct + ((w_amt + self._GAP) if w_amt else 0)
+        w_tot = 0
+        if self._moneda is not None:
+            f_tot = QFont(f_ley); f_tot.setBold(True)
+            w_tot = QFontMetrics(f_tot).horizontalAdvance("Total") + 8
+        return max(160, 28 + w_tot + w_cols + 10)
+
     def _alto_necesario(self, W: int) -> int:
         f_ley = QFont(); f_ley.setPointSize(8)
         filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley))
@@ -11792,10 +11897,11 @@ class _DonutChart(QWidget):
         return max(200, 110 + ley)
 
     def minimumSizeHint(self):
-        return QSize(160, self._alto_necesario(self.width()))
+        return QSize(self._ancho_necesario(), self._alto_necesario(self.width()))
 
     def sizeHint(self):
-        return QSize(240, self._alto_necesario(self.width()))
+        return QSize(max(240, self._ancho_necesario()),
+                     self._alto_necesario(self.width()))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
