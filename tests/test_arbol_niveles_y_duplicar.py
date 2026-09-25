@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
+from PySide6.QtCore import Qt
 
 import core.database as d
 
@@ -97,9 +98,28 @@ def test_nivel_1_deja_solo_los_capitulos_cerrados():
 def test_nivel_2_abre_los_capitulos_y_cierra_los_subcapitulos():
     tw, (t1, t2, t3, t1b) = _arbol_de_prueba()
     expandir_hasta_nivel(tw.invisibleRootItem(), 2)
-    assert t1.isExpanded() and t1b.isExpanded()
+    assert t1.isExpanded()
     assert not t2.isExpanded()
     assert not t3.isExpanded()
+    # «02» solo tiene partidas: no hay nivel 2 en esa rama, así que se queda
+    # cerrado como el nivel superior existente (#6).
+    assert not t1b.isExpanded()
+
+
+def test_un_nivel_muestra_solo_titulos():
+    """#6: las partidas que cuelgan de un título abierto se ocultan; al
+    volver a «Todos» reaparecen."""
+    tw = QTreeWidget()
+    t1 = QTreeWidgetItem(tw, ["01"])
+    part = QTreeWidgetItem(t1, ["01.01"])          # partida suelta en nivel 2
+    t2 = QTreeWidgetItem(t1, ["01.02"])
+    QTreeWidgetItem(t2, ["01.02.01"])
+    root = tw.invisibleRootItem()
+    expandir_hasta_nivel(root, 2)
+    assert t1.isExpanded() and not t2.isHidden()
+    assert part.isHidden()
+    expandir_hasta_nivel(root, None)
+    assert not part.isHidden() and t2.isExpanded()
 
 
 def test_todos_abre_el_arbol_entero():
@@ -121,6 +141,43 @@ def test_el_nivel_elegido_sobrevive_a_la_recarga():
     v.mostrar_hasta_nivel(None)
     v.recargar_partidas()
     assert all(root.child(i).isExpanded() for i in range(root.childCount()))
+
+
+def _primera(v, titulo: bool):
+    pila = [v.tree.invisibleRootItem()]
+    while pila:
+        it = pila.pop()
+        for i in range(it.childCount()):
+            h = it.child(i)
+            if bool(h.data(0, Qt.UserRole + 1)) == titulo:
+                return h
+            pila.append(h)
+    raise AssertionError("el proyecto de prueba no tiene esa fila")
+
+
+def test_recargar_conserva_la_seleccion():
+    """#6: recalcular reconstruye el árbol; la partida sigue seleccionada y
+    ↑/↓ siguen navegando desde ella."""
+    v = _vista()
+    p = _primera(v, titulo=False)
+    pid = p.data(0, Qt.UserRole)
+    v.tree.setCurrentItem(p)
+    v.recalcular()
+    actual = v.tree.currentItem()
+    assert actual is not None and actual.data(0, Qt.UserRole) == pid
+    assert actual.isSelected()
+
+
+def test_seleccionar_un_titulo_deja_el_acu_en_blanco():
+    """#6: con una partida a la vista, pasar a un título no debe dejar su
+    ACU a la derecha."""
+    v = _vista()
+    v.tree.setCurrentItem(_primera(v, titulo=False))
+    assert v._partida_actual_id is not None
+    v.tree.setCurrentItem(_primera(v, titulo=True))
+    assert v._partida_actual_id is None
+    assert v.tbl_acu.rowCount() == 0
+    assert v.lbl_acu_titulo.text() == "Seleccione una partida"
 
 
 def test_el_menu_ofrece_tantos_niveles_como_hay():

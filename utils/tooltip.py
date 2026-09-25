@@ -274,6 +274,11 @@ QMenu::item:selected {
     background: #FEF5EB;
     color: #C0621A;
 }
+QMenu::item:disabled,
+QMenu::item:disabled:selected {
+    background: transparent;
+    color: #95A3AB;
+}
 QMenu::separator {
     height: 1px;
     background: #E8EBED;

@@ -98,14 +98,29 @@ def expandir_hasta_nivel(root, nivel):
 
     Es la forma rápida de ver los montos agrupados por título sin plegar
     rama por rama (pedido de David Ramos, 9 sep 2026). `root` es el
-    `invisibleRootItem`; los hijos sin descendencia (partidas) se saltan.
+    `invisibleRootItem`.
+
+    Un nivel muestra SOLO títulos (#6): las partidas que cuelgan de un
+    título abierto se ocultan, y un título sin subtítulos se queda cerrado
+    —es el «nivel superior existente» de esa rama—. Al abrirlo a mano sus
+    partidas sí aparecen, y «Todos» vuelve a mostrarlo todo.
     """
+    def _es_titulo(it):
+        marca = it.data(0, Qt.UserRole + 1)
+        return bool(marca) if marca is not None else it.childCount() > 0
+
     def _rec(item, prof):
         for i in range(item.childCount()):
             hijo = item.child(i)
-            if hijo.childCount():
-                hijo.setExpanded(nivel is None or prof < nivel)
-                _rec(hijo, prof + 1)
+            if not _es_titulo(hijo):
+                continue
+            hijos = [hijo.child(j) for j in range(hijo.childCount())]
+            con_subtitulos = any(_es_titulo(h) for h in hijos)
+            abierto = nivel is None or (prof < nivel and con_subtitulos)
+            hijo.setExpanded(abierto)
+            for h in hijos:
+                h.setHidden(nivel is not None and abierto and not _es_titulo(h))
+            _rec(hijo, prof + 1)
 
     _rec(root, 1)
 
@@ -5175,6 +5190,10 @@ class ProyectoView(QWidget):
         from utils.i18n import tr
         # El árbol se reconstruye → los items resaltados quedan obsoletos.
         self._ins_resaltados = []
+        # La fila seleccionada sobrevive a la recarga (recalcular, editar…):
+        # si no, se perdía el resaltado y ↑/↓ dejaban de navegar (#6).
+        _actual = self.tree.currentItem()
+        _id_sel = _actual.data(0, Qt.UserRole) if _actual is not None else None
         self.tree._proyecto_id = self.pid
         self.tree._sub_ppto_id = self._sub_ppto_id
         conn = get_db()
@@ -5301,6 +5320,10 @@ class ProyectoView(QWidget):
         if getattr(self, '_nivel_visible', None) is not None:
             expandir_hasta_nivel(self.tree.invisibleRootItem(), self._nivel_visible)
         self.tree.resizeColumnToContents(0)   # ajustar col Ítem al contenido
+        if _id_sel in self._id_to_item:
+            self.tree.blockSignals(True)
+            self.tree.setCurrentItem(self._id_to_item[_id_sel])
+            self.tree.blockSignals(False)
         self.actualizar_total()
         # Reaplicar bloqueos tras recargar (flags pueden haberse perdido)
         if not getattr(self, '_ed_presupuesto', True):
@@ -5355,6 +5378,15 @@ class ProyectoView(QWidget):
         if not (_recurso_por_dia(tipo, unidad) or _recurso_por_hora(tipo, unidad)):
             return ''
         return f"{float(cuadrilla or 0):.3f}"
+
+    def _acu_en_blanco(self):
+        """Panel ACU como al abrir el presupuesto: sin partida."""
+        from utils.i18n import tr
+        self._partida_actual_id = None
+        self.tbl_acu.setRowCount(0)
+        self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+        self.inp_rend.setText("")
+        self.lbl_rend_unidad.setText("")
 
     def cargar_acu(self, part_id: int):
         from utils.i18n import tr
@@ -6548,13 +6580,7 @@ class ProyectoView(QWidget):
 
     def _on_reordenadas(self):
         """Llamado tras drag & drop: recarga colores y totales sin perder la selección."""
-        pid_sel = self._partida_actual_id
-        self.recargar_partidas()
-        # Restaurar selección si sigue existiendo
-        if pid_sel and pid_sel in self._id_to_item:
-            self.tree.blockSignals(True)
-            self.tree.setCurrentItem(self._id_to_item[pid_sel])
-            self.tree.blockSignals(False)
+        self.recargar_partidas()   # conserva la selección
         self.actualizar_total()
 
     def _deseleccionar(self):
@@ -6723,7 +6749,9 @@ class ProyectoView(QWidget):
                 self._tuxia._qs.setValue(f"last_partida/{self.pid}", int(pid))
             except Exception:
                 pass
-        if not es_tt:
+        if es_tt:
+            self._acu_en_blanco()   # no dejar el ACU de la partida anterior (#6)
+        else:
             self.cargar_acu(pid)
         tab = self.tabs.currentIndex()
         if tab == 1:
@@ -7394,9 +7422,7 @@ class ProyectoView(QWidget):
         conn.commit()
         conn.close()
         if self._partida_actual_id == new_id:
-            self._partida_actual_id = None
-            self.tbl_acu.setRowCount(0)
-            self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+            self._acu_en_blanco()
         self.recargar_partidas()
         self.tree._renumerar()
         self.actualizar_total()
@@ -7638,9 +7664,7 @@ class ProyectoView(QWidget):
             from core.adjuntos import limpiar_carpeta as _lc
             _lc('especificaciones', part_id)
             if self._partida_actual_id == part_id:
-                self._partida_actual_id = None
-                self.tbl_acu.setRowCount(0)
-                self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+                self._acu_en_blanco()
         conn.commit()
         conn.close()
         self.recargar_partidas()
@@ -7668,9 +7692,7 @@ class ProyectoView(QWidget):
         from core.adjuntos import limpiar_carpeta as _lc
         _lc('especificaciones', part_id)
         if self._partida_actual_id == part_id:
-            self._partida_actual_id = None
-            self.tbl_acu.setRowCount(0)
-            self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+            self._acu_en_blanco()
         self.recargar_partidas()
         self.tree._renumerar()   # recorre la numeración para cerrar los huecos
         self.actualizar_total()
@@ -11246,9 +11268,7 @@ class ProyectoView(QWidget):
     def _on_sub_ppto_cambiado(self, sub_id):
         from utils.i18n import tr
         self._sub_ppto_id = sub_id
-        self._partida_actual_id = None
-        self.tbl_acu.setRowCount(0)
-        self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
+        self._acu_en_blanco()
         self._cargar_sub_pptos()   # redibuja tabs con nuevo activo
         self.recargar_partidas()
         self.actualizar_total()

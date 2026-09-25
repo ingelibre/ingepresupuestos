@@ -212,6 +212,32 @@ def test_los_separadores_saltan_las_columnas_de_ancho_cero():
                                        [('a', 1, 0), ('b', 0, 0), ('c', 1, 0)], 300) == 0.0
 
 
+# ── 4. Issue #7: menú de columnas y ruta crítica ─────────────────────────────
+
+def test_las_opciones_deshabilitadas_de_un_menu_se_ven_grises():
+    """«Descripción» ya estaba deshabilitada en el menú de columnas, pero el
+    QSS global de menús no tenía `:disabled` y se veía como las demás."""
+    from utils.tooltip import _MENU_QSS
+    bloque = re.search(r'QMenu::item:disabled[^{]*\{([^}]*)\}', _MENU_QSS)
+    assert bloque and '#95A3AB' in bloque.group(1)
+
+
+def test_la_ruta_critica_no_colorea_el_texto_de_las_partidas():
+    from PySide6.QtCore import Qt
+    from views.cronograma_view import RED_500
+    g = _gantt(PID_SIMPLE)
+    tareas = g._cv._tasks
+    assert tareas, "el Gantt de prueba no tiene tareas"
+    for t in tareas.values():         # todas críticas: el peor caso
+        t['critical'] = True
+    g._llenar_tabla()
+    for r in range(g.tbl.rowCount()):
+        for c in range(g.tbl.columnCount()):
+            it = g.tbl.item(r, c)
+            if it is not None and not it.data(Qt.UserRole + 1):
+                assert it.foreground().color().name().upper() != RED_500, (r, c)
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):

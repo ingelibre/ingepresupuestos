@@ -2587,11 +2587,8 @@ class GanttWidget(QWidget):
                     if es_subt:
                         f = QFont(); f.setBold(True); it.setFont(f)
                         it.setForeground(QBrush(QColor(_nivel_fg(nivel_p))))
-                # Ruta crítica: solo resaltar la columna "Ítem" (c==1) en rojo
-                # bold; el resto de la fila mantiene el color por defecto.
-                if not es_titulo and not virtual and t.get('critical') and c == 1:
-                    it.setForeground(QBrush(QColor(RED_500)))
-                    f = QFont(); f.setBold(True); it.setFont(f)
+                # La ruta crítica NO colorea el texto: el color y la negrita
+                # son de los títulos, y la ruta ya se ve en las barras (#7).
                 self.tbl.setItem(r, c, it)
             self.tbl.item(r, 0).setData(Qt.UserRole, p['id'])
             self.tbl.item(r, 0).setData(Qt.UserRole + 1, es_titulo)
@@ -3855,10 +3852,8 @@ class GanttWidget(QWidget):
 
             # Texto por celda
             p.setFont(f_title if es_titulo else f_body)
-            critical = bool(t.get('critical'))
-            # Color por defecto: títulos casi negro, cuerpo gris-oscuro.
-            # Para críticas NO pintamos toda la fila en rojo: solo la
-            # columna "Ítem" (índice 1) se resalta en rojo + bold.
+            # Color por defecto: títulos casi negro, cuerpo gris-oscuro. La
+            # ruta crítica no colorea texto, solo barras (#7).
             if es_titulo:
                 default_pen = QColor("#1E2635")
             else:
@@ -3874,15 +3869,12 @@ class GanttWidget(QWidget):
                     continue
                 rect_cell = QRectF(cx + 2, cur_y, cw - 4, hr)
                 # Fuente fresca por celda (evita arrastrar estado): subrayado en
-                # el código/nombre de los títulos de nivel 1; bold en críticas.
-                cell_critical = critical and not es_titulo and idx == 1
+                # el código/nombre de los títulos de nivel 1.
                 cf = QFont(f_title if es_titulo else f_body)
                 if is_main_title and idx in (1, 2):
                     cf.setUnderline(True)
-                if cell_critical:
-                    cf.setBold(True)
                 p.setFont(cf)
-                p.setPen(QColor("#C6262E") if cell_critical else default_pen)
+                p.setPen(default_pen)
                 # Elide manual si el texto excede
                 fm = p.fontMetrics()
                 txt = val
