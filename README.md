@@ -31,7 +31,7 @@ Copyright (C) 2026 Marco Sumari
 - **Importadores nativos**: S10 (`.S2K`), PowerCost (`.prs`), Delphin (`.sqlite`), Excel, IFC y `.db` nativo.
 - **Asistente IA (Tuxia)** con la clave del propio usuario —Groq, Gemini y OpenRouter tienen plan gratuito; Ollama corre sin internet— y **«Sugerir partidas»** con búsqueda semántica local (RAG). Sin clave, el asistente sigue respondiendo con análisis locales del proyecto.
 
-Las novedades de cada versión están en [Releases](https://github.com/ingelibre/ingepresupuestos/releases); la 3.0.8, la 3.0.10, la 3.0.12 y la 3.0.14 (septiembre de 2026) salieron de las observaciones que envió un usuario, David Ramos López.
+Las novedades de cada versión están en [Releases](https://github.com/ingelibre/ingepresupuestos/releases); la 3.0.8, la 3.0.10, la 3.0.12 y la 3.0.14 (septiembre de 2026) salieron de las observaciones que envió un usuario, David Ramos López, y la 3.0.16 de los reportes de los usuarios que llegaron desde Colombia y el resto de Latinoamérica.
 
 ## Instalación
 
