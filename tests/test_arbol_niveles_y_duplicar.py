@@ -268,10 +268,6 @@ def test_aceptar_la_ficha_conserva_la_copia_como_hermana():
     assert n_new == n_orig
 
 
-if __name__ == '__main__':
-    import pytest
-    sys.exit(pytest.main([__file__, '-q']))
-
 
 # ── 3. Ítems hondos ──────────────────────────────────────────────────────────
 # Marco, 9 sep 2026: con títulos a nueve niveles la columna Ítem crecía hasta
@@ -657,3 +653,16 @@ def test_al_imprimir_una_pagina_de_otra_orientacion_se_gira_en_vez_de_recortarse
     assert pr2.pageLayout().orientation() == QPageLayout.Landscape
     for p in (mixto, out, apaisado):
         os.unlink(p)
+
+
+if __name__ == '__main__':
+    import pytest
+    rc = pytest.main([__file__, '-q'])
+    # Salir SIN el desmontaje del intérprete: al destruir los widgets de Qt
+    # que siguen vivos, este archivo a veces daba segfault y a veces entraba
+    # en un bucle que se comía la memoria (llegó a ~20 GB el 24-09-2026 y el
+    # kernel cerró la terminal entera). Los tests ya terminaron: no hay nada
+    # que limpiar que valga ese riesgo.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(int(rc))
