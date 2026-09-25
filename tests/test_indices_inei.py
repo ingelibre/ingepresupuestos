@@ -637,6 +637,27 @@ def test_el_paquete_cubre_2026_sin_huecos():
         conn.close()
 
 
+def test_el_generador_no_pierde_meses_ya_publicados():
+    """gob.pe solo deja el mes vigente: el 20-09-2026 la Action regeneró el
+    histórico sin julio de 2026. Lo nuevo manda; lo que ya estaba, se queda."""
+    import importlib.util
+    ruta = os.path.join(os.path.dirname(__file__), '..', 'scripts',
+                        'generar_indices_valores.py')
+    spec = importlib.util.spec_from_file_location('gen_indices', ruta)
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    f = lambda m, v: {'serie': '2025', 'anio': 2026, 'mes': m, 'codigo': '21',
+                      'area': '01', 'valor': v}
+    nuevas = [f(8, 110.0), f(6, 105.5)]
+    previas = [f(6, 999.0), f(7, 108.0)]
+    out = g.conservar_lo_publicado(nuevas, previas)
+    por_mes = {x['mes']: x['valor'] for x in out}
+    assert por_mes == {6: 105.5, 7: 108.0, 8: 110.0}
+    # Y el archivo que viaja con el programa trae julio.
+    filas = g._filas_de_archivo(g.DESTINO)
+    assert any(x['serie'] == '2025' and (x['anio'], x['mes']) == (2026, 7) for x in filas)
+
+
 def test_el_refresco_corrige_la_basura_del_seed_viejo():
     """Hasta la 3.0.4 el seed traía marcadores (100, 500, 1000) que la siembra,
     al ser INSERT OR IGNORE, no podía corregir nunca."""

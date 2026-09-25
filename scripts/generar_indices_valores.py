@@ -184,6 +184,42 @@ def _empaquetar(filas: list[dict]) -> dict:
     return out
 
 
+def _filas_de_archivo(ruta: str) -> list[dict]:
+    """Desempaqueta un histórico ya generado (el formato de `_empaquetar`)."""
+    try:
+        with gzip.open(ruta, 'rt', encoding='utf-8') as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    filas: list[dict] = []
+    for s, d in (doc.get('series') or {}).items():
+        areas = d.get('areas') or []
+        for periodo, codigos in (d.get('datos') or {}).items():
+            anio, mes = (int(x) for x in periodo.split('-'))
+            for codigo, valores in codigos.items():
+                for area, valor in zip(areas, valores):
+                    if valor is not None:
+                        filas.append({'serie': s, 'anio': anio, 'mes': mes,
+                                      'codigo': codigo, 'area': area,
+                                      'valor': valor})
+    return filas
+
+
+def conservar_lo_publicado(nuevas: list[dict], previas: list[dict]) -> list[dict]:
+    """Lo recién bajado manda; lo que ya estaba y hoy no llega se CONSERVA.
+
+    gob.pe solo publica el mes vigente: un mes que se capturó cuando salía
+    deja de estar en cualquier fuente al mes siguiente. Armar el archivo
+    desde cero lo borraba — el 20-09-2026 la Action publicó el histórico sin
+    julio de 2026, que el del 30-08 sí tenía. Un índice publicado no deja de
+    existir: un mes perdido solo puede volver por El Peruano, a mano."""
+    def clave(f):
+        return (f.get('serie') or serie_de(f['anio'], f['mes']),
+                f['anio'], f['mes'], f['codigo'], f['area'])
+    ya = {clave(f) for f in nuevas}
+    return nuevas + [f for f in previas if clave(f) not in ya]
+
+
 def main() -> int:
     print("Generando el histórico de índices unificados…")
     filas = _traer_1992() + _traer_2025()
@@ -191,6 +227,11 @@ def main() -> int:
     if not filas:
         print("No se obtuvo ningún valor. No se toca el archivo.")
         return 1
+    previas = _filas_de_archivo(DESTINO)
+    n_antes = len(filas)
+    filas = conservar_lo_publicado(filas, previas)
+    if len(filas) > n_antes:
+        print(f"  conservados del histórico anterior: {len(filas) - n_antes} valores")
     doc = _empaquetar(filas)
     tmp = DESTINO + '.tmp'          # mismo sistema de archivos que el destino
     # mtime=0: gzip guarda la hora de compresión en su cabecera, así que sin
