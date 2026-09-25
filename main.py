@@ -89,6 +89,16 @@ def _aplicar_barra_titulo_oscura(ventana) -> None:
         pass
 
 
+def _preguntar_pais(ventana):
+    """Primer arranque (o primera vez tras actualizar): pedir el país, con
+    el del sistema propuesto (issue #9). Sale una sola vez."""
+    try:
+        from views.pais_dialog import preguntar_pais_si_falta
+        preguntar_pais_si_falta(ventana)
+    except Exception:
+        pass
+
+
 def main():
     # Bajo Flatpak, /tmp es privado del sandbox y el LibreOffice/mdbtools del
     # host (invocados vía flatpak-spawn) no lo ven. Redirigir los temporales a
@@ -246,6 +256,7 @@ def main():
         # "Cargando proyectos…" sea visible mientras se construye el dashboard
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, lambda: ventana.set_usuario(sesion))
+        QTimer.singleShot(800, lambda: _preguntar_pais(ventana))
         app.exec()
         # Si hizo logout dentro de la app → continuar al bucle normal
         if usuario_actual() is not None:
@@ -272,6 +283,8 @@ def main():
         ventana.set_usuario(usuario)
         ventana.show()
         ventana.asegurar_visible()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(800, lambda: _preguntar_pais(ventana))
         app.exec()
 
         if usuario_actual() is not None:

@@ -16,6 +16,7 @@ Convención cross-platform: Word ≈ LibreOffice Writer. El .docx generado
 abre sin problemas en MS Office, LibreOffice y Google Docs.
 """
 from __future__ import annotations
+from core.paises import etiqueta_tributaria as _etq_trib
 from pathlib import Path
 
 from docx import Document
@@ -1567,7 +1568,7 @@ def generar_word_tdr(req_id: int, archivo: str) -> str:
                 p.paragraph_format.space_after = Pt(0)
                 r = p.add_run(g('solicitante')); r.bold = True; r.font.size = Pt(12)
                 r.font.color.rgb = _SLATE_900
-            sub = '  ·  '.join(x for x in (g('ruc') and f"RUC: {g('ruc')}",
+            sub = '  ·  '.join(x for x in (g('ruc') and f"{_etq_trib()}: {g('ruc')}",
                                            g('direccion'), g('telefono')) if x)
             if sub:
                 p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER

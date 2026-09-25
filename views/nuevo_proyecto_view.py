@@ -197,13 +197,44 @@ class _WorkerElevacion(QThread):
             self.listo.emit(-9999.0)
 
 
+class _WorkerBusquedaLugar(QThread):
+    """Busca un lugar por nombre en Nominatim (OpenStreetMap), gratis y sin
+    clave. Solo se llama al pulsar Buscar/Enter —nunca mientras se escribe—,
+    que es lo que pide la política de uso de Nominatim, e identificándose con
+    un User-Agent propio."""
+    listo = Signal(list)   # [{'nombre', 'lat', 'lon'}]; [] si nada o falla
+
+    def __init__(self, texto: str):
+        super().__init__()
+        self.texto = texto
+
+    def run(self):
+        try:
+            import json
+            import urllib.parse
+            import urllib.request
+            from core.update_manager import CURRENT_VERSION
+            url = ("https://nominatim.openstreetmap.org/search?"
+                   + urllib.parse.urlencode({'q': self.texto, 'format': 'jsonv2',
+                                             'limit': 6, 'accept-language': 'es'}))
+            req = urllib.request.Request(url, headers={
+                'User-Agent': f'IngePresupuestos/{CURRENT_VERSION} (+https://ingepresupuestos.com)'})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                data = json.load(r)
+            self.listo.emit([{'nombre': d.get('display_name') or '',
+                              'lat': float(d['lat']), 'lon': float(d['lon'])}
+                             for d in data if d.get('lat') and d.get('lon')])
+        except Exception:
+            self.listo.emit([])
+
+
 class _DialogMapa(QDialog):
     """Mapa OpenStreetMap (QtLocation) para marcar la ubicación EXACTA del
     proyecto. Opcional: requiere internet para ver los tiles. Si el mapa no
     carga (sin conexión o sin el módulo), muestra un aviso y el formulario
     sigue funcionando con la ubicación por distrito."""
 
-    def __init__(self, parent, center=None, mark=None):
+    def __init__(self, parent, center=None, mark=None, texto_busqueda: str = ""):
         # Top-level INDEPENDIENTE, SIN padre transitorio. En X11/Wayland un
         # QDialog con padre queda como `WM_TRANSIENT_FOR` de la ventana
         # principal y el compositor acopla sus geometrías → al arrastrar el mapa
@@ -246,6 +277,26 @@ class _DialogMapa(QDialog):
             lambda on: self._root.setProperty("satelite", on) if self._root else None)
         top.addWidget(self._btn_sat)
         vl.addLayout(top)
+
+        # Buscar un lugar por nombre (pedido de Marco, 24 sep 2026): sobre
+        # todo fuera del Perú, donde no hay distrito UBIGEO para centrar.
+        busq = QHBoxLayout()
+        self._inp_buscar = QLineEdit()
+        self._inp_buscar.setPlaceholderText("Buscar dirección, ciudad o lugar…  (Enter)")
+        self._inp_buscar.setMinimumHeight(30)
+        self._inp_buscar.setText(texto_busqueda or "")
+        self._inp_buscar.returnPressed.connect(self._buscar_lugar)
+        busq.addWidget(self._inp_buscar, 1)
+        self._btn_buscar = QPushButton("Buscar")
+        self._btn_buscar.setMinimumHeight(30)
+        self._btn_buscar.setCursor(Qt.PointingHandCursor)
+        self._btn_buscar.clicked.connect(self._buscar_lugar)
+        busq.addWidget(self._btn_buscar)
+        vl.addLayout(busq)
+        self._lbl_busq = QLabel("")
+        self._lbl_busq.setStyleSheet("font-size:11px; color:#667885;")
+        self._lbl_busq.hide()
+        vl.addWidget(self._lbl_busq)
 
         try:
             # Pre-cargar QtLocation/QtPositioning DESDE PYTHON antes de instanciar
@@ -300,8 +351,15 @@ class _DialogMapa(QDialog):
                 raise RuntimeError(msgs or "No se pudo cargar el mapa.")
             root = self._qw.rootObject()
             self._root = root
-            cy, cx = (center or (self._lat, self._lon) or (-12.0464, -77.0428))
-            if cy and cx:
+            # Sin distrito reconocido ni marca, el mapa abre en la capital del
+            # país del perfil (antes, siempre en Lima; issue #5). Ojo: la tupla
+            # (None, None) es verdadera, por eso no vale un `or` encadenado.
+            if center is None:
+                from core.paises import centro_mapa
+                center = ((self._lat, self._lon) if self._lat is not None
+                          else centro_mapa())
+            cy, cx = center
+            if cy is not None and cx is not None:
                 root.setProperty("centerLat", float(cy))
                 root.setProperty("centerLon", float(cx))
             if self._lat is not None and self._lon is not None:
@@ -398,6 +456,56 @@ class _DialogMapa(QDialog):
         w.listo.connect(_on_listo)
         w.finished.connect(_cleanup)
         w.start()
+
+    def _buscar_lugar(self):
+        texto = self._inp_buscar.text().strip()
+        if not texto or self._root is None:
+            return
+        self._btn_buscar.setEnabled(False)
+        self._lbl_busq.setText("Buscando…")
+        self._lbl_busq.show()
+        w = _WorkerBusquedaLugar(texto)
+        _ELEV_WORKERS.add(w)   # referencia fuerte, igual que la altitud
+
+        def _on_listo(res):
+            try:
+                self._btn_buscar.setEnabled(True)
+                self._mostrar_resultados(res)
+            except RuntimeError:
+                pass   # el diálogo ya se cerró
+
+        def _cleanup(_w=w):
+            _ELEV_WORKERS.discard(_w)
+            _w.deleteLater()
+
+        w.listo.connect(_on_listo)
+        w.finished.connect(_cleanup)
+        w.start()
+
+    def _mostrar_resultados(self, res: list):
+        if not res:
+            self._lbl_busq.setText("No se encontró ese lugar (o no hay conexión). "
+                                   "Prueba con «ciudad, país».")
+            return
+        if len(res) == 1:
+            self._ir_a_lugar(res[0])
+            return
+        from PySide6.QtWidgets import QMenu
+        self._lbl_busq.setText(f"{len(res)} resultados: elige uno.")
+        menu = QMenu(self)
+        for r in res:
+            nombre = r['nombre'] if len(r['nombre']) <= 90 else r['nombre'][:87] + '…'
+            menu.addAction(nombre, lambda _r=r: self._ir_a_lugar(_r))
+        menu.exec(self._inp_buscar.mapToGlobal(self._inp_buscar.rect().bottomLeft()))
+
+    def _ir_a_lugar(self, r: dict):
+        from PySide6.QtCore import QMetaObject, Q_ARG
+        self._lbl_busq.setText(r['nombre'])
+        QMetaObject.invokeMethod(self._root, "marcar",
+                                 Q_ARG("QVariant", r['lat']), Q_ARG("QVariant", r['lon']))
+        QMetaObject.invokeMethod(self._root, "centrar", Q_ARG("QVariant", r['lat']),
+                                 Q_ARG("QVariant", r['lon']), Q_ARG("QVariant", 16))
+        self._on_picked(r['lat'], r['lon'])
 
     def _on_altitud(self, alt):
         self._altitud = alt if alt > -9000 else None
@@ -596,7 +704,13 @@ class NuevoProyectoView(QWidget):
         _uh.setContentsMargins(0, 0, 0, 0)
         _uh.setSpacing(4)
         self.inp_ubic = _inp(tr("Ubicación"))
-        self.inp_ubic.setPlaceholderText(tr("Distrito… (autocompleta UBIGEO)"))
+        from core.paises import es_peru
+        # Fuera del Perú el autocompletado UBIGEO solo confundía: al escribir
+        # «bog» sugería «Jose Sabogal, Cajamarca» y parecía que Bogotá no se
+        # podía poner (vídeo de un usuario de Colombia, 23 sep 2026; issue #5).
+        self.inp_ubic.setPlaceholderText(
+            tr("Distrito (autocompleta UBIGEO) o escribe la ubicación") if es_peru()
+            else tr("Ciudad, departamento o región"))
         _uh.addWidget(self.inp_ubic, 1)
         self.btn_mapa = QPushButton()
         self.btn_mapa.setIcon(icon("ubicacion"))
@@ -610,7 +724,8 @@ class NuevoProyectoView(QWidget):
         self.btn_mapa.clicked.connect(self._abrir_mapa)
         _uh.addWidget(self.btn_mapa)
         grid.addWidget(_ubic_cont, 1, 1, 1, 3)
-        self._setup_ubigeo_completer()
+        if es_peru():
+            self._setup_ubigeo_completer()
 
         grid.addWidget(_label(tr("Cliente")), 2, 0)
         self.inp_cliente = _inp(tr("Cliente"))
@@ -725,7 +840,8 @@ class NuevoProyectoView(QWidget):
             pass
         mark = ((self._latitud, self._longitud, self._altitud)
                 if self._latitud is not None else None)
-        dlg = _DialogMapa(self, center=center, mark=mark)
+        dlg = _DialogMapa(self, center=center, mark=mark,
+                          texto_busqueda=self.inp_ubic.text().strip())
         if dlg.exec() == QDialog.Accepted:
             lat, lon, alt = dlg.coords()
             if lat is not None:
@@ -762,12 +878,20 @@ class NuevoProyectoView(QWidget):
             def set_query(self, texto):
                 self._q = norm_busqueda(texto)
                 self.invalidateFilter()
+                self.sort(0)
             def filterAcceptsRow(self, row, parent):
                 if not self._q:
                     return False   # sin texto → sin sugerencias
                 idx = self.sourceModel().index(row, 0, parent)
                 norm = self.sourceModel().data(idx, Qt.UserRole) or ""
                 return self._q in norm
+            def lessThan(self, a, b):
+                # Primero los distritos que EMPIEZAN por lo escrito («bog»
+                # no debe abrir con «Jose SaBOGal»); después, alfabético.
+                na = self.sourceModel().data(a, Qt.UserRole) or ""
+                nb = self.sourceModel().data(b, Qt.UserRole) or ""
+                return ((not na.startswith(self._q), na)
+                        < (not nb.startswith(self._q), nb))
 
         proxy = _NormProxy(self)
         proxy.setSourceModel(modelo)
@@ -1067,6 +1191,7 @@ class NuevoProyectoView(QWidget):
         self.btn_crear.setEnabled(False)
         jornada_nueva = int(self.inp_jorn.currentText() or 8)
 
+        from core.paises import impuesto as _impuesto
         conn = get_db()
         try:
             if self._proyecto_id is None:
@@ -1087,7 +1212,7 @@ class NuevoProyectoView(QWidget):
                         self.inp_sub.text().strip(),
                         self.inp_costo_al.text().strip(),
                         self.inp_plazo.value(),
-                        10.0, 5.0, 18.0,
+                        10.0, 5.0, _impuesto()[1],   # tasa del país (#9)
                         self.inp_grupo.text().strip(),
                         jornada_nueva,
                         self.cmb_moneda.currentData(),
@@ -1144,7 +1269,6 @@ class NuevoProyectoView(QWidget):
                         "SELECT id, rendimiento, unidad FROM partidas WHERE proyecto_id=?",
                         (self._proyecto_id,)
                     ).fetchall()
-                    dec = get_decimales_cant_acu()
                     for part in partidas:
                         if partida_global(part['unidad']):
                             continue
@@ -1165,7 +1289,7 @@ class NuevoProyectoView(QWidget):
                             factor = 1 if por_dia else jornada_nueva
                             conn.execute(
                                 "UPDATE acu_items SET cantidad=? WHERE id=?",
-                                (_rn(cuad / rend * factor, dec), it['id'])
+                                (_rn(cuad / rend * factor, get_decimales_cant_acu(it['tipo'])), it['id'])
                             )
                         _recalcular_pu(conn, part['id'])
                 conn.commit()

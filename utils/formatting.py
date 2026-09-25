@@ -30,6 +30,17 @@ def fmt_num(valor: float, moneda: str = 'Soles', decimales: int = 2) -> str:
         return f"0{sep_dec}{'0' * decimales}"
 
 
+def moneda_defecto() -> str:
+    """Moneda de Configuración (`moneda_defecto`). La usan los catálogos
+    globales —Insumos, Biblioteca de ACU—, que no pertenecen a ningún
+    proyecto y por eso no tienen moneda propia (issue #1)."""
+    try:
+        from core.database import get_config
+        return get_config('moneda_defecto', 'Soles') or 'Soles'
+    except Exception:
+        return 'Soles'
+
+
 def fmt(valor: float, moneda: str = 'Soles', decimales: int = 2) -> str:
     cfg = moneda_cfg(moneda)
     sep_miles = cfg['sep_miles']

@@ -90,8 +90,6 @@ _TRADUCCIONES: dict[str, dict[str, str]] = {
 
     # ── Configuración — Card moneda ──────���───────────────────────────────
     "Moneda por defecto": {"en": "Default currency"},
-    "Moneda seleccionada automáticamente al crear un proyecto nuevo.":
-        {"en": "Currency automatically selected when creating a new project."},
     "Moneda:": {"en": "Currency:"},
 
     # ── Configuración — Card backups ─────────────────────────���───────────
@@ -115,16 +113,21 @@ _TRADUCCIONES: dict[str, dict[str, str]] = {
     "Define cuántos decimales se usan al calcular y mostrar cada parte "
     "del presupuesto (mismo criterio que S10 «Datos Adicionales»).\n"
     "Montos: precios unitarios, parciales y totales. Metrados: metrado "
-    "de la partida y planilla. Cantidades: insumos del ACU.\n"
+    "de la partida y planilla. Cantidades: insumos del ACU, por tipo; "
+    "la cantidad se redondea antes de multiplicarla por el precio.\n"
     "Abre de nuevo el proyecto para ver el cambio aplicado.":
         {"en": "Defines how many decimals are used to compute and display each "
                "part of the budget (same criteria as S10 \"Additional Data\").\n"
                "Amounts: unit prices, partials and totals. Takeoff: item "
-               "quantity and worksheet. Quantities: unit cost resources.\n"
+               "quantity and worksheet. Quantities: unit cost resources, per type; "
+               "the quantity is rounded before multiplying it by the price.\n"
                "Reopen the project to see the change applied."},
     "Decimales en montos (PU y parciales):": {"en": "Decimals for amounts (UP and partials):"},
     "Decimales en metrados:": {"en": "Decimals for quantity takeoff:"},
-    "Decimales en cantidades del ACU:": {"en": "Decimals for unit cost quantities:"},
+    "Cantidades de mano de obra (MO):": {"en": "Labor quantities (MO):"},
+    "Cantidades de materiales (MAT):": {"en": "Material quantities (MAT):"},
+    "Cantidades de equipos (EQ):": {"en": "Equipment quantities (EQ):"},
+    "Cantidades de subcontratos (SC):": {"en": "Subcontract quantities (SC):"},
 
     # ── Detector PU ≠ ACU ────────────────────────────────────────────────
     "PU consistentes": {"en": "Unit prices consistent"},

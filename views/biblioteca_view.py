@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from core.database import get_db
 from views._catalogo_base import CatalogoTablaMixin, UnidadSuperindiceMixin
-from utils.formatting import fmt, parse_num
+from utils.formatting import fmt, parse_num, moneda_defecto
 from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
@@ -402,6 +402,7 @@ class BibliotecaView(CatalogoTablaMixin, QWidget):
 
     # ── carga y filtrado ────────────────────────────────────────────────────
     def cargar(self):
+        self._moneda = moneda_defecto()   # catálogo global → moneda de Configuración (#1)
         # Refrescar combo grupo (sin perder selección)
         self._refrescar_combo_grupos()
 
@@ -476,7 +477,7 @@ class BibliotecaView(CatalogoTablaMixin, QWidget):
                 self.tbl.setItem(row, 2, it_r)
 
                 cu_val = float(r['costo_unitario'] or 0)
-                it_c = NumItem(fmt(cu_val), cu_val)
+                it_c = NumItem(fmt(cu_val, self._moneda), cu_val)
                 it_c.setTextAlignment(align_right)
                 it_c.setFlags(flag)
                 it_c.setFont(font_pre)
@@ -595,7 +596,7 @@ class BibliotecaView(CatalogoTablaMixin, QWidget):
         rend_txt = f"{rend:.4f}".rstrip('0').rstrip('.') or '1'
         self.lbl_panel_titulo.setText(cu['descripcion'])
         self.lbl_panel_meta.setText(
-            f"  ·  {cu['unidad'] or '?'}  ·  Rend.: {rend_txt}  ·  CU: {fmt(cu['costo_unitario'] or 0)}"
+            f"  ·  {cu['unidad'] or '?'}  ·  Rend.: {rend_txt}  ·  CU: {fmt(cu['costo_unitario'] or 0, self._moneda)}"
         )
 
         if not items:

@@ -76,6 +76,17 @@ GANTT_GRID = "#E8EAED"
 MSPDI_TEXT29 = "188744015"
 MSPDI_TEXT30 = "188744016"
 
+
+def _re_simbolos_moneda() -> str:
+    """Alternativa regex con TODOS los símbolos de `MONEDAS` (más `S/.`, `Bs` y `$`):
+    decide qué celdas se exportan al Excel como número. Estaba escrita a mano
+    y cada moneda nueva salía como texto (issue #9)."""
+    import re as _re
+    from core.config import MONEDAS
+    sims = {m['simbolo'] for m in MONEDAS.values()} | {'S/.', 'Bs', '$'}
+    return '|'.join(_re.escape(x) for x in sorted(sims, key=len, reverse=True))
+
+
 class CronogramaView(QWidget):
     """Vista completa de Cronograma — usada como page 2 del root_stack del proyecto."""
 
@@ -8479,8 +8490,7 @@ class ValorizadoWidget(QWidget):
             _NUM = (r'(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?'   # 1,234,567.89
                     r'|\d{1,3}(?:\.\d{3})+(?:,\d+)?'     # 1.234.567,89
                     r'|\d+(?:[.,]\d+)?)')                  # 1234.56 · 21,36 · 85
-            if not _re.match(r'^\s*-?\s*(?:S/\.?|US\$|CLP\$|COP\$|ARS\$'
-                             r'|UYU\$|MXN\$|R\$|Bs\.?|₲|€|\$)?'
+            if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
             return parse_num(s)
@@ -11720,8 +11730,7 @@ class InsumosWidget(QWidget):
             _NUM = (r'(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?'   # 1,234,567.89
                     r'|\d{1,3}(?:\.\d{3})+(?:,\d+)?'     # 1.234.567,89
                     r'|\d+(?:[.,]\d+)?)')                  # 1234.56 · 21,36 · 85
-            if not _re.match(r'^\s*-?\s*(?:S/\.?|US\$|CLP\$|COP\$|ARS\$'
-                             r'|UYU\$|MXN\$|R\$|Bs\.?|₲|€|\$)?'
+            if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
             return parse_num(s)

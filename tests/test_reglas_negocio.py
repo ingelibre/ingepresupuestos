@@ -64,7 +64,7 @@ def test_parcial_wysiwyg_separa_ambitos():
 # ── Derivación de cantidad ACU: cuadrilla / rendimiento (× jornada) ─────────
 
 def test_cantidad_derivada_cuadrilla():
-    dc = d._DECIMALES_CANT_ACU
+    dc = dict(d._DECIMALES_CANT_ACU)
     try:
         d.set_decimales_cant_acu(4)
         n = d.get_decimales_cant_acu()
@@ -74,7 +74,7 @@ def test_cantidad_derivada_cuadrilla():
         # MO/EQ por día: sin jornada
         assert d._rn(1 / 3.5, n) == 0.2857
     finally:
-        d.set_decimales_cant_acu(dc)
+        d._DECIMALES_CANT_ACU.update(dc)
 
 
 # ── Clasificación canónica de insumos derivados de la cuadrilla ─────────────
@@ -108,14 +108,14 @@ def _recalc_item(it, rend, jornada):
     if not (por_dia or d.recurso_por_hora(it['tipo'], it['unidad'])):
         return it['cantidad']
     factor = 1 if por_dia else jornada
-    return d._rn(cuad / rend * factor, d.get_decimales_cant_acu())
+    return d._rn(cuad / rend * factor, d.get_decimales_cant_acu(it["tipo"]))
 
 
 def test_recalculo_incluye_equipo_por_hora():
     """Regresión del bug hm: al cambiar rendimiento/jornada se recalculan MO Y
     equipo por hora (hm); MAT, equipo-día sin cuadrilla y overhead conservan su
     cantidad; la MO/EQ por día se recalcula SIN multiplicar por la jornada."""
-    dc = d._DECIMALES_CANT_ACU
+    dc = dict(d._DECIMALES_CANT_ACU)
     try:
         d.set_decimales_cant_acu(4)
         items = [
@@ -134,7 +134,7 @@ def test_recalculo_incluye_equipo_por_hora():
         assert out[4] == d._rn(1 / 200, 4)     # MO-día: cuad/rend SIN jornada
         assert out[5] == 3.0                   # overhead %: intacto
     finally:
-        d.set_decimales_cant_acu(dc)
+        d._DECIMALES_CANT_ACU.update(dc)
 
 
 # ── Suma del ACU: parciales redondeados + overhead %MO/%MAT al final ────────
@@ -901,7 +901,7 @@ def test_el_dialogo_de_recursos_graba_cuadrilla_solo_donde_aplica():
     conn.close()
     assert fila['cuadrilla'] == 2, dict(fila)
     assert fila['cantidad'] == d._rn(2 / rend * jornada,
-                                     d.get_decimales_cant_acu()), dict(fila)
+                                     d.get_decimales_cant_acu("MO")), dict(fila)
 
 
 if __name__ == "__main__":

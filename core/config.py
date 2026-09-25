@@ -164,6 +164,13 @@ MONEDAS = {
     'Guaraníes':         {'simbolo': '₲',     'sep_miles': '.', 'sep_dec': ','},
     'Pesos Uruguayos':   {'simbolo': 'UYU$',  'sep_miles': '.', 'sep_dec': ','},
     'Pesos Mexicanos':   {'simbolo': 'MXN$',  'sep_miles': ',', 'sep_dec': '.'},
+    # Perfil de país (issue #9): las del resto de Latinoamérica.
+    'Bolívares':         {'simbolo': 'Bs.S',  'sep_miles': '.', 'sep_dec': ','},
+    'Quetzales':         {'simbolo': 'Q',     'sep_miles': ',', 'sep_dec': '.'},
+    'Lempiras':          {'simbolo': 'L',     'sep_miles': ',', 'sep_dec': '.'},
+    'Córdobas':          {'simbolo': 'C$',    'sep_miles': ',', 'sep_dec': '.'},
+    'Colones':           {'simbolo': '₡',     'sep_miles': '.', 'sep_dec': ','},
+    'Pesos Dominicanos': {'simbolo': 'RD$',   'sep_miles': ',', 'sep_dec': '.'},
 }
 
 ESTADOS_PROYECTO = ['elaboracion', 'revision', 'aprobado', 'ejecutado']

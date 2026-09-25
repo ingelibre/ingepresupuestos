@@ -327,6 +327,14 @@ class _SeleccionarRecursoDialog(QDialog):
     usuario típicamente elige uno de esos para consolidar).
     """
 
+    def _simbolo_moneda(self) -> str:
+        from core.config import moneda_cfg
+        conn = get_db()
+        row = conn.execute("SELECT moneda FROM proyectos WHERE id=?",
+                           (self._proyecto_id,)).fetchone()
+        conn.close()
+        return moneda_cfg((row and row['moneda']) or 'Soles')['simbolo']
+
     def __init__(self, proyecto_id: int, recurso_id_excluir: int,
                  desc_origen: str, parent=None):
         super().__init__(parent)
@@ -358,7 +366,7 @@ class _SeleccionarRecursoDialog(QDialog):
 
         self.tbl = QTableWidget(0, 4, self)
         self.tbl.setHorizontalHeaderLabels(
-            ['Código', 'Descripción', 'Unidad', 'Precio S/.']
+            ['Código', 'Descripción', 'Unidad', f'Precio {self._simbolo_moneda()}']
         )
         self.tbl.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl.setSelectionMode(QTableWidget.SingleSelection)
@@ -3472,19 +3480,12 @@ class ProyectoView(QWidget):
         return SLATE_500
 
     def _pie_crear_rubros_default(self, proy):
-        gf   = proy['gf_pct']       or 10.0
-        util = proy['utilidad_pct'] or 5.0
-        igv  = proy['igv_pct']      or 18.0
+        # Las líneas salen de `core.pie.lineas_por_defecto`, según el país:
+        # Colombia siembra AIU con IVA sobre la utilidad (#10); el código de
+        # la línea del impuesto es 'IGV' en todos (lo usan los totales).
+        from core.pie import lineas_por_defecto
         conn = get_db()
-        for codigo, nombre, pct, activo, orden, tipo, mostrar_pct in [
-            ('GG',   'Gastos Generales',   gf,   1, 0, 'rubro',    1),
-            ('UTIL', 'Utilidad',            util, 1, 1, 'pct_cd',   1),
-            ('SUB',  'Sub Total',           0,    1, 2, 'subtotal', 1),
-            ('SUP',  'Supervisión',         5.0,  0, 3, 'rubro',    0),
-            ('ET',   'Expediente Técnico',  3.0,  0, 4, 'rubro',    0),
-            ('LQ',   'Liquidación de Obra', 2.0,  0, 5, 'rubro',    0),
-            ('IGV',  f'IGV ({int(igv)}%)',  igv,  1, 6, 'pct_sub',  1),
-        ]:
+        for codigo, nombre, pct, activo, orden, tipo, mostrar_pct in lineas_por_defecto(proy):
             conn.execute(
                 "INSERT INTO pie_rubros"
                 " (proyecto_id, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)"
@@ -3605,53 +3606,23 @@ class ProyectoView(QWidget):
         """Calcula las filas del Resumen según los pie_rubros activos del proyecto.
         Retorna lista de (nombre, monto, color, bold) + total_final.
         all_subs=True usa el CD global del proyecto (todos los subpresupuestos)."""
-        conn = get_db()
-        rubros   = conn.execute(
-            "SELECT * FROM pie_rubros WHERE proyecto_id=? AND activo=1 ORDER BY orden",
-            (self.pid,)
-        ).fetchall()
-        gg_items = conn.execute(
-            "SELECT * FROM gastos_generales WHERE proyecto_id=? ORDER BY orden",
-            (self.pid,)
-        ).fetchall()
-        conn.close()
-
+        # El cálculo es `core.pie.calcular_pie`, el mismo del PDF y el Excel
+        # (issue #3: estaba copiado cinco veces y ninguna redondeaba).
+        from core.pie import calcular_pie
         cd = self._total_proyecto(all_subs=all_subs)
+        conn = get_db()
+        lineas, total = calcular_pie(conn, self.pid, cd)
+        conn.close()
         # En mayúsculas como el resto de filas y como lo imprimen PDF, Excel
         # y Word (David Ramos, 16 sep 2026).
-        filas = [("COSTO DIRECTO", cd, SLATE_700, False)]
-        acum = cd; last_sub = cd
-
-        for rub in rubros:
-            tipo = rub['tipo']; pct = rub['pct'] or 0; cod = rub['codigo']
-            if tipo == 'subtotal':
-                last_sub = acum
-                filas.append((rub['nombre'], acum, SLATE_700, True))
-            elif tipo == 'pct_sub':
-                val = last_sub * pct / 100; acum += val
-                filas.append((rub['nombre'], val, SLATE_500, False))
-            elif tipo == 'pct_cd':
-                val = cd * pct / 100; acum += val
-                filas.append((rub['nombre'], val, SLATE_500, False))
-            else:  # rubro con detalle
-                manual = next((i for i in gg_items if i['rubro'] == cod and i['tipo'] == 'manual'), None)
-                if manual:
-                    val = manual['precio'] or 0
-                else:
-                    items_r = [i for i in gg_items if i['rubro'] == cod and i['tipo'] == 'item']
-                    if items_r:
-                        val = sum(
-                            (i['cantidad'] or 0)
-                            * ((i['pct_participacion'] or 100) / 100) * (i['precio'] or 0)
-                            for i in items_r
-                        )
-                    else:
-                        val = cd * pct / 100
-                acum += val
-                filas.append((rub['nombre'], val, SLATE_500, False))
-
-        filas.append(("PRESUPUESTO TOTAL", acum, BLUE_500, True))
-        return filas, acum
+        filas = [("COSTO DIRECTO", _rn(cd, get_decimales_ppto()), SLATE_700, False)]
+        for l in lineas or []:
+            if l['tipo'] == 'subtotal':
+                filas.append((l['nombre'], l['valor'], SLATE_700, True))
+            else:
+                filas.append((l['nombre'], l['valor'], SLATE_500, False))
+        filas.append(("PRESUPUESTO TOTAL", total, BLUE_500, True))
+        return filas, total
 
     def _build_resumen_card(self, title="RESUMEN DE COSTOS", all_subs: bool = False):
         """Card de Resumen de Costos basado en pie_rubros activos.
@@ -4469,6 +4440,7 @@ class ProyectoView(QWidget):
             'rubro':    'Con detalle',
             'pct_cd':   '% CD',
             'pct_sub':  '% SubTot.',
+            'pct_util': '% Utilidad',
             'subtotal': 'Separador',
         }
 
@@ -4581,7 +4553,7 @@ class ProyectoView(QWidget):
             for i, rub in enumerate(self._pl_data):
                 tipo  = rub['tipo']
                 badge = TIPO_BADGE.get(tipo, tipo)
-                has_pct = tipo in ('pct_cd', 'pct_sub')
+                has_pct = tipo in ('pct_cd', 'pct_sub', 'pct_util')
 
                 # Widget de fila
                 row_f = QFrame()
@@ -4762,6 +4734,7 @@ class ProyectoView(QWidget):
             ("Con detalle", "rubro"),
             ("% CD",        "pct_cd"),
             ("% Sub Tot.",  "pct_sub"),
+            ("% Utilidad",  "pct_util"),
             ("Separador",   "subtotal"),
         ]:
             b = QPushButton(lbl_t)
@@ -5481,7 +5454,7 @@ class ProyectoView(QWidget):
                 it['descripcion'] or '',
                 it['unidad'] or '',
                 self._texto_cuadrilla(tipo, it['unidad'], cuad),
-                f"{cant:.{get_decimales_cant_acu()}f}",
+                f"{cant:.{get_decimales_cant_acu(tipo)}f}",
                 f"{precio:.4f}",
                 fmt(it['parcial'] or 0, self._moneda),
             ]
@@ -7862,7 +7835,7 @@ class ProyectoView(QWidget):
             if not es_glb and (por_dia
                                or _recurso_por_hora(row_data['tipo'], row_data['unidad'])):
                 cant = _rn(valor / (rend if rend > 0 else 1)
-                           * (1 if por_dia else jornada), get_decimales_cant_acu())
+                           * (1 if por_dia else jornada), get_decimales_cant_acu(row_data['tipo']))
                 conn.execute("UPDATE acu_items SET cuadrilla=?, cantidad=? WHERE id=?",
                              (valor, cant, acu_id))
             else:
@@ -8380,7 +8353,7 @@ class ProyectoView(QWidget):
                 factor = 1 if por_dia else jornada
                 conn.execute("UPDATE acu_items SET cantidad=? WHERE id=?",
                              (_rn(cuad / rend * factor,
-                                  get_decimales_cant_acu()), it['id']))
+                                  get_decimales_cant_acu(it['tipo'])), it['id']))
         _recalcular_pu(conn, self._partida_actual_id)
         conn.commit()
         conn.close()
@@ -10394,8 +10367,8 @@ class ProyectoView(QWidget):
             desc = (duplicados['descripcion'] or '')[:40]
             self._tuxia.show_tip(
                 f"«{desc}» aparece en este proyecto con "
-                f"precios distintos: S/ {duplicados['p_min']:.2f} ↔ "
-                f"S/ {duplicados['p_max']:.2f}. ¿Quizá deba unificarse?",
+                f"precios distintos: {fmt(duplicados['p_min'], self._moneda)} ↔ "
+                f"{fmt(duplicados['p_max'], self._moneda)}. ¿Quizá deba unificarse?",
                 titulo="tuxia · precios duplicados",
                 key=f"precios_dup:{self.pid}:{duplicados['descripcion']}",
                 fade_ms=10000,

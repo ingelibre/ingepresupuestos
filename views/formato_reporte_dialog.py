@@ -239,9 +239,10 @@ class FormatoReporteDialog(QDialog):
 
         # Datos fiscales — van al pie de la portada del PDF.
         self.inp_ruc = QLineEdit()
-        self.inp_ruc.setPlaceholderText("RUC / DNI")
+        from core.paises import etiqueta_tributaria
+        self.inp_ruc.setPlaceholderText(etiqueta_tributaria())
         self.inp_ruc.setStyleSheet(self._le_ss())
-        form.addRow("RUC:", self.inp_ruc)
+        form.addRow(f"{etiqueta_tributaria()}:", self.inp_ruc)
 
         self.inp_direccion = QLineEdit()
         self.inp_direccion.setPlaceholderText("Dirección")

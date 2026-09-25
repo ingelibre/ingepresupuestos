@@ -37,9 +37,10 @@ from PySide6.QtGui import (
 
 from core.database import (
     calcular_totales, cuadrilla_reporte, get_acu_items, get_config, get_db,
-    get_decimales_ppto, get_decimales_metrado, get_insumos_proyecto,
-    get_insumos_para_partidas, set_config, _orden_mo,
+    get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu, get_insumos_proyecto,
+    get_insumos_para_partidas, set_config, _orden_mo, _rn,
 )
+from core.paises import etiqueta_tributaria
 from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money, ITEM_TRAMOS_POR_LINEA,
                              texto_rendimiento)
 
@@ -499,18 +500,14 @@ def _monto_en_letras(monto: float, moneda: str = 'Soles') -> str:
         entero += 1
         centavos -= 100
     letras = _entero_a_letras(entero).upper()
-    # Nombres de moneda en plural
-    plural = {
-        'Soles': 'SOLES',
+    return f"{letras} CON {centavos:02d}/100 {_moneda_plural(moneda)}"
+
+
+def _moneda_plural(moneda: str) -> str:
+    """Nombre de la moneda para la línea «Son: … CON 00/100 <MONEDA>»."""
+    return {
         'Dólares': 'DÓLARES AMERICANOS',
-        'Euros': 'EUROS',
-        'Reales': 'REALES',
-        'Pesos Argentinos': 'PESOS ARGENTINOS',
-        'Guaraníes': 'GUARANÍES',
-        'Pesos Uruguayos': 'PESOS URUGUAYOS',
-        'Pesos Mexicanos': 'PESOS MEXICANOS',
-    }.get(moneda, str(moneda).upper())
-    return f"{letras} CON {centavos:02d}/100 {plural}"
+    }.get(moneda or 'Soles', str(moneda or 'Soles').upper())
 
 
 def _hoy_formateado() -> str:
@@ -1182,7 +1179,7 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
                 f'<td>{escape(it.get("descripcion") or "")}</td>'
                 f'<td class="c">{escape(it.get("unidad") or "")}</td>'
                 f'<td class="r">{_fmt_cuadrilla(it)}</td>'
-                f'<td class="r">{_fmt(it.get("cantidad"), 6)}</td>'
+                f'<td class="r">{_fmt(it.get("cantidad"), get_decimales_cant_acu(tipo))}</td>'
                 f'<td class="r">{_fmt(it.get("precio"), dec)}</td>'
                 f'<td class="r">{_fmt(it.get("parcial"), dec)}</td>'
                 f'</tr>'
@@ -3392,82 +3389,22 @@ def _png_donut_b64(mo: float, mat: float, eq: float,
 
 
 def _build_pie_rows(pid: int, cd: float) -> list:
-    """Construye las filas del pie de presupuesto para el reporte,
-    espejando exactamente `_filas_resumen` de ProyectoView.
+    """Construye las filas del pie de presupuesto para el reporte, desde
+    `core.pie.calcular_pie` (el mismo cálculo que la pantalla y el Excel).
 
     Devuelve lista de tuplas (label, monto, cls) donde cls es:
       'sub'  → subtotal (CD, Sub Total)
       ''     → rubro normal (GG, Util, IGV, supervisión…)
       'gran' → PRESUPUESTO TOTAL (último)
     """
+    from core.pie import calcular_pie, etiqueta
     conn = get_db()
-    rubros = conn.execute(
-        "SELECT * FROM pie_rubros WHERE proyecto_id=? AND activo=1 ORDER BY orden",
-        (pid,)
-    ).fetchall()
-    gg_items = conn.execute(
-        "SELECT * FROM gastos_generales WHERE proyecto_id=? ORDER BY orden",
-        (pid,)
-    ).fetchall()
+    lineas, total = calcular_pie(conn, pid, cd)
     conn.close()
-
-    def _col(row, name, default=None):
-        """Lee una columna de sqlite3.Row sin .get(). Devuelve default si la
-        columna no existe en el esquema (migraciones tolerantes)."""
-        try:
-            v = row[name]
-            return v if v is not None else default
-        except (IndexError, KeyError):
-            return default
-
-    filas = [('Costo Directo', cd, 'sub')]
-    acum = cd
-    last_sub = cd
-    for rub in rubros:
-        tipo = rub['tipo']
-        pct = rub['pct'] or 0
-        cod = rub['codigo']
-        nombre = rub['nombre']
-        mostrar_pct = bool(_col(rub, 'mostrar_pct', 1))
-        if tipo == 'subtotal':
-            last_sub = acum
-            filas.append((nombre, acum, 'sub'))
-        elif tipo == 'pct_sub':
-            val = last_sub * pct / 100
-            acum += val
-            etiqueta = f"{nombre} ({pct:g}%)" if mostrar_pct else nombre
-            filas.append((etiqueta, val, ''))
-        elif tipo == 'pct_cd':
-            val = cd * pct / 100
-            acum += val
-            etiqueta = f"{nombre} ({pct:g}%)" if mostrar_pct else nombre
-            filas.append((etiqueta, val, ''))
-        else:  # rubro con detalle (GG, Supervisión, etc.)
-            manual = next((i for i in gg_items
-                           if i['rubro'] == cod and i['tipo'] == 'manual'), None)
-            if manual:
-                val = manual['precio'] or 0
-            else:
-                items_r = [i for i in gg_items
-                           if i['rubro'] == cod and i['tipo'] == 'item']
-                if items_r:
-                    val = sum(
-                        (i['cantidad'] or 0)
-                        * ((i['pct_participacion'] or 100) / 100)
-                        * (i['precio'] or 0)
-                        for i in items_r
-                    )
-                else:
-                    val = cd * pct / 100
-            acum += val
-            # El monto de GG/Supervisión sale del detalle (o valor manual),
-            # así que el `pct` guardado del rubro puede no corresponder. El
-            # porcentaje mostrado se deriva del monto real sobre el CD para
-            # que siempre sea coherente con la cifra de la derecha.
-            eff_pct = (val / cd * 100) if cd else 0
-            etiqueta = f"{nombre} ({eff_pct:g}%)" if (mostrar_pct and eff_pct) else nombre
-            filas.append((etiqueta, val, ''))
-    filas.append(('PRESUPUESTO TOTAL', acum, 'gran'))
+    filas = [('Costo Directo', _rn(cd or 0, get_decimales_ppto()), 'sub')]
+    for l in lineas or []:
+        filas.append((etiqueta(l), l['valor'], 'sub' if l['tipo'] == 'subtotal' else ''))
+    filas.append(('PRESUPUESTO TOTAL', total, 'gran'))
     return filas
 
 
@@ -3491,7 +3428,7 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     total = pie[-1][1] or 0
     # Filas de impuesto (IGV/IVA) — se mantienen abajo, separadas del PU.
     # `\b` evita falsos positivos (p.ej. «IVA» dentro de otra palabra).
-    es_tax = lambda lbl: bool(re.search(r'\b(IGV|IVA)\b', (lbl or '').upper()))
+    es_tax = lambda lbl: bool(re.search(r'\b(IGV|IVA|ISV|ITBMS|ITBIS)\b', (lbl or '').upper()))
     tax_rows = [(lbl, val, cls) for (lbl, val, cls) in pie
                 if cls not in ('sub', 'gran') and es_tax(lbl)]
     tax_total = sum(v for (_l, v, _c) in tax_rows)
@@ -3635,7 +3572,7 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
 
         # Líneas de resumen (subtotales y porcentajes planos).
         mp  = rub.get('mostrar_pct', 1)
-        if tipo in ('pct_cd', 'pct_sub'):
+        if tipo in ('pct_cd', 'pct_sub', 'pct_util'):
             pct = rub.get('pct') or 0
             label = f'{rub["nombre"].upper()} ({pct:g}%)' if (mp and pct) else rub['nombre'].upper()
             parts.append(_fila_resumen(label, rub['valor']))
@@ -4155,7 +4092,7 @@ class _PdfRenderer:
         # aparecían en los reportes y no se pintaban en ningún sitio; este es
         # el único lugar con espacio real para ellos.
         _datos = [t for t in (
-            (f"RUC: {self.formato.get('rep_empresa_ruc')}"
+            (f"{etiqueta_tributaria()}: {self.formato.get('rep_empresa_ruc')}"
              if self.formato.get('rep_empresa_ruc') else ''),
             self.formato.get('rep_empresa_direccion') or '',
             (f"Tel. {self.formato.get('rep_empresa_telefono')}"
@@ -6124,7 +6061,7 @@ def _html_tdr_encabezado(datos: dict) -> str:
         if g('solicitante'):
             out.append(f'<p style="margin:0;color:{SLATE_900};font-weight:700;'
                        f'font-size:12pt;">{escape(g("solicitante"))}</p>')
-        sub = '  ·  '.join(x for x in (g('ruc') and f"RUC: {g('ruc')}",
+        sub = '  ·  '.join(x for x in (g('ruc') and f"{etiqueta_tributaria()}: {g('ruc')}",
                                        g('direccion'), g('telefono')) if x)
         if sub:
             out.append(f'<p style="margin:0 0 3pt 0;color:{SLATE_500};'

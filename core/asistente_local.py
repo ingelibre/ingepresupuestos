@@ -611,74 +611,42 @@ def totales_detalle(proyecto_id: int) -> str:
     cd = tot.get('cd', 0)
     total = tot.get('total', 0)
 
-    # Leemos los pie_rubros activos para mostrar el desglose real.
+    # El desglose sale de `core.pie.calcular_pie`, el mismo cálculo que la
+    # pestaña Pie y los reportes (issue #3).
+    from core.pie import calcular_pie
+    from core.config import moneda_cfg
     conn = get_db()
-    rubros = conn.execute(
-        "SELECT * FROM pie_rubros WHERE proyecto_id=? AND activo=1 ORDER BY orden",
-        (proyecto_id,)
-    ).fetchall()
-    gg_items = conn.execute(
-        "SELECT * FROM gastos_generales WHERE proyecto_id=? ORDER BY orden",
-        (proyecto_id,)
-    ).fetchall()
+    pie, _ = calcular_pie(conn, proyecto_id, cd)
+    proy = conn.execute("SELECT moneda FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     conn.close()
+    S = moneda_cfg((proy and proy['moneda']) or 'Soles')['simbolo']
 
     lineas = [TUX_TIP, "", "Totales del proyecto:", ""]
-    lineas.append(f"  {'Costo Directo (CD)':28s} S/ {cd:>14,.2f}")
+    lineas.append(f"  {'Costo Directo (CD)':28s} {S} {cd:>14,.2f}")
 
-    if rubros:
-        # Iteramos espejo a `_filas_resumen` para listar cada rubro activo.
-        acum = cd
-        last_sub = cd
-        for rub in rubros:
-            tipo = rub['tipo']
-            pct = rub['pct'] or 0
-            cod = rub['codigo']
-            nombre = rub['nombre']
-            if tipo == 'subtotal':
-                last_sub = acum
+    if pie:
+        for l in pie:
+            if l['tipo'] == 'subtotal':
                 lineas.append(f"  {'─'*30}")
-                lineas.append(f"  {nombre:28s} S/ {acum:>14,.2f}")
+                lineas.append(f"  {l['nombre']:28s} {S} {l['valor']:>14,.2f}")
                 continue
-            if tipo == 'pct_sub':
-                val = last_sub * pct / 100
-            elif tipo == 'pct_cd':
-                val = cd * pct / 100
-            else:  # rubro con detalle (GG, Util, etc.)
-                manual = next((i for i in gg_items
-                               if i['rubro'] == cod and i['tipo'] == 'manual'),
-                              None)
-                if manual:
-                    val = manual['precio'] or 0
-                else:
-                    items_r = [i for i in gg_items
-                               if i['rubro'] == cod and i['tipo'] == 'item']
-                    if items_r:
-                        val = sum(
-                            (i['cantidad'] or 0)
-                            * ((i['pct_participacion'] or 100) / 100)
-                            * (i['precio'] or 0)
-                            for i in items_r
-                        )
-                    else:
-                        val = cd * pct / 100
-            acum += val
-            sufijo = f" ({pct:.2f}%)" if pct and tipo in ('pct_sub', 'pct_cd') else ''
-            lineas.append(f"  {nombre + sufijo:28s} S/ {val:>14,.2f}")
+            sufijo = (f" ({l['pct']:.2f}%)"
+                      if l['pct'] and l['tipo'] in ('pct_sub', 'pct_cd', 'pct_util') else '')
+            lineas.append(f"  {l['nombre'] + sufijo:28s} {S} {l['valor']:>14,.2f}")
     else:
         # Fallback legacy (sin pie_rubros): formula simple desde proyectos.
         if tot.get('gf', 0):
-            lineas.append(f"  {'Gastos Generales':28s} S/ {tot['gf']:>14,.2f}")
+            lineas.append(f"  {'Gastos Generales':28s} {S} {tot['gf']:>14,.2f}")
         if tot.get('utilidad', 0):
-            lineas.append(f"  {'Utilidad':28s} S/ {tot['utilidad']:>14,.2f}")
+            lineas.append(f"  {'Utilidad':28s} {S} {tot['utilidad']:>14,.2f}")
         if tot.get('subtotal', 0) != cd:
             lineas.append(f"  {'─'*30}")
-            lineas.append(f"  {'Subtotal':28s} S/ {tot['subtotal']:>14,.2f}")
+            lineas.append(f"  {'Subtotal':28s} {S} {tot['subtotal']:>14,.2f}")
         if tot.get('igv', 0):
-            lineas.append(f"  {'IGV':28s} S/ {tot['igv']:>14,.2f}")
+            lineas.append(f"  {'IGV':28s} {S} {tot['igv']:>14,.2f}")
 
     lineas.append(f"  {'═'*30}")
-    lineas.append(f"  {'PRESUPUESTO TOTAL':28s} S/ {total:>14,.2f}")
+    lineas.append(f"  {'PRESUPUESTO TOTAL':28s} {S} {total:>14,.2f}")
     return "\n".join(lineas)
 
 

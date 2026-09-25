@@ -239,7 +239,6 @@ class ProyectoFormDialog(QDialog):
                         "SELECT id, rendimiento, unidad FROM partidas WHERE proyecto_id=?",
                         (self.proyecto_id,)
                     ).fetchall()
-                    dec = get_decimales_cant_acu()
                     for part in partidas:
                         if partida_global(part['unidad']):
                             continue
@@ -260,7 +259,7 @@ class ProyectoFormDialog(QDialog):
                             factor = 1 if por_dia else jornada_nueva
                             conn.execute(
                                 "UPDATE acu_items SET cantidad=? WHERE id=?",
-                                (_rn(cuad / rend * factor, dec), it['id'])
+                                (_rn(cuad / rend * factor, get_decimales_cant_acu(it['tipo'])), it['id'])
                             )
                         _recalcular_pu(conn, part['id'])
                     conn.commit()

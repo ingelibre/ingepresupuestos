@@ -9,8 +9,9 @@ from openpyxl.worksheet.properties import WorksheetProperties, PageSetupProperti
 from openpyxl.worksheet.page import PageMargins
 import os
 import io
-from core.database import get_db, calcular_totales, get_acu_items, get_decimales_metrado, cuadrilla_reporte
-from utils.formatting import ITEM_TRAMOS_POR_LINEA
+from core.database import (get_db, calcular_totales, get_acu_items, get_decimales_metrado,
+                           get_decimales_cant_acu, cuadrilla_reporte)
+from utils.formatting import ITEM_TRAMOS_POR_LINEA, fmt as _fmt_moneda
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
 # contiene todos los pesos y variantes (italic en su propio archivo).
@@ -177,12 +178,13 @@ def _n2l(n):
     return ' '.join(p)
 
 
-def _monto_letras(monto, moneda='SOLES'):
+def _monto_letras(monto, moneda='Soles'):
+    from core.pdf_reports import _moneda_plural
     try:
         monto   = round(float(monto), 2)
         entero  = int(monto)
         cts     = round((monto - entero) * 100)
-        return f"{_n2l(entero)} CON {cts:02d}/100 {moneda}"
+        return f"{_n2l(entero)} CON {cts:02d}/100 {_moneda_plural(moneda)}"
     except Exception:
         return ''
 
@@ -192,73 +194,9 @@ def _monto_letras(monto, moneda='SOLES'):
 def _calcular_rubros_pie(conn, proyecto_id, cd):
     # None = el proyecto nunca ha tenido pie configurado → usar fallback de porcentajes
     # []   = pie configurado pero sin rubros activos → mostrar solo Costo Directo
-    tiene_pie = conn.execute(
-        "SELECT 1 FROM pie_rubros WHERE proyecto_id=? LIMIT 1", (proyecto_id,)
-    ).fetchone()
-    if not tiene_pie:
-        return None, cd
-
-    rubros = conn.execute(
-        "SELECT * FROM pie_rubros WHERE proyecto_id=? AND activo=1 ORDER BY orden",
-        (proyecto_id,)
-    ).fetchall()
-    if not rubros:
-        return [], cd
-
-    result   = []
-    acum     = cd
-    last_sub = cd
-
-    for r in rubros:
-        tipo   = r['tipo']
-        nombre = r['nombre']
-        pct    = r['pct'] or 0
-        codigo = r['codigo']
-
-        mp = r['mostrar_pct'] if r['mostrar_pct'] is not None else 1
-        if tipo == 'subtotal':
-            last_sub = acum
-            result.append({'tipo': tipo, 'nombre': nombre, 'valor': acum, 'codigo': codigo, 'pct': pct, 'mostrar_pct': mp})
-        elif tipo == 'pct_sub':
-            val   = last_sub * pct / 100
-            acum += val
-            result.append({'tipo': tipo, 'nombre': nombre, 'valor': val, 'codigo': codigo, 'pct': pct, 'mostrar_pct': mp})
-        else:
-            has_items = False
-            if tipo == 'rubro':
-                # Monto manual del rubro (si existe) tiene prioridad — igual que
-                # el Resumen en pantalla (`_filas_resumen`).
-                manual = conn.execute(
-                    "SELECT precio FROM gastos_generales"
-                    " WHERE proyecto_id=? AND rubro=? AND tipo='manual'",
-                    (proyecto_id, codigo)
-                ).fetchone()
-                if manual is not None:
-                    val = manual['precio'] or 0
-                    has_items = True
-                else:
-                    gg = conn.execute(
-                        "SELECT * FROM gastos_generales WHERE proyecto_id=? AND rubro=? AND tipo='item'",
-                        (proyecto_id, codigo)
-                    ).fetchall()
-                    if gg:
-                        val = sum(
-                            (i['cantidad'] or 0)
-                            * ((i['pct_participacion'] or 100) / 100)
-                            * (i['precio'] or 0)
-                            for i in gg
-                        )
-                        has_items = True
-                    else:
-                        val = cd * pct / 100
-            else:
-                val = cd * pct / 100
-            pct_real = round(val / cd * 100, 2) if cd else 0
-            acum += val
-            result.append({'tipo': tipo, 'nombre': nombre, 'valor': val, 'codigo': codigo,
-                           'pct': pct, 'mostrar_pct': mp, 'has_items': has_items, 'pct_real': pct_real})
-
-    return result, acum
+    # El cálculo vive en `core.pie` (issue #3: estaba copiado cinco veces).
+    from core.pie import calcular_pie
+    return calcular_pie(conn, proyecto_id, cd)
 
 
 # ─── EXCEL: Fórmula Polinómica ────────────────────────────────────────────────
@@ -1105,7 +1043,7 @@ def exportar_presupuesto(proyecto_id):
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
     for c in range(1, N + 1):
         ws.cell(r, c).border = Border()
-    c_son = ws.cell(r, 1, f"Son: {_monto_letras(monto_total)}.")
+    c_son = ws.cell(r, 1, f"Son: {_monto_letras(monto_total, proyecto['moneda'])}.")
     c_son.font = Font(name='Inter', italic=True, size=10, color=C_SLATE_700)
     c_son.alignment = Alignment(horizontal='right', vertical='center', wrap_text=True)
     ws.row_dimensions[r].height = 22
@@ -1203,7 +1141,7 @@ def exportar_acus(proyecto_id):
 
     # Símbolo de moneda + decimales
     try:
-        from utils.formatting import _moneda_simbolo
+        from core.pdf_reports import _moneda_simbolo
         sym = _moneda_simbolo(proyecto['moneda'] or 'Soles')
     except Exception:
         sym = 'S/'
@@ -1260,7 +1198,7 @@ def exportar_acus(proyecto_id):
             bloques += [TextBlock(f_reg, '   ·   Rendimiento: '),
                         TextBlock(f_bold, rend_txt)]
         bloques += [TextBlock(f_reg, '   ·   Costo Unit.: '),
-                    TextBlock(f_bold, f'{sym} {cu:,.2f}')]
+                    TextBlock(f_bold, _fmt_moneda(cu, proyecto['moneda'] or 'Soles'))]
         meta_rich = CellRichText(*bloques)
         # PRE-aplicar mismo fill que la fila del item (acu-head card) en todas
         # las cols antes de mergear — sin esto el bg solo queda en col 1 y se
@@ -1348,7 +1286,8 @@ def exportar_acus(proyecto_id):
                 c_cu.number_format = fmt_4
                 c_cu.alignment = Alignment(horizontal='right', vertical='top')
                 c_ca = ws.cell(r, 6, cant); c_ca.font = num_font
-                c_ca.number_format = fmt_4
+                _dc = get_decimales_cant_acu(tipo)
+                c_ca.number_format = '#,##0' + ('.' + '0' * _dc if _dc else '')
                 c_ca.alignment = Alignment(horizontal='right', vertical='top')
                 c_p = ws.cell(r, 7, precio); c_p.font = num_font
                 c_p.number_format = fmt_money
@@ -1533,7 +1472,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
 
         # Símbolo moneda
         try:
-            from utils.formatting import _moneda_simbolo
+            from core.pdf_reports import _moneda_simbolo
             sym = _moneda_simbolo(proyecto['moneda'] or 'Soles')
         except Exception:
             sym = 'S/'
@@ -2232,7 +2171,7 @@ def _hoja_gastos_generales(wb, proyecto_id):
         return
 
     for rub in rubros_pie:
-        if rub['tipo'] in ('subtotal', 'pct_cd', 'pct_sub'):
+        if rub['tipo'] in ('subtotal', 'pct_cd', 'pct_sub', 'pct_util'):
             is_bold = rub['tipo'] == 'subtotal' or rub['nombre'].upper().startswith('TOTAL')
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N - 1)
             ws.cell(r, 1, rub['nombre'].upper()).font = Font(name='Inter',bold=is_bold, size=11)
@@ -2614,7 +2553,7 @@ def exportar_reporte_completo(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     ws_p.merge_cells(start_row=r + 1, start_column=1, end_row=r + 1, end_column=N)
-    ws_p.cell(r + 1, 1, f"Son :   {_monto_letras(monto_final)}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_p.cell(r + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     _escribir_pie(ws_p, r + 2, pie)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], [10, 42, 6, 7, 10, 12, 12, 12, 14]):
         ws_p.column_dimensions[col].width = w
@@ -2805,7 +2744,7 @@ def exportar_reporte_completo(proyecto_id):
             _fila_i(lb, v)
 
     ws_i.merge_cells(start_row=ri + 1, start_column=1, end_row=ri + 1, end_column=Ni)
-    ws_i.cell(ri + 1, 1, f"Son :   {_monto_letras(monto_final)}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_i.cell(ri + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], [14, 36, 6, 8, 12, 12, 12, 6]):
         ws_i.column_dimensions[col].width = w
     _setup_impresion(ws_i, n_filas_encabezado=_filas_hdr(ws_i, 8))
@@ -3078,7 +3017,7 @@ def exportar_pdf(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final)}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 2. ANÁLISIS DE COSTOS UNITARIOS
@@ -3284,7 +3223,7 @@ def exportar_pdf(proyecto_id):
     story.append(t_ti)
 
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final)}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 4. PLANILLA DE SUSTENTO DE METRADOS
@@ -3394,7 +3333,7 @@ def exportar_pdf(proyecto_id):
 
     if rubros_pie is not None:
         for rub in rubros_pie:
-            if rub['tipo'] in ('subtotal', 'pct_cd', 'pct_sub'):
+            if rub['tipo'] in ('subtotal', 'pct_cd', 'pct_sub', 'pct_util'):
                 is_bold = rub['tipo'] == 'subtotal' or 'TOTAL' in rub['nombre'].upper()
                 resumen = [[rub['nombre'].upper(), _fmt(rub['valor'])]]
                 t_r = Table(resumen, colWidths=col_gg2)

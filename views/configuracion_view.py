@@ -31,7 +31,7 @@ from core.database import (get_db, get_decimales_ppto, set_decimales_ppto,
                            get_decimales_metrado, set_decimales_metrado,
                            get_decimales_cant_acu, set_decimales_cant_acu,
                            get_config, set_config)
-from core.config import MONEDAS, BACKUPS_DIR
+from core.config import BACKUPS_DIR
 from utils.theme import BTN_PRIMARY_SS
 from utils.auth import (
     usuario_actual, listar_usuarios, crear_admin,
@@ -89,8 +89,9 @@ class ConfiguracionView(QWidget):
     # tarjetas en un solo scroll (Marco, 8 sep 2026: «hago mucho scroll»);
     # ahora cada tarjeta es una sección, igual que «Editar formato».
     _SECCIONES = (
+        ('pais',        "País",                    "General"),
         ('empresa',     "Empresa",                 "General"),
-        ('jornada',     "Jornada y moneda",        "General"),
+        ('jornada',     "Jornada laboral",         "General"),
         ('decimales',   "Decimales",               "General"),
         ('backups',     "Copias de seguridad",     "Sistema"),
         ('exportacion', "Carpeta de exportación",  "Sistema"),
@@ -165,8 +166,11 @@ class ConfiguracionView(QWidget):
         u = usuario_actual()
         es_admin = bool(u and u.es_admin)
         builders = {
+            'pais':        lambda: self._pagina(self._card_pais()),
             'empresa':     lambda: self._pagina(self._card_empresa()),
-            'jornada':     lambda: self._pagina(self._card_jornada(), self._card_moneda()),
+            # La moneda vive en «País» desde el 24 sep 2026: tenerla también
+            # aquí, con otro Guardar, confundía (Marco).
+            'jornada':     lambda: self._pagina(self._card_jornada()),
             'decimales':   lambda: self._pagina(self._card_decimales()),
             'backups':     lambda: self._pagina(self._card_backups()),
             'exportacion': lambda: self._pagina(self._card_ruta_exportacion()),
@@ -431,9 +435,10 @@ class ConfiguracionView(QWidget):
 
         self._inp_emp_ruc = QLineEdit()
         self._inp_emp_ruc.setStyleSheet(_INP)
-        self._inp_emp_ruc.setPlaceholderText(tr("RUC / DNI"))
+        from core.paises import etiqueta_tributaria
+        self._inp_emp_ruc.setPlaceholderText(etiqueta_tributaria())
         self._inp_emp_ruc.setText(_fmt_rep().get('rep_empresa_ruc', ''))
-        form.addRow(tr("RUC:"), self._inp_emp_ruc)
+        form.addRow(f"{etiqueta_tributaria()}:", self._inp_emp_ruc)
 
         self._inp_emp_direccion = QLineEdit()
         self._inp_emp_direccion.setStyleSheet(_INP)
@@ -630,11 +635,10 @@ class ConfiguracionView(QWidget):
             f"✓  Jornada por defecto: {val} horas. Se aplica a proyectos nuevos."
         )
 
-    # ── Card moneda ──────────────────────────────────────────────────────
+    # ── Card país (issue #9) ─────────────────────────────────────────────
 
-    def _card_moneda(self) -> QFrame:
-        from utils.theme import apply_shadow
-        from utils.i18n import tr
+    def _card_pais(self) -> QFrame:
+        from views.pais_dialog import PaisForm
         card = QFrame()
         card.setObjectName("cfgCard")
         card.setAttribute(Qt.WA_StyledBackground, True)
@@ -643,56 +647,46 @@ class ConfiguracionView(QWidget):
         vl.setContentsMargins(24, 20, 24, 24)
         vl.setSpacing(12)
 
-        lbl = QLabel(tr("Moneda por defecto"))
+        lbl = QLabel("País")
         lbl.setStyleSheet(_SEC_SS)
         vl.addWidget(lbl)
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet(f"color:{SILVER_300};")
-        vl.addWidget(sep)
-
         nota = QLabel(
-            tr("Moneda seleccionada automáticamente al crear un proyecto nuevo.")
-        )
+            "El país fija los valores por defecto de los proyectos nuevos: "
+            "moneda (también la de los catálogos), el nombre de la "
+            "identificación tributaria en los reportes y el impuesto del pie "
+            "de presupuesto. Los proyectos ya creados no cambian. Cambiar la "
+            "moneda no convierte los precios.")
         nota.setWordWrap(True)
         nota.setStyleSheet(_NOTE_SS)
         vl.addWidget(nota)
 
-        form = QFormLayout()
-        form.setSpacing(10)
-        self._combo_moneda = QComboBox()
-        self._combo_moneda.addItems(list(MONEDAS.keys()))
-        actual = get_config('moneda_defecto', 'Soles')
-        idx = self._combo_moneda.findText(actual)
-        if idx >= 0:
-            self._combo_moneda.setCurrentIndex(idx)
-        self._combo_moneda.setMinimumHeight(34)
-        self._combo_moneda.setMaximumWidth(220)
-        form.addRow(tr("Moneda:"), self._combo_moneda)
-        vl.addLayout(form)
+        self._form_pais = PaisForm(card)
+        vl.addWidget(self._form_pais)
 
         hl = QHBoxLayout()
         hl.addStretch()
-        btn = QPushButton(tr("Guardar"))
+        btn = QPushButton("Guardar")
         btn.setFixedHeight(34)
         btn.setStyleSheet(_BTN_SAVE)
-        btn.clicked.connect(self._guardar_moneda)
+        btn.clicked.connect(self._guardar_pais)
         hl.addWidget(btn)
         vl.addLayout(hl)
 
-        self._lbl_moneda_estado = QLabel("")
-        self._lbl_moneda_estado.setStyleSheet(
-            f"color:{GREEN}; font-size:11px; background:transparent; border:none;"
-        )
-        vl.addWidget(self._lbl_moneda_estado)
+        self._lbl_pais_estado = QLabel("")
+        self._lbl_pais_estado.setStyleSheet(
+            f"color:{GREEN}; font-size:11px; background:transparent; border:none;")
+        vl.addWidget(self._lbl_pais_estado)
         return card
 
-    def _guardar_moneda(self):
-        moneda = self._combo_moneda.currentText()
-        set_config('moneda_defecto', moneda)
-        simbolo = MONEDAS[moneda]['simbolo']
-        self._lbl_moneda_estado.setText(
-            f"✓  Moneda por defecto: {moneda} ({simbolo}). Se aplica a proyectos nuevos."
-        )
+    def _guardar_pais(self):
+        from core.paises import PAISES
+        iso = self._form_pais.guardar()
+        moneda = self._form_pais.cmb_moneda.currentText()
+        self._lbl_pais_estado.setText(
+            f"✓  {PAISES[iso]['nombre']}: {moneda} · "
+            f"{self._form_pais.inp_etiqueta.text()} · "
+            f"{self._form_pais.inp_imp_nombre.text()} "
+            f"{self._form_pais.spn_imp_pct.value():g} %. Se aplica a proyectos nuevos.")
 
     # ── Card backups ─────────────────────────────────────────────────────
 
@@ -990,7 +984,8 @@ class ConfiguracionView(QWidget):
             "Define cuántos decimales se usan al calcular y mostrar cada parte "
             "del presupuesto (mismo criterio que S10 «Datos Adicionales»).\n"
             "Montos: precios unitarios, parciales y totales. Metrados: metrado "
-            "de la partida y planilla. Cantidades: insumos del ACU.\n"
+            "de la partida y planilla. Cantidades: insumos del ACU, por tipo; "
+            "la cantidad se redondea antes de multiplicarla por el precio.\n"
             "Abre de nuevo el proyecto para ver el cambio aplicado."
         )
         nota.setWordWrap(True)
@@ -1013,12 +1008,22 @@ class ConfiguracionView(QWidget):
         self.spin_dec_met.setMaximumWidth(80)
         form.addRow("Decimales en metrados:", self.spin_dec_met)
 
-        self.spin_dec_cant = QSpinBox()
-        self.spin_dec_cant.setRange(0, 6)
-        self.spin_dec_cant.setValue(get_decimales_cant_acu())
-        self.spin_dec_cant.setMinimumHeight(34)
-        self.spin_dec_cant.setMaximumWidth(80)
-        form.addRow("Decimales en cantidades del ACU:", self.spin_dec_cant)
+        # Un ajuste por tipo de insumo (issue #2): S10 deja, p. ej., la MO y
+        # el equipo derivados de la cuadrilla en 2 decimales y los
+        # materiales en 4. La cantidad se redondea ANTES de multiplicar.
+        self.spin_dec_cant = {}
+        for tipo, etiqueta in (('MO', "Cantidades de mano de obra (MO):"),
+                               ('MAT', "Cantidades de materiales (MAT):"),
+                               ('EQ', "Cantidades de equipos (EQ):"),
+                               ('SC', "Cantidades de subcontratos (SC):")):
+            sp = QSpinBox()
+            sp.setRange(0, 6)
+            sp.setValue(get_decimales_cant_acu(tipo))
+            sp.setMinimumHeight(34)
+            sp.setMaximumWidth(80)
+            sp.valueChanged.connect(self._actualizar_ejemplo)
+            form.addRow(etiqueta, sp)
+            self.spin_dec_cant[tipo] = sp
         vl.addLayout(form)
 
         ej = QFrame()
@@ -1039,7 +1044,6 @@ class ConfiguracionView(QWidget):
         vl.addWidget(ej)
         self.spin_dec.valueChanged.connect(self._actualizar_ejemplo)
         self.spin_dec_met.valueChanged.connect(self._actualizar_ejemplo)
-        self.spin_dec_cant.valueChanged.connect(self._actualizar_ejemplo)
         self._actualizar_ejemplo()
 
         hl = QHBoxLayout()
@@ -1557,21 +1561,21 @@ class ConfiguracionView(QWidget):
     def _actualizar_ejemplo(self, _n: int = 0):
         nm = self.spin_dec.value()
         nt = self.spin_dec_met.value()
-        nc = self.spin_dec_cant.value()
+        nc = self.spin_dec_cant['MO'].value()
         self.lbl_ej.setText(
             f"Ejemplo — monto: {1234.5678:,.{nm}f}   ·   "
             f"metrado: {125.4567:,.{nt}f}   ·   "
-            f"cantidad: {0.123456:.{nc}f}"
+            f"cantidad MO: {0.666667:.{nc}f}"
         )
 
     def _guardar_decimales(self):
         n_ppto = self.spin_dec.value()
         n_met  = self.spin_dec_met.value()
-        n_cant = self.spin_dec_cant.value()
+        n_cant = {t: sp.value() for t, sp in self.spin_dec_cant.items()}
         conn = get_db()
         for clave, val in (('decimales_presupuesto', n_ppto),
                            ('decimales_metrado', n_met),
-                           ('decimales_cantidad_acu', n_cant)):
+                           *((f'decimales_cantidad_{t.lower()}', n) for t, n in n_cant.items())):
             conn.execute(
                 "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
                 (clave, str(val))
@@ -1580,9 +1584,11 @@ class ConfiguracionView(QWidget):
         conn.close()
         set_decimales_ppto(n_ppto)
         set_decimales_metrado(n_met)
-        set_decimales_cant_acu(n_cant)
+        for t, n in n_cant.items():
+            set_decimales_cant_acu(n, t)
+        cant_txt = " · ".join(f"{t} {n}" for t, n in n_cant.items())
         self.lbl_dec_estado.setText(
-            f"✓  Guardado: montos {n_ppto} · metrados {n_met} · cantidades {n_cant}. "
+            f"✓  Guardado: montos {n_ppto} · metrados {n_met} · cantidades {cant_txt}. "
             "Abre un proyecto para ver el cambio aplicado."
         )
 

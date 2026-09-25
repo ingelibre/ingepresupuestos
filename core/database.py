@@ -20,10 +20,10 @@ def _rn(val, n: int = 2):
 # Tres ámbitos separados, mismo criterio que S10 «Datos Adicionales»:
 #   _DECIMALES_PPTO     → montos: PU, parciales, totales      (def 2)
 #   _DECIMALES_METRADO  → metrados (partida y planilla)       (def 2)
-#   _DECIMALES_CANT_ACU → cantidad de insumo en el ACU        (def 4)
+#   _DECIMALES_CANT_ACU → cantidad de insumo en el ACU, POR TIPO (def 4)
 _DECIMALES_PPTO: int = 2
 _DECIMALES_METRADO: int = 2
-_DECIMALES_CANT_ACU: int = 4
+_DECIMALES_CANT_ACU: dict[str, int] = {'MO': 4, 'MAT': 4, 'EQ': 4, 'SC': 4}
 
 
 def parcial_wysiwyg(metrado, pu, n: int | None = None) -> float:
@@ -53,12 +53,37 @@ def set_decimales_metrado(n: int):
     global _DECIMALES_METRADO
     _DECIMALES_METRADO = max(0, min(6, int(n)))
 
-def get_decimales_cant_acu() -> int:
-    return _DECIMALES_CANT_ACU
+def _tipo_cant(tipo) -> str:
+    """Tipo al que pertenece el ajuste de decimales; lo desconocido es MAT,
+    igual que en `totales_tipo`."""
+    return tipo if tipo in _DECIMALES_CANT_ACU else 'MAT'
 
-def set_decimales_cant_acu(n: int):
-    global _DECIMALES_CANT_ACU
-    _DECIMALES_CANT_ACU = max(0, min(6, int(n)))
+def get_decimales_cant_acu(tipo: str | None = None) -> int:
+    """Decimales de la cantidad del ACU para `tipo` (MO/MAT/EQ/SC). Cada tipo
+    tiene su propio ajuste en Configuración (issue #2: S10 redondea la MO y
+    el equipo derivados de la cuadrilla a 2 decimales y los materiales a 4)."""
+    return _DECIMALES_CANT_ACU[_tipo_cant(tipo)]
+
+def set_decimales_cant_acu(n: int, tipo: str | None = None):
+    """Con `tipo` fija ese; sin él, los cuatro."""
+    n = max(0, min(6, int(n)))
+    for t in ((_tipo_cant(tipo),) if tipo else tuple(_DECIMALES_CANT_ACU)):
+        _DECIMALES_CANT_ACU[t] = n
+
+def cantidad_acu(cantidad, tipo) -> float:
+    """La cantidad del ACU COMO SE VE: redondeada a los decimales de su tipo.
+    Es la que se multiplica por el precio (lo que ves es lo que se calcula);
+    antes se multiplicaba la cantidad guardada con todos sus decimales y la
+    configuración no cambiaba el costo (issue #2)."""
+    return _rn(cantidad or 0, get_decimales_cant_acu(tipo))
+
+
+def _tipo_item(it) -> str | None:
+    """`tipo` de una fila de ACU, sea dict o sqlite3.Row (que no tiene .get)."""
+    try:
+        return it['tipo']
+    except (KeyError, IndexError):
+        return None
 
 
 # ── Derivación de cantidad desde la cuadrilla (reglas canónicas peruanas) ──
@@ -834,6 +859,12 @@ def init_db():
                SELECT 'decimales_metrado', valor FROM configuracion WHERE clave='decimales_presupuesto'"""
         )
         conn.execute("INSERT OR IGNORE INTO configuracion (clave, valor) VALUES ('decimales_cantidad_acu', '4')")
+        # Un ajuste por tipo (issue #2): heredan el valor único de antes.
+        for _t in ('mo', 'mat', 'eq', 'sc'):
+            conn.execute(
+                """INSERT OR IGNORE INTO configuracion (clave, valor)
+                   SELECT ?, valor FROM configuracion WHERE clave='decimales_cantidad_acu'""",
+                (f'decimales_cantidad_{_t}',))
         conn.commit()
     except Exception:
         pass
@@ -841,7 +872,10 @@ def init_db():
     # Cargar decimales en las variables globales
     for clave, setter in (('decimales_presupuesto', set_decimales_ppto),
                           ('decimales_metrado', set_decimales_metrado),
-                          ('decimales_cantidad_acu', set_decimales_cant_acu)):
+                          ('decimales_cantidad_mo',  lambda n: set_decimales_cant_acu(n, 'MO')),
+                          ('decimales_cantidad_mat', lambda n: set_decimales_cant_acu(n, 'MAT')),
+                          ('decimales_cantidad_eq',  lambda n: set_decimales_cant_acu(n, 'EQ')),
+                          ('decimales_cantidad_sc',  lambda n: set_decimales_cant_acu(n, 'SC'))):
         try:
             row = conn.execute("SELECT valor FROM configuracion WHERE clave=?", (clave,)).fetchone()
             if row:
@@ -1081,71 +1115,29 @@ def calcular_totales(proyecto_id):
 
     cd = sum(parciales.values())
 
-    # Intentar calcular total desde pie_rubros (sistema dinámico).
-    # Si existe CUALQUIER pie_rubros para el proyecto (aunque todos estén
-    # inactivos), usar el sistema dinámico — los inactivos suman 0. Sin esta
-    # distinción, "todo desactivado" caía al fallback legacy y aplicaba
-    # silenciosamente `proyectos.utilidad_pct` / `igv_pct`.
+    # El pie sale de `core.pie.calcular_pie`, su único cálculo (issue #3).
+    # None = el proyecto nunca configuró su pie → fórmula simple con los
+    # campos del proyecto. Si existe CUALQUIER línea (aunque todas estén
+    # inactivas) manda el pie: «todo desactivado» no debe caer al cálculo
+    # simple y aplicar en silencio `utilidad_pct` / `igv_pct`.
+    from core.pie import calcular_pie, es_impuesto
     conn2 = get_db()
-    rubros = conn2.execute(
-        "SELECT * FROM pie_rubros WHERE proyecto_id=? AND activo=1 ORDER BY orden",
-        (proyecto_id,)
-    ).fetchall()
-    tiene_pie = conn2.execute(
-        "SELECT 1 FROM pie_rubros WHERE proyecto_id=? LIMIT 1", (proyecto_id,)
-    ).fetchone() is not None
-
-    if rubros or tiene_pie:
-        acum = cd
-        last_sub = cd
-        gf = utilidad = subtotal_val = igv = 0
-        for r in rubros:
-            tipo = r['tipo']; pct = r['pct'] or 0; codigo = r['codigo']
-            if tipo == 'subtotal':
-                last_sub = acum
-                subtotal_val = acum
-            elif tipo == 'pct_sub':
-                val = last_sub * pct / 100
-                acum += val
-                if codigo == 'IGV': igv = val
-            else:  # rubro o pct_cd
-                if tipo == 'rubro':
-                    manual = conn2.execute(
-                        "SELECT precio FROM gastos_generales"
-                        " WHERE proyecto_id=? AND rubro=? AND tipo='manual'",
-                        (proyecto_id, codigo)
-                    ).fetchone()
-                    if manual:
-                        val = manual['precio'] or 0
-                    else:
-                        gg_items = conn2.execute(
-                            "SELECT * FROM gastos_generales"
-                            " WHERE proyecto_id=? AND rubro=? AND tipo='item'",
-                            (proyecto_id, codigo)
-                        ).fetchall()
-                        if gg_items:
-                            val = sum(
-                                (i['cantidad'] or 0)
-                                * ((i['pct_participacion'] or 100) / 100)
-                                * (i['precio'] or 0)
-                                for i in gg_items
-                            )
-                        else:
-                            val = cd * pct / 100
-                else:
-                    val = cd * pct / 100
-                acum += val
-                if codigo == 'GG':      gf = val
-                elif codigo == 'UTIL':  utilidad = val
-        total_obra = acum
-        subtotal = subtotal_val if subtotal_val else cd + gf + utilidad
+    lineas, total_obra = calcular_pie(conn2, proyecto_id, cd)
+    if lineas is not None:
+        gf = sum(l['valor'] for l in lineas if l['codigo'] == 'GG')
+        utilidad = sum(l['valor'] for l in lineas if l['codigo'] == 'UTIL')
+        igv = sum(l['valor'] for l in lineas
+                  if l['tipo'] != 'subtotal' and es_impuesto(l) and l['codigo'] == 'IGV')
+        subs = [l['valor'] for l in lineas if l['tipo'] == 'subtotal']
+        subtotal = subs[-1] if subs else cd + gf + utilidad
     else:
         # Fallback: fórmula simple desde campos del proyecto
-        gf = cd * (proyecto['gf_pct'] or 0) / 100
-        utilidad = cd * (proyecto['utilidad_pct'] or 0) / 100
-        subtotal = cd + gf + utilidad
-        igv = subtotal * (proyecto['igv_pct'] or 0) / 100
-        total_obra = subtotal + igv
+        n = _DECIMALES_PPTO
+        gf = _rn(cd * (proyecto['gf_pct'] or 0) / 100, n)
+        utilidad = _rn(cd * (proyecto['utilidad_pct'] or 0) / 100, n)
+        subtotal = _rn(cd + gf + utilidad, n)
+        igv = _rn(subtotal * (proyecto['igv_pct'] or 0) / 100, n)
+        total_obra = _rn(subtotal + igv, n)
 
     conn2.close()
     return items_con_total, {
@@ -1205,7 +1197,8 @@ def _pu_desde_items(items) -> float:
         if (it['unidad'] or '').startswith('%'):
             pct_pending.append(it)
         else:
-            parcial = _rn((it['cantidad'] or 0) * (it['precio'] or 0), _DECIMALES_PPTO)
+            parcial = _rn(cantidad_acu(it['cantidad'], _tipo_item(it)) * (it['precio'] or 0),
+                          _DECIMALES_PPTO)
             tipo = it['tipo'] if it['tipo'] in totales_tipo else 'MAT'
             totales_tipo[tipo] += parcial
     cu = sum(totales_tipo.values())
@@ -1320,15 +1313,16 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
             it['parcial'] = 0.0
             pct_pending.append(it)
         else:
-            parcial = _r2((it['cantidad'] or 0) * (it['precio'] or 0))
+            it['cantidad'] = cantidad_acu(it['cantidad'], it['tipo'])
+            parcial = _rn(it['cantidad'] * (it['precio'] or 0), _DECIMALES_PPTO)
             it['parcial'] = parcial
             tipo = it['tipo'] if it['tipo'] in totales_tipo else 'MAT'
             totales_tipo[tipo] += parcial
 
     for it in pct_pending:
         base = totales_tipo.get(base_overhead(it['unidad']), 0)
-        it['parcial'] = _r2((it['cantidad'] or 0) / 100 * base)
-        it['precio'] = _r2(base)
+        it['parcial'] = _rn((it['cantidad'] or 0) / 100 * base, _DECIMALES_PPTO)
+        it['precio'] = _rn(base, _DECIMALES_PPTO)
         tipo = it['tipo'] if it['tipo'] in totales_tipo else 'EQ'
         totales_tipo[tipo] += it['parcial']
 

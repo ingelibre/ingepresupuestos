@@ -110,7 +110,7 @@ class AcuTable(QWidget):
                 row['codigo'] or '', row['descripcion'] or '',
                 row['tipo'] or '', row['unidad'] or '',
                 f"{(row['cuadrilla'] or 0):.3f}",
-                f"{cant:.{get_decimales_cant_acu()}f}",
+                f"{cant:.{get_decimales_cant_acu(row['tipo'])}f}",
                 f"{precio:.4f}",
                 fmt(parcial, moneda),
             ]

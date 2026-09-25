@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from core.database import get_db, _siguiente_codigo_inei
 from views._catalogo_base import CatalogoTablaMixin, UnidadSuperindiceMixin
 from core.config import TIPOS_RECURSO, INEI_DEFAULT
-from utils.formatting import fmt, parse_num
+from utils.formatting import fmt, parse_num, moneda_defecto
 from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
@@ -408,7 +408,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.kpi_eq = self._mk_kpi("Equipos", "0", TIPO_TEXTO['EQ'])
         self.kpi_sc = self._mk_kpi("Sub-contratos", "0", TIPO_TEXTO['SC'])
         from utils.theme import accent_color as _acc
-        self.kpi_valor = self._mk_kpi("Valor catálogo", fmt(0), _acc())
+        self.kpi_valor = self._mk_kpi("Valor catálogo", fmt(0, moneda_defecto()), _acc())
         for k in (self.kpi_total, self.kpi_mo, self.kpi_mat,
                   self.kpi_eq, self.kpi_sc, self.kpi_valor):
             pie.addWidget(k)
@@ -506,6 +506,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
 
     # -- carga / consulta ------------------------------------------------------
     def cargar(self):
+        self._moneda = moneda_defecto()   # catálogo global → moneda de Configuración (#1)
         from utils.formatting import norm_busqueda
         q = norm_busqueda(self.inp_q.text().strip()) if hasattr(self, 'inp_q') else ''
         tipo = self.cmb_tipo.currentData() if hasattr(self, 'cmb_tipo') else ''
@@ -589,7 +590,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
                 self.tbl.setItem(row, 3, it_und)
 
                 precio = float(r['precio'] or 0)
-                it_pre = NumItem(fmt(precio), precio)
+                it_pre = NumItem(fmt(precio, self._moneda), precio)
                 it_pre.setTextAlignment(align_right)
                 es_overhead = (r['unidad'] or '').startswith('%')
                 if es_overhead:
@@ -631,7 +632,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.kpi_mat.lbl_valor.setText(str(n_mat))
         self.kpi_eq.lbl_valor.setText(str(n_eq))
         self.kpi_sc.lbl_valor.setText(str(n_sc))
-        self.kpi_valor.lbl_valor.setText(fmt(valor))
+        self.kpi_valor.lbl_valor.setText(fmt(valor, self._moneda))
 
         n_filt = len(rows)
         if n_filt == n_total:
@@ -651,7 +652,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         anterior = float(item.data(Qt.UserRole) or 0)
         if abs(nuevo - anterior) < 0.0001:
             self.tbl.blockSignals(True)
-            item.setText(fmt(anterior))
+            item.setText(fmt(anterior, self._moneda))
             self.tbl.blockSignals(False)
             return
         conn = get_db()
@@ -660,7 +661,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         conn.close()
         self.tbl.blockSignals(True)
         item.setData(Qt.UserRole, nuevo)
-        item.setText(fmt(nuevo))
+        item.setText(fmt(nuevo, self._moneda))
         self.tbl.blockSignals(False)
 
     def _on_double_click(self, row: int, col: int):

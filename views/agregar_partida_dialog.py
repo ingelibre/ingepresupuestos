@@ -22,7 +22,11 @@ from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel, QSortFilterProx
 from PySide6.QtGui import QFont, QColor, QCursor
 
 from core.database import get_db, _recalcular_pu
-from utils.formatting import fmt
+from utils.formatting import fmt, moneda_defecto
+
+# Los CU vienen de la Biblioteca (catálogo global, sin moneda propia): se
+# muestran con la moneda de Configuración. Se refresca al abrir el diálogo (#1).
+_MONEDA = 'Soles'
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
 BLUE_500  = "#F37329"
@@ -122,8 +126,8 @@ class _BibliotecaRow(QFrame):
         unidad = cu.get('unidad') or ""
         precio = cu.get('costo_unitario') or 0
         lbl_meta = QLabel(
-            f"{grupo}  ·  {fmt(precio, 'Soles')} / {unidad}" if grupo
-            else f"{fmt(precio, 'Soles')} / {unidad}"
+            f"{grupo}  ·  {fmt(precio, _MONEDA)} / {unidad}" if grupo
+            else f"{fmt(precio, _MONEDA)} / {unidad}"
         )
         lbl_meta.setStyleSheet(f"color:{SLATE_100}; font-size:10px; border:none;")
 
@@ -177,6 +181,8 @@ class AgregarPartidaDialog(QDialog):
                  parent=None):
         super().__init__(parent)
         self.pid                  = proyecto_id
+        global _MONEDA
+        _MONEDA = moneda_defecto()
         self.usuario              = usuario
         self._contexto_item       = contexto_item        # código del ítem seleccionado
         self._contexto_es_titulo  = contexto_es_titulo   # True si es título/sección
@@ -725,7 +731,7 @@ class AgregarPartidaDialog(QDialog):
         rend = cu.get('rendimiento') or 0
         meta = QLabel(f"{(cu.get('unidad') or '—')}   ·   "
                       f"{self._tr('Rend')} {rend:g}/{self._tr('día')}   ·   "
-                      f"CU {fmt(cu.get('costo_unitario') or 0, 'Soles')}")
+                      f"CU {fmt(cu.get('costo_unitario') or 0, _MONEDA)}")
         meta.setStyleSheet(f"color:{SLATE_300}; font-size:11px; border:none;"
                            f" background:transparent; padding:2px 0 8px 0;")
         self._prev_layout.addWidget(meta)
@@ -779,7 +785,7 @@ class AgregarPartidaDialog(QDialog):
         tot_row = QHBoxLayout()
         lt = QLabel(self._tr("Costo unitario")); lt.setStyleSheet(
             f"color:{SLATE_700}; font-size:12px; font-weight:700; border:none; background:transparent;")
-        lv = QLabel(fmt(cu.get('costo_unitario') or 0, 'Soles')); lv.setStyleSheet(
+        lv = QLabel(fmt(cu.get('costo_unitario') or 0, _MONEDA)); lv.setStyleSheet(
             f"color:{SLATE_700}; font-size:12px; font-weight:700; border:none; background:transparent;")
         lv.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
@@ -794,7 +800,7 @@ class AgregarPartidaDialog(QDialog):
         desc = QLabel(d['descripcion'] or "—")
         desc.setStyleSheet(f"color:{SLATE_700}; font-size:11px; border:none; background:transparent;")
         desc.setWordWrap(True)
-        parc = QLabel(fmt(d.get('parcial') or 0, 'Soles'))
+        parc = QLabel(fmt(d.get('parcial') or 0, _MONEDA))
         parc.setStyleSheet(f"color:{SLATE_300}; font-size:11px; font-weight:600;"
                            f" border:none; background:transparent;")
         parc.setAlignment(Qt.AlignRight | Qt.AlignVCenter)

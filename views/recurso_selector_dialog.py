@@ -61,7 +61,7 @@ def _cuadrilla_y_cantidad(tipo, unidad, *, cuad, cant, rend, jornada,
     if cuad <= 0:
         return 0.0, cant
     factor = 1 if _es_por_dia(tipo, unidad) else jornada
-    return cuad, _rn(cuad / (rend or 1) * factor, get_decimales_cant_acu())
+    return cuad, _rn(cuad / (rend or 1) * factor, get_decimales_cant_acu(tipo))
 
 
 class RecursoSelectorDialog(QDialog):
