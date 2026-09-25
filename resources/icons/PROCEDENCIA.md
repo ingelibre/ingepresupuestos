@@ -49,6 +49,14 @@ equivalente del upstream actual, que ya es GPL-3.0.
 4. PNG de tamaño fijo: renderizar el SVG con `QSvgRenderer` al tamaño y color
    deseados (ver los existentes como referencia).
 
+## Iconos propios dentro de `elementary/24/`
+
+- `disquete.svg` — «Guardar en Biblioteca» en la cabecera del ACU (24 sep
+  2026). El `document-save` de elementary es una bandeja con flecha, no un
+  disquete, y es a color; este va en un solo tono (`currentColor`) para
+  colorearlo con `icon_colored`. Dibujado para el proyecto. © Marco Sumari,
+  GPL-3.0-or-later.
+
 ## Otras carpetas
 
 - `hicolor/` — icono MIME propio (`application-x-ingepresupuestos-db`),

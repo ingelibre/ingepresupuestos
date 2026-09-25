@@ -1755,6 +1755,83 @@ class _HandleDragFilter(QObject):
 
 
 
+# ── Botones de las cabeceras de pestaña (ACU · Metrados · Especificaciones ·
+# Memoria) ─────────────────────────────────────────────────────────────────────
+# El QSS global pone `min-height:28px` a todo QPushButton y eso pisa a
+# setFixedHeight: los botones de estas cabeceras salían más altos que su
+# 24 px y descentrados (capturas de Marco, 24 sep 2026). El alto va fijado
+# EN el estilo, 26 px como los de la barra del árbol.
+# En QSS el borde se suma al min-height: un botón con borde de 1 px pide
+# 24 px de contenido para medir 26.
+_QSS_ALTO_CAB = "min-height:26px; max-height:26px; padding-top:0; padding-bottom:0;"
+_QSS_ALTO_CAB_BORDE = "min-height:24px; max-height:24px; padding-top:0; padding-bottom:0;"
+
+
+def _fijar_alto_boton(btn):
+    ss = btn.styleSheet().strip()
+    alto = _QSS_ALTO_CAB_BORDE if 'border:1px' in ss.replace(' ', '') else _QSS_ALTO_CAB
+    if '{' in ss:
+        ss += " QPushButton { " + alto + " }"
+    else:
+        ss = (ss.rstrip(';') + '; ' if ss else '') + alto
+    btn.setStyleSheet(ss)
+
+
+def _fijar_alto_cabecera(hdr):
+    for btn in hdr.findChildren(QPushButton):
+        _fijar_alto_boton(btn)
+
+
+# «Guardar»: botón cuadrado verde con un disquete blanco, el mismo en las
+# cuatro cabeceras. El tooltip dice QUÉ guarda.
+_QSS_BTN_GUARDAR = (
+    "QPushButton { background:#68B723; border:none; border-radius:4px; padding:0;"
+    " min-height:26px; max-height:26px; min-width:26px; max-width:26px; }"
+    "QPushButton:hover { background:#5a9e1e; }")
+_QSS_BTN_GUARDADO = _QSS_BTN_GUARDAR.replace("#68B723", "#0F5132")
+
+
+def _boton_guardar(tooltip: str, slot) -> QPushButton:
+    btn = QPushButton()
+    btn.setFixedSize(26, 26)
+    btn.setIcon(icon_colored("disquete", "white"))
+    btn.setIconSize(QSize(16, 16))
+    btn.setToolTip(tooltip)
+    btn.setCursor(QCursor(Qt.PointingHandCursor))
+    btn.setStyleSheet(_QSS_BTN_GUARDAR)
+    btn.clicked.connect(slot)
+    return btn
+
+
+class _LabelElidido(QLabel):
+    """Rótulo de una línea que termina en «…» si no cabe; el texto completo
+    queda en el tooltip. Un QLabel a secas recorta sin avisar."""
+
+    def __init__(self, texto: str = '', parent=None):
+        super().__init__(parent)
+        self._completo = ''
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(0)
+        self.setText(texto)
+
+    def setText(self, texto: str):
+        self._completo = texto or ''
+        self.setToolTip(self._completo)
+        self._aplicar()
+
+    def text(self) -> str:
+        return self._completo
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._aplicar()
+
+    def _aplicar(self):
+        visible = self.fontMetrics().elidedText(
+            self._completo, Qt.ElideRight, max(0, self.width() - 2))
+        super().setText(visible)
+
+
 class ProyectoView(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2241,9 +2318,13 @@ class ProyectoView(QWidget):
         def _abtn(label, handler, bg=BLUE_500, hover=BLUE_700):
             b = QPushButton(label)
             b.setFixedHeight(26)
+            # Alto fijado en el QSS (_QSS_ALTO_CAB): con el min-height global
+            # medían 28 y los demás botones de la barra 26; el naranja de
+            # «+ Partida» lo delataba (captura de Marco, 24 sep 2026).
             b.setStyleSheet(
                 f"QPushButton {{ background:{bg}; color:white; border:none;"
-                f" border-radius:6px; font-size:11px; font-weight:700; padding:0 10px; }}"
+                f" border-radius:6px; font-size:11px; font-weight:700; padding:0 10px;"
+                f" {_QSS_ALTO_CAB} }}"
                 f"QPushButton:hover {{ background:{hover}; }}"
             )
             b.clicked.connect(handler)
@@ -2688,7 +2769,11 @@ class ProyectoView(QWidget):
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
 
-        # Cabecera del ACU
+        # Cabecera del ACU, en una fila: nombre de la partida (termina en «…»
+        # si no cabe, completo en el tooltip) · + Recurso · disquete ·
+        # rendimiento · jornada. «Guardar en Biblioteca» pasó a icono para
+        # dejarle sitio al nombre, que se cortaba sin avisar (captura de
+        # Marco, 24 sep 2026).
         hdr = QFrame()
         hdr.setFixedHeight(36)
         hdr.setStyleSheet(f"background:{SILVER_100}; border-bottom:1px solid {SILVER_300};")
@@ -2696,57 +2781,38 @@ class ProyectoView(QWidget):
         hl.setContentsMargins(10, 0, 8, 0)
         hl.setSpacing(8)
 
-        self.lbl_acu_titulo = QLabel("Seleccione una partida")
+        self.lbl_acu_titulo = _LabelElidido("Seleccione una partida")
         self.lbl_acu_titulo.setStyleSheet(
-            f"color:{SLATE_700}; font-size:11px; font-weight:700; border:none;"
+            f"color:{SLATE_700}; font-size:11px; font-weight:700;"
+            f" border:none; background:transparent;"
         )
-        self.lbl_acu_titulo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.lbl_acu_titulo.setMinimumWidth(0)
         hl.addWidget(self.lbl_acu_titulo, stretch=1)
-        hl.addStretch()
-
-        # Subir / bajar el insumo seleccionado dentro de su grupo (issue #12).
-        for _txt, _paso, _tip in (("↑", -1, "Subir insumo  (Ctrl+↑)"),
-                                  ("↓", +1, "Bajar insumo  (Ctrl+↓)")):
-            _b = QPushButton(_txt)
-            _b.setFixedSize(22, 22)
-            _b.setToolTip(_tip)
-            _b.setCursor(QCursor(Qt.PointingHandCursor))
-            _b.setStyleSheet(
-                f"QPushButton {{ background:white; color:{SLATE_700};"
-                f" border:1px solid {SILVER_300}; border-radius:4px;"
-                f" font-size:11px; font-weight:700; padding:0; min-height:0; }}"
-                f"QPushButton:hover {{ border-color:{BLUE_500}; color:{BLUE_500}; }}"
-            )
-            _b.clicked.connect(lambda _=False, p=_paso: self._mover_insumo_acu(p))
-            hl.addWidget(_b)
 
         btn_add = QPushButton("+ Recurso")
-        btn_add.setFixedHeight(22)
+        # Mismo alto que el disquete, fijado EN el QSS: un `min-height` del
+        # estilo pisa a setFixedHeight, y el botón acababa con el alto de su
+        # texto — más alto y corrido hacia abajo en la pantalla de Marco, 12 px
+        # en la de pruebas (24 sep 2026).
+        btn_add.setFixedHeight(26)
         btn_add.setCursor(QCursor(Qt.PointingHandCursor))
         btn_add.setStyleSheet(
             f"QPushButton {{ background:{BLUE_500}; color:white; border:none; border-radius:4px;"
-            f" padding:0 8px; font-size:10px; font-weight:600; }}"
+            f" padding:0 10px; font-size:10px; font-weight:600;"
+            f" min-height:26px; max-height:26px; }}"
             f"QPushButton:hover {{ background:{BLUE_700}; }}"
         )
         btn_add.clicked.connect(self._agregar_recurso)
-        hl.addWidget(btn_add)
+        hl.addWidget(btn_add, 0, Qt.AlignVCenter)
 
-        # Dice a qué guarda: el ACU se guarda solo, celda a celda, y David
-        # Ramos (16 sep 2026) creyó que este botón era el «Guardar» del ACU
-        # y pidió verlo en gris cuando no hubiera cambios.
-        btn_bib = QPushButton("Guardar en Biblioteca")
-        btn_bib.setFixedHeight(22)
-        btn_bib.setToolTip("Guardar este análisis de costo unitario en la Biblioteca")
-        btn_bib.setCursor(QCursor(Qt.PointingHandCursor))
-        btn_bib.setStyleSheet(
-            f"QPushButton {{ background:{GREEN_500}; color:white; border:none; border-radius:4px;"
-            f" padding:0 10px; font-size:10px; font-weight:600; }}"
-            f"QPushButton:hover {{ background:#5a9e1e; }}"
-        )
-        btn_bib.clicked.connect(self._guardar_en_biblioteca)
+        # Guardar en Biblioteca: botón cuadrado de icono, como los de la barra
+        # del árbol (⟳ ≡ ◎ ↕) pero en su versión para fondo claro. El ACU se
+        # guarda solo, celda a celda: el tooltip dice a qué guarda este
+        # botón, porque David Ramos (16 sep 2026) lo tomó por el «Guardar»
+        # del ACU.
+        btn_bib = _boton_guardar("Guardar en Biblioteca", self._guardar_en_biblioteca)
         self._btn_bib = btn_bib
-        hl.addWidget(btn_bib)
+        hl.addWidget(btn_bib, 0, Qt.AlignVCenter)
+        hl.addSpacing(4)
 
         lbl_r = QLabel("Rend.:")
         lbl_r.setStyleSheet(f"color:{SLATE_300}; font-size:10px; border:none;")
@@ -2764,7 +2830,7 @@ class ProyectoView(QWidget):
             f" padding:0 6px; font-size:11px; color:{SLATE_700};"
         )
         self.inp_rend.editingFinished.connect(self._guardar_rendimiento)
-        hl.addWidget(self.inp_rend)
+        hl.addWidget(self.inp_rend, 0, Qt.AlignVCenter)
 
         # Unidad del rendimiento (unidad de la partida / día), ej. «m²/día»
         self.lbl_rend_unidad = QLabel("")
@@ -2835,7 +2901,8 @@ class ProyectoView(QWidget):
         self.tbl_acu.doubleClicked.connect(self._editar_celda_acu)
         self.tbl_acu.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl_acu.customContextMenuRequested.connect(self._menu_acu)
-        for _seq, _paso in (("Ctrl+Up", -1), ("Ctrl+Down", +1)):
+        # Alt+↑/↓, igual que mover partidas en el árbol (issue #12).
+        for _seq, _paso in (("Alt+Up", -1), ("Alt+Down", +1)):
             _sc = QShortcut(QKeySequence(_seq), self.tbl_acu)
             _sc.setContext(Qt.WidgetWithChildrenShortcut)
             _sc.activated.connect(lambda p=_paso: self._mover_insumo_acu(p))
@@ -3108,10 +3175,11 @@ class ProyectoView(QWidget):
         # Toggle Metrados / Acero
         self._met_modo = 'met'
         _TOGGLE_ON  = (f"background:{BLUE_500}; color:white; border:none;"
-                       f" border-radius:4px; padding:0 10px; font-size:10px; font-weight:700;")
+                       f" border-radius:4px; padding:0 10px; font-size:10px; font-weight:700;"
+                       f" {_QSS_ALTO_CAB}")
         _TOGGLE_OFF = (f"background:{SILVER_100}; color:{SLATE_500};"
                        f" border:1px solid {SILVER_300}; border-radius:4px;"
-                       f" padding:0 10px; font-size:10px;")
+                       f" padding:0 10px; font-size:10px; {_QSS_ALTO_CAB_BORDE}")
         self.btn_modo_met   = QPushButton("⊞ Metrados")
         self.btn_modo_acero = QPushButton("⊞ Acero")
         self.btn_modo_met.setFixedHeight(24)
@@ -3133,14 +3201,8 @@ class ProyectoView(QWidget):
         )
         btn_met_add.clicked.connect(self._metrado_fila_btn)
         hl.addWidget(btn_met_add)
-        btn_met_save = QPushButton("✓ Guardar")
-        btn_met_save.setFixedHeight(24)
-        btn_met_save.setStyleSheet(
-            f"background:{GREEN_500}; color:white; border:none; border-radius:4px;"
-            f" padding:0 10px; font-size:10px; font-weight:600;"
-        )
-        btn_met_save.clicked.connect(self._metrado_guardar)
-        hl.addWidget(btn_met_save)
+        hl.addWidget(_boton_guardar("Guardar metrados", self._metrado_guardar))
+        _fijar_alto_cabecera(hdr)
         vl.addWidget(hdr)
 
         # Tabla de metrados (planilla)
@@ -3367,15 +3429,8 @@ class ProyectoView(QWidget):
         btn_ia.clicked.connect(self._ia_generar_spec)
         hl.addWidget(btn_ia)
 
-        btn_save = QPushButton("Guardar")
-        btn_save.setFixedHeight(24)
-        btn_save.setStyleSheet(
-            f"QPushButton {{ background:{GREEN_500}; color:white; border:none; border-radius:4px;"
-            f" padding:0 12px; font-size:10px; font-weight:600; }}"
-            f"QPushButton:hover {{ background:#5a9e1e; }}"
-        )
-        btn_save.clicked.connect(self._guardar_spec)
-        hl.addWidget(btn_save)
+        hl.addWidget(_boton_guardar("Guardar especificación", self._guardar_spec))
+        _fijar_alto_cabecera(hdr)
         vl.addWidget(hdr)
 
         # ── Toolbar de formato ───────────────────────────────────────
@@ -4885,15 +4940,9 @@ class ProyectoView(QWidget):
         btn_ia.clicked.connect(self._ia_generar_memoria)
         hl.addWidget(btn_ia)
 
-        btn_save = QPushButton(_tr_m("Guardar"))
-        btn_save.setFixedHeight(24)
-        btn_save.setStyleSheet(
-            f"QPushButton {{ background:{GREEN_500}; color:white; border:none; border-radius:4px;"
-            f" padding:0 12px; font-size:10px; font-weight:600; }}"
-            f"QPushButton:hover {{ background:#5a9e1e; }}"
-        )
-        btn_save.clicked.connect(self._guardar_memoria)
-        hl.addWidget(btn_save)
+        hl.addWidget(_boton_guardar(_tr_m("Guardar memoria descriptiva"),
+                                    self._guardar_memoria))
+        _fijar_alto_cabecera(hdr)
         vl.addWidget(hdr)
 
         # ── Toolbar de formato (igual que Especificaciones) ──────────
@@ -6811,6 +6860,7 @@ class ProyectoView(QWidget):
                     ('Supr / Backspace',   'Limpiar / eliminar fila'),
                     ('Doble clic',         'Editar valor de la celda'),
                     ('Tab / Shift+Tab',    'Navegar entre celdas'),
+                    ('Alt+↑ / Alt+↓',      'Subir / bajar insumo del ACU'),
                 ]),
                 ('Predecesoras (columna "Pred.")', [
                     ('5',                  'FS: inicia cuando 5 termina'),
@@ -8042,8 +8092,8 @@ class ProyectoView(QWidget):
             menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
             menu.addSeparator()
             self.tbl_acu.selectRow(row)
-            menu.addAction(tr("Subir") + "  Ctrl+↑", lambda: self._mover_insumo_acu(-1))
-            menu.addAction(tr("Bajar") + "  Ctrl+↓", lambda: self._mover_insumo_acu(+1))
+            menu.addAction(tr("Subir") + "  Alt+↑", lambda: self._mover_insumo_acu(-1))
+            menu.addAction(tr("Bajar") + "  Alt+↓", lambda: self._mover_insumo_acu(+1))
             menu.addSeparator()
             menu.addAction(tr("Eliminar"), lambda: self._eliminar_acu_item(acu_id))
             menu.addSeparator()
@@ -8474,18 +8524,13 @@ class ProyectoView(QWidget):
 
         btn = getattr(self, '_btn_bib', None)
         if btn:
-            btn.setText("✓ Guardado")
-            btn.setStyleSheet(
-                "QPushButton { background:#0F5132; color:white; border:none; border-radius:4px;"
-                " padding:0 10px; font-size:10px; font-weight:600; }"
-            )
+            # Confirmación breve sobre el mismo botón: verde oscuro con el
+            # tooltip «Guardado», y a los 2,5 s vuelve a ser el de siempre.
+            btn.setStyleSheet(_QSS_BTN_GUARDADO)
+            btn.setToolTip("Guardado en la Biblioteca")
             QTimer.singleShot(2500, lambda: (
-                btn.setText("Guardar"),
-                btn.setStyleSheet(
-                    f"QPushButton {{ background:{GREEN_500}; color:white; border:none; border-radius:4px;"
-                    f" padding:0 10px; font-size:10px; font-weight:600; }}"
-                    f"QPushButton:hover {{ background:#5a9e1e; }}"
-                )
+                btn.setStyleSheet(_QSS_BTN_GUARDAR),
+                btn.setToolTip("Guardar en Biblioteca"),
             ))
 
         QMessageBox.information(self, "Biblioteca", msg)
