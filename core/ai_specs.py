@@ -2691,9 +2691,12 @@ def buscar_en_biblioteca(descripcion: str, unidad: str = '') -> dict | None:
 
 
 def importar_partidas_con_biblioteca(proyecto_id: int, partidas: list,
-                                      usar_biblioteca: bool = True) -> tuple[int, int]:
+                                      usar_biblioteca: bool = True,
+                                      solo_estructura: bool = False) -> tuple[int, int]:
     """Importa partidas. Si `usar_biblioteca=True`, busca cada partida en
     biblioteca_cu y, si encuentra match suficiente, copia el ACU + rendimiento.
+    `solo_estructura=True` copia rendimientos y cantidades sin los precios de
+    referencia (ver `database.copiar_items_acu`, issue #11).
     Retorna (creadas, con_acu_de_biblioteca)."""
     if not partidas:
         return (0, 0)
@@ -2739,17 +2742,13 @@ def importar_partidas_con_biblioteca(proyecto_id: int, partidas: list,
             creadas += 1
             # Copiar items del ACU si hay match
             if bib_match and bib_match.get('items'):
-                for it in bib_match['items']:
-                    precio = it.get('precio')
-                    conn.execute(
-                        """INSERT INTO acu_items (partida_id, recurso_id,
-                                                   cuadrilla, cantidad, precio)
-                           VALUES (?,?,?,?,?)""",
-                        (new_pid, it['recurso_id'],
-                         it.get('cuadrilla') or 0,
-                         it.get('cantidad') or 0,
-                         precio if precio else None)
-                    )
+                from core.database import copiar_items_acu, _recalcular_pu
+                copiar_items_acu(conn, new_pid, bib_match['items'],
+                                 proyecto_id=proyecto_id,
+                                 solo_estructura=solo_estructura)
+                # El CU guardado en la biblioteca ya no vale si algún insumo
+                # tomó el precio del proyecto o entró sin precio.
+                _recalcular_pu(conn, new_pid)
                 con_acu += 1
         except Exception:
             pass

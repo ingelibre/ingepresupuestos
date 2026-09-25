@@ -82,8 +82,8 @@ def _re_simbolos_moneda() -> str:
     decide qué celdas se exportan al Excel como número. Estaba escrita a mano
     y cada moneda nueva salía como texto (issue #9)."""
     import re as _re
-    from core.config import MONEDAS
-    sims = {m['simbolo'] for m in MONEDAS.values()} | {'S/.', 'Bs', '$'}
+    from core.config import monedas
+    sims = {m['simbolo'] for m in monedas().values()} | {'S/.', 'Bs', '$'}
     return '|'.join(_re.escape(x) for x in sorted(sims, key=len, reverse=True))
 
 
@@ -9062,8 +9062,8 @@ class CurvaSWidget(QWidget):
 
     def _moneda_simbolo(self):
         try:
-            from core.config import MONEDAS
-            return MONEDAS.get(self._cv._moneda, {}).get('simbolo', 'S/')
+            from core.config import moneda_cfg
+            return moneda_cfg(self._cv._moneda)['simbolo']
         except Exception:
             return 'S/'
 

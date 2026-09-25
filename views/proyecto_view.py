@@ -1081,6 +1081,31 @@ class _PresupuestoTree(QTreeWidget):
     def minimumSizeHint(self):
         return QSize(200, 100)
 
+    # Ancho por debajo del cual la Descripción deja de encogerse y el árbol
+    # pasa a barra horizontal, como el resumen de costos (issue #15). Antes
+    # la Descripción en Stretch se comprimía sin límite y en un panel
+    # estrecho quedaban tres letras por línea.
+    DESC_MIN = 240
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.ajustar_modo_descripcion()
+
+    def ajustar_modo_descripcion(self):
+        """Descripción en Stretch mientras quepa DESC_MIN; si no, ancho fijo
+        DESC_MIN y la barra horizontal se encarga del resto."""
+        hdr = self.header()
+        if hdr.count() < 2:
+            return
+        fijas = sum(hdr.sectionSize(c) for c in range(hdr.count())
+                    if c != 1 and not hdr.isSectionHidden(c))
+        estirar = self.viewport().width() - fijas >= self.DESC_MIN
+        modo = QHeaderView.Stretch if estirar else QHeaderView.Interactive
+        if hdr.sectionResizeMode(1) != modo:
+            hdr.setSectionResizeMode(1, modo)
+            if not estirar:
+                hdr.resizeSection(1, self.DESC_MIN)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.InternalMove)
@@ -2295,6 +2320,19 @@ class ProyectoView(QWidget):
         self._btn_niveles.setMenu(self._menu_niveles)
         hl.addWidget(self._btn_niveles)
 
+        # Ir a la selección (issue #15): tras desplazarse por un presupuesto
+        # largo, vuelve a la partida o título seleccionado.
+        btn_ir_sel = QPushButton("◎")
+        btn_ir_sel.setFixedSize(26, 26)
+        btn_ir_sel.setToolTip(_tr_b("Ir a la selección"))
+        btn_ir_sel.setStyleSheet(
+            f"QPushButton {{ background:rgba(255,255,255,0.12); color:white; border:none;"
+            f" border-radius:4px; font-size:13px; font-weight:700; min-height:0; padding:0; }}"
+            f"QPushButton:hover {{ background:rgba(255,255,255,0.25); }}"
+        )
+        btn_ir_sel.clicked.connect(self._ir_a_seleccion)
+        hl.addWidget(btn_ir_sel)
+
         self._btn_layout = QPushButton("↕")
         self._btn_layout.setFixedSize(26, 26)
         self._btn_layout.setStyleSheet(
@@ -2667,6 +2705,22 @@ class ProyectoView(QWidget):
         hl.addWidget(self.lbl_acu_titulo, stretch=1)
         hl.addStretch()
 
+        # Subir / bajar el insumo seleccionado dentro de su grupo (issue #12).
+        for _txt, _paso, _tip in (("↑", -1, "Subir insumo  (Ctrl+↑)"),
+                                  ("↓", +1, "Bajar insumo  (Ctrl+↓)")):
+            _b = QPushButton(_txt)
+            _b.setFixedSize(22, 22)
+            _b.setToolTip(_tip)
+            _b.setCursor(QCursor(Qt.PointingHandCursor))
+            _b.setStyleSheet(
+                f"QPushButton {{ background:white; color:{SLATE_700};"
+                f" border:1px solid {SILVER_300}; border-radius:4px;"
+                f" font-size:11px; font-weight:700; padding:0; min-height:0; }}"
+                f"QPushButton:hover {{ border-color:{BLUE_500}; color:{BLUE_500}; }}"
+            )
+            _b.clicked.connect(lambda _=False, p=_paso: self._mover_insumo_acu(p))
+            hl.addWidget(_b)
+
         btn_add = QPushButton("+ Recurso")
         btn_add.setFixedHeight(22)
         btn_add.setCursor(QCursor(Qt.PointingHandCursor))
@@ -2781,6 +2835,10 @@ class ProyectoView(QWidget):
         self.tbl_acu.doubleClicked.connect(self._editar_celda_acu)
         self.tbl_acu.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl_acu.customContextMenuRequested.connect(self._menu_acu)
+        for _seq, _paso in (("Ctrl+Up", -1), ("Ctrl+Down", +1)):
+            _sc = QShortcut(QKeySequence(_seq), self.tbl_acu)
+            _sc.setContext(Qt.WidgetWithChildrenShortcut)
+            _sc.activated.connect(lambda p=_paso: self._mover_insumo_acu(p))
         self.tbl_acu._key_handler = self._acu_key_press
         vl.addWidget(self.tbl_acu, stretch=1)
 
@@ -3629,8 +3687,9 @@ class ProyectoView(QWidget):
         lineas, total = calcular_pie(conn, self.pid, cd)
         conn.close()
         # En mayúsculas como el resto de filas y como lo imprimen PDF, Excel
-        # y Word (David Ramos, 16 sep 2026).
-        filas = [("COSTO DIRECTO", _rn(cd, get_decimales_ppto()), SLATE_700, False)]
+        # y Word (David Ramos, 16 sep 2026), y en negrita como un subtotal,
+        # que es como ya salía en los reportes (issue #15).
+        filas = [("COSTO DIRECTO", _rn(cd, get_decimales_ppto()), SLATE_700, True)]
         for l in lineas or []:
             if l['tipo'] == 'subtotal':
                 filas.append((l['nombre'], l['valor'], SLATE_700, True))
@@ -5320,6 +5379,7 @@ class ProyectoView(QWidget):
         if getattr(self, '_nivel_visible', None) is not None:
             expandir_hasta_nivel(self.tree.invisibleRootItem(), self._nivel_visible)
         self.tree.resizeColumnToContents(0)   # ajustar col Ítem al contenido
+        self._ajustar_anchos_numericos()
         if _id_sel in self._id_to_item:
             self.tree.blockSignals(True)
             self.tree.setCurrentItem(self._id_to_item[_id_sel])
@@ -5378,6 +5438,78 @@ class ProyectoView(QWidget):
         if not (_recurso_por_dia(tipo, unidad) or _recurso_por_hora(tipo, unidad)):
             return ''
         return f"{float(cuadrilla or 0):.3f}"
+
+    def _menu_copiar_resumen(self, widget, pos):
+        from utils.i18n import tr
+        menu = QMenu(self)
+        act = menu.addAction(tr("Copiar como imagen"))
+        act.triggered.connect(lambda: self._copiar_resumen_imagen(widget))
+        menu.exec(widget.mapToGlobal(pos))
+
+    def _copiar_resumen_imagen(self, widget):
+        from utils.captura import imagen_nitida
+        from utils.i18n import tr
+        QApplication.clipboard().setImage(imagen_nitida(widget))
+        win = self.window()
+        if hasattr(win, 'statusBar') and win.statusBar():
+            win.statusBar().showMessage(
+                tr("Resumen de costos copiado como imagen"), 4000)
+
+    # Anchos de partida de Cantidad, P.U. y Parcial: los de siempre. Crecen
+    # hasta el número más largo del árbol (issue #15): con pesos colombianos
+    # «1.234.567.890,00» no entraba en 90 px y salía cortado con «…».
+    _ANCHO_BASE_NUM = {3: 76, 4: 80, 5: 90}
+
+    def _ajustar_anchos_numericos(self):
+        """Ensancha las columnas numéricas hasta su texto más largo (títulos
+        en negrita incluidos). Solo crece: si el usuario las abrió más a
+        mano, se respeta."""
+        from PySide6.QtWidgets import QTreeWidgetItemIterator
+        hdr = self.tree.header()
+        need = {}
+        for c, base in self._ANCHO_BASE_NUM.items():
+            fh = QFont(hdr.font()); fh.setBold(True)
+            need[c] = max(base, QFontMetrics(fh).horizontalAdvance(
+                self.tree.headerItem().text(c)) + 24)
+        it = QTreeWidgetItemIterator(self.tree)
+        metricas = {}      # una QFontMetrics por fuente, no una por celda
+        while it.value():
+            item = it.value()
+            for c in need:
+                txt = item.text(c)
+                if not txt:
+                    continue
+                f = QFont(item.font(c)); f.setBold(True)
+                fm = metricas.get(f.key())
+                if fm is None:
+                    fm = metricas[f.key()] = QFontMetrics(f)
+                need[c] = max(need[c], fm.horizontalAdvance(txt) + 24)
+            it += 1
+        for c, w in need.items():
+            if self.tree.columnWidth(c) < w:
+                self.tree.setColumnWidth(c, w)
+        self.tree.ajustar_modo_descripcion()
+
+    def _ir_a_seleccion(self):
+        """Desplaza el árbol hasta la fila seleccionada. Si el filtro de nivel
+        la tiene oculta o dentro de un título cerrado, abre solo lo necesario
+        para verla (issue #15)."""
+        it = self.tree.currentItem()
+        if it is None and self._partida_actual_id in getattr(self, '_id_to_item', {}):
+            it = self._id_to_item[self._partida_actual_id]
+        if it is None:
+            return
+        it.setHidden(False)
+        padre = it.parent()
+        while padre is not None:
+            padre.setHidden(False)
+            padre.setExpanded(True)
+            padre = padre.parent()
+        self.tree.blockSignals(True)
+        self.tree.setCurrentItem(it)
+        self.tree.blockSignals(False)
+        self.tree.scrollToItem(it, QAbstractItemView.PositionAtCenter)
+        self.tree.setFocus()
 
     def _acu_en_blanco(self):
         """Panel ACU como al abrir el presupuesto: sin partida."""
@@ -6440,6 +6572,11 @@ class ProyectoView(QWidget):
         hl_top = QHBoxLayout(top_row)
         hl_top.setContentsMargins(0, 0, 0, 0)
         hl_top.setSpacing(12)
+        # Clic derecho → «Copiar como imagen» de costos + distribución del CD,
+        # para pegarla en un informe o un chat (issue #15).
+        top_row.setContextMenuPolicy(Qt.CustomContextMenu)
+        top_row.customContextMenuRequested.connect(
+            lambda pos, w=top_row: self._menu_copiar_resumen(w, pos))
 
         # Card de costos dinámica según pie_rubros activos — project-wide
         # (suma todos los subpresupuestos; el resto del tab Resumen también
@@ -7369,9 +7506,10 @@ class ProyectoView(QWidget):
         new_id = cur.lastrowid
         for ai in conn.execute("SELECT * FROM acu_items WHERE partida_id=?", (part_id,)).fetchall():
             conn.execute(
-                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio)"
-                " VALUES (?,?,?,?,?)",
-                (new_id, ai['recurso_id'], ai['cuadrilla'], ai['cantidad'], ai['precio'])
+                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio, orden)"
+                " VALUES (?,?,?,?,?,?)",
+                (new_id, ai['recurso_id'], ai['cuadrilla'], ai['cantidad'], ai['precio'],
+                 ai['orden'])
             )
         conn.commit()
         conn.close()
@@ -7903,6 +8041,10 @@ class ProyectoView(QWidget):
             acu_id = self._acu_row_ids[row]
             menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
             menu.addSeparator()
+            self.tbl_acu.selectRow(row)
+            menu.addAction(tr("Subir") + "  Ctrl+↑", lambda: self._mover_insumo_acu(-1))
+            menu.addAction(tr("Bajar") + "  Ctrl+↓", lambda: self._mover_insumo_acu(+1))
+            menu.addSeparator()
             menu.addAction(tr("Eliminar"), lambda: self._eliminar_acu_item(acu_id))
             menu.addSeparator()
 
@@ -7920,6 +8062,28 @@ class ProyectoView(QWidget):
             )
 
         menu.exec(self.tbl_acu.mapToGlobal(pos))
+
+    def _mover_insumo_acu(self, paso: int):
+        """↑/↓ del insumo seleccionado dentro de su grupo MO/MAT/EQ/SC. El
+        orden se guarda y lo siguen los reportes de ACU (issue #12)."""
+        if not self._partida_actual_id or not self._require_editable('reordenar insumos'):
+            return
+        row = self.tbl_acu.currentRow()
+        if not (0 <= row < len(self._acu_row_ids)) or self._acu_row_ids[row] == -1:
+            return
+        acu_id = self._acu_row_ids[row]
+        from core.database import mover_insumo_acu
+        conn = get_db()
+        movido = mover_insumo_acu(conn, self._partida_actual_id, acu_id, paso)
+        conn.commit()
+        conn.close()
+        if not movido:
+            return
+        self.cargar_acu(self._partida_actual_id)
+        if acu_id in self._acu_row_ids:
+            nueva = self._acu_row_ids.index(acu_id)
+            self.tbl_acu.setCurrentCell(nueva, max(0, self.tbl_acu.currentColumn()))
+            self.tbl_acu.selectRow(nueva)
 
     def _eliminar_acu_item(self, acu_id: int):
         msg = QMessageBox(self)
@@ -12772,18 +12936,28 @@ class _DialogSugerirPartidas(QDialog):
                 "No hay partidas marcadas. Marca al menos una.")
             return
         usar_bib = self.chk_biblio.isChecked()
+        solo_estructura = False
+        if usar_bib:
+            from views.aviso_precios_dialog import (
+                SOLO_ESTRUCTURA, moneda_de_proyecto, preguntar_precios)
+            eleccion = preguntar_precios(self, moneda_de_proyecto(self.proyecto_id))
+            if eleccion is None:
+                return
+            solo_estructura = eleccion == SOLO_ESTRUCTURA
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             from core.ai_specs import importar_partidas_con_biblioteca
             creadas, con_acu = importar_partidas_con_biblioteca(
-                self.proyecto_id, marcadas, usar_biblioteca=usar_bib
+                self.proyecto_id, marcadas, usar_biblioteca=usar_bib,
+                solo_estructura=solo_estructura
             )
         finally:
             QApplication.restoreOverrideCursor()
         if usar_bib and con_acu > 0:
+            que = ("recursos y rendimientos, sin los precios de referencia"
+                   if solo_estructura else "recursos, rendimientos y precios")
             extra = (f"\n\n✨ <b>{con_acu}</b> de ellas se importaron con su "
-                     "ACU completo (recursos, rendimientos y precios) "
-                     "desde tu biblioteca.")
+                     f"ACU completo ({que}) desde tu biblioteca.")
         else:
             extra = ""
         QMessageBox.information(self, "Importar partidas",

@@ -191,6 +191,45 @@ def partida_usa_acero(tiene_acero, tiene_met, flag, descripcion, unidad) -> bool
     return es_partida_acero(descripcion, unidad)
 
 
+# Orden de los insumos de UN ACU (alias `ai` = acu_items, `r` = recursos):
+# por grupo MO → MAT → EQ → SC y, dentro del grupo, primero el orden manual
+# (issue #12: ↑/↓ en el panel ACU) y después el de siempre (jerarquía de la
+# MO, luego descripción). Un ACU que nadie reordenó tiene `orden` NULL en
+# todas sus líneas y sale exactamente como antes. Lo usan get_acu_items y
+# los dos reportes con SQL propio de exporter.
+ORDEN_ACU_SQL = """CASE r.tipo WHEN 'MO' THEN 1 WHEN 'MAT' THEN 2
+                                WHEN 'EQ' THEN 3 ELSE 4 END,
+                    ai.orden IS NULL, ai.orden,
+                    CASE WHEN r.tipo='MO' THEN mo_rank(r.descripcion) ELSE 0 END,
+                    r.descripcion, ai.id"""
+
+
+def _grupo_acu(tipo) -> int:
+    """El grupo de ORDEN_ACU_SQL, en Python."""
+    return {'MO': 1, 'MAT': 2, 'EQ': 3}.get(tipo, 4)
+
+
+def mover_insumo_acu(conn, part_id: int, acu_item_id: int, paso: int) -> bool:
+    """Sube (paso=-1) o baja (+1) un insumo DENTRO de su grupo del ACU y deja
+    fijado el orden de todo el grupo. False si ya está en el borde o no
+    existe (issue #12)."""
+    filas = conn.execute(
+        "SELECT ai.id, r.tipo FROM acu_items ai JOIN recursos r ON r.id = ai.recurso_id"
+        " WHERE ai.partida_id = ? ORDER BY " + ORDEN_ACU_SQL, (part_id,)).fetchall()
+    grupo_de = {f['id']: _grupo_acu(f['tipo']) for f in filas}
+    if acu_item_id not in grupo_de:
+        return False
+    ids = [f['id'] for f in filas if grupo_de[f['id']] == grupo_de[acu_item_id]]
+    i = ids.index(acu_item_id)
+    j = i + (1 if paso > 0 else -1)
+    if not 0 <= j < len(ids):
+        return False
+    ids[i], ids[j] = ids[j], ids[i]
+    conn.executemany("UPDATE acu_items SET orden = ? WHERE id = ?",
+                     [(n, x) for n, x in enumerate(ids)])
+    return True
+
+
 def _orden_mo(desc) -> int:
     """Rango jerárquico de una mano de obra según el régimen de construcción
     civil (Perú): Capataz < Operario < Oficial < Peón < (otros: topógrafo,
@@ -628,6 +667,9 @@ def init_db():
         ('area_met',    "ALTER TABLE metrados_detalle ADD COLUMN area REAL"),
         ('n_estr_acero',"ALTER TABLE acero_detalle ADD COLUMN n_estructuras REAL"),
         ('precio_acu',        "ALTER TABLE acu_items ADD COLUMN precio REAL"),
+        # Orden manual dentro de su grupo MO/MAT/EQ/SC (issue #12). NULL = el
+        # de siempre (jerarquía de MO, luego descripción).
+        ('acu_orden',         "ALTER TABLE acu_items ADD COLUMN orden INTEGER"),
         ('sub_presupuesto_id', "ALTER TABLE partidas ADD COLUMN sub_presupuesto_id INTEGER REFERENCES sub_presupuestos(id) ON DELETE SET NULL"),
         ('portafolio_id', "ALTER TABLE proyectos ADD COLUMN portafolio_id INTEGER REFERENCES portafolios(id) ON DELETE SET NULL"),
         ('fecha_inicio',  "ALTER TABLE proyectos ADD COLUMN fecha_inicio TEXT DEFAULT ''"),
@@ -1297,10 +1339,7 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
            FROM acu_items ai
            JOIN recursos r ON r.id = ai.recurso_id
            WHERE ai.partida_id = ?
-           ORDER BY CASE r.tipo WHEN 'MO' THEN 1 WHEN 'MAT' THEN 2
-                                WHEN 'EQ' THEN 3 ELSE 4 END,
-                    CASE WHEN r.tipo='MO' THEN mo_rank(r.descripcion) ELSE 0 END,
-                    r.descripcion""",
+           ORDER BY """ + ORDEN_ACU_SQL,
         (part_id,)
     ).fetchall()
 
@@ -1535,6 +1574,44 @@ def acu_de_pool(conn, origen: str, ref_id: int) -> dict | None:
     return {'rendimiento': p['rendimiento'],
             'costo_unitario': p['precio_unitario'],
             'items': [dict(i) for i in items]}
+
+
+def copiar_items_acu(conn, partida_id: int, items, *, proyecto_id: int,
+                     solo_estructura: bool = False) -> int:
+    """Copia a `acu_items` la composición de un ACU ajeno (biblioteca o
+    proyecto propio) y devuelve cuántas líneas grabó.
+
+    Un insumo que el proyecto ya usa entra con SU precio en el proyecto
+    (`precio_recurso_en_proyecto`, la regla «un insumo = un precio por
+    proyecto»). Uno nuevo entra con el precio del origen, o vacío para que
+    caiga al del catálogo (`COALESCE(ai.precio, r.precio)`).
+
+    `solo_estructura=True` es el «importar sin precios» del issue #11: los
+    ACU de la biblioteca traen precios de referencia del Perú en soles, y en
+    un proyecto en otra moneda sirven los rendimientos y las cantidades pero
+    no los precios. Un insumo nuevo entra entonces con 0. Los de unidad «%»
+    no se tocan: su precio lo deriva el ACU."""
+    n = 0
+    for it in items:
+        it = dict(it)
+        rid = it.get('recurso_id')
+        if rid is None:
+            continue
+        precio = precio_recurso_en_proyecto(conn, proyecto_id, rid)
+        if precio is None:
+            precio = it.get('precio') or None
+            if solo_estructura:
+                r = conn.execute(
+                    "SELECT unidad FROM recursos WHERE id=?", (rid,)).fetchone()
+                if not (r and str(r['unidad'] or '').strip().startswith('%')):
+                    precio = 0.0
+        conn.execute(
+            "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio)"
+            " VALUES (?,?,?,?,?)",
+            (partida_id, rid, it.get('cuadrilla') or 0, it.get('cantidad') or 0,
+             precio))
+        n += 1
+    return n
 
 
 def precios_inconsistentes(conn, pid: int) -> dict[int, dict]:

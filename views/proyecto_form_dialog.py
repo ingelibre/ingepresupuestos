@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIntValidator
 
-from core.config import MONEDAS, ESTADOS_PROYECTO
+from core.config import monedas, ESTADOS_PROYECTO
 from core.database import get_db, _recalcular_pu
 from models.usuario import Usuario
 from utils.formatting import parse_num
@@ -80,7 +80,7 @@ class ProyectoFormDialog(QDialog):
         self.inp_costo_al = QLineEdit(); self.inp_costo_al.setMinimumHeight(32)
 
         self.cmb_moneda = QComboBox()
-        for m in MONEDAS:
+        for m in monedas():
             self.cmb_moneda.addItem(m, m)
         self.cmb_moneda.setMinimumHeight(32)
 

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel, QSortFilterProxyModel
 from PySide6.QtGui import QFont, QColor, QCursor
 
-from core.database import get_db, _recalcular_pu
+from core.database import get_db, _recalcular_pu, copiar_items_acu
 from utils.formatting import fmt, moneda_defecto
 
 # Los CU vienen de la Biblioteca (catálogo global, sin moneda propia): se
@@ -834,6 +834,12 @@ class AgregarPartidaDialog(QDialog):
     def _agregar_desde_biblioteca(self):
         if not self._seleccionados:
             return
+        from views.aviso_precios_dialog import (
+            SOLO_ESTRUCTURA, moneda_de_proyecto, preguntar_precios)
+        eleccion = preguntar_precios(self, moneda_de_proyecto(self.pid))
+        if eleccion is None:
+            return
+        solo_estructura = eleccion == SOLO_ESTRUCTURA
         try:
             conn = get_db()
             agregados = 0
@@ -871,20 +877,9 @@ class AgregarPartidaDialog(QDialog):
                         "SELECT * FROM biblioteca_acu_items WHERE cu_id=?",
                         (cu_id,)
                     ).fetchall()
-                    for bai in bib_acus:
-                        bai_dict = dict(bai)
-                        # precio NULL → COALESCE(ai.precio, r.precio) cae al de catálogo
-                        precio = bai_dict.get('precio')
-                        conn.execute(
-                            "INSERT INTO acu_items"
-                            " (partida_id, recurso_id, cuadrilla, cantidad, precio)"
-                            " VALUES (?,?,?,?,?)",
-                            (new_part_id,
-                             bai_dict.get('recurso_id'),
-                             bai_dict.get('cuadrilla', 0),
-                             bai_dict.get('cantidad', 0),
-                             precio if precio else None)
-                        )
+                    copiar_items_acu(conn, new_part_id, bib_acus,
+                                     proyecto_id=self.pid,
+                                     solo_estructura=solo_estructura)
                     if bib_acus:
                         _recalcular_pu(conn, new_part_id)
                 except Exception:

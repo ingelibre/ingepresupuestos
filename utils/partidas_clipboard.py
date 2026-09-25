@@ -43,7 +43,7 @@ def _serializar_partida(conn, part_id: int) -> dict:
 
     # ACU items con descripción/tipo/unidad del recurso
     acu = conn.execute(
-        """SELECT ai.cuadrilla, ai.cantidad,
+        """SELECT ai.cuadrilla, ai.cantidad, ai.orden,
                   COALESCE(ai.precio, r.precio, 0) AS precio,
                   r.codigo, r.descripcion, r.tipo, r.unidad, r.indice_inei
            FROM acu_items ai JOIN recursos r ON r.id = ai.recurso_id
@@ -397,9 +397,9 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
                     precio_dst = ai.get('precio')
                 conn.execute(
                     "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla,"
-                    " cantidad, precio) VALUES (?,?,?,?,?)",
+                    " cantidad, precio, orden) VALUES (?,?,?,?,?,?)",
                     (new_pid, rec_id, ai.get('cuadrilla'),
-                     ai.get('cantidad'), precio_dst)
+                     ai.get('cantidad'), precio_dst, ai.get('orden'))
                 )
 
             # Metrados detalle

@@ -10,7 +10,7 @@ from openpyxl.worksheet.page import PageMargins
 import os
 import io
 from core.database import (get_db, calcular_totales, get_acu_items, get_decimales_metrado,
-                           get_decimales_cant_acu, cuadrilla_reporte)
+                           get_decimales_cant_acu, cuadrilla_reporte, ORDEN_ACU_SQL)
 from utils.formatting import ITEM_TRAMOS_POR_LINEA, fmt as _fmt_moneda
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
@@ -2576,7 +2576,8 @@ def exportar_reporte_completo(proyecto_id):
             """SELECT ai.*, r.codigo, r.descripcion as rdesc, r.tipo, r.unidad,
                       COALESCE(ai.precio, r.precio, 0) as precio
                FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
-               WHERE ai.partida_id=?""", (partida['id'],)
+               WHERE ai.partida_id=?
+               ORDER BY """ + ORDEN_ACU_SQL, (partida['id'],)
         ).fetchall()
         if not items_acu:
             continue
@@ -3038,7 +3039,8 @@ def exportar_pdf(proyecto_id):
             """SELECT ai.*, r.codigo, r.descripcion as rdesc, r.tipo, r.unidad,
                       COALESCE(ai.precio, r.precio, 0) as precio
                FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
-               WHERE ai.partida_id=?""", (partida['id'],)
+               WHERE ai.partida_id=?
+               ORDER BY """ + ORDEN_ACU_SQL, (partida['id'],)
         ).fetchall()
         if not items_acu:
             continue

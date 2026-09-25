@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
-from core.config import MONEDAS
+from core.config import monedas
 from core import paises
 from utils.theme import BTN_PRIMARY_SS, SLATE_500, SLATE_700
 
@@ -42,9 +42,17 @@ class PaisForm(QWidget):
         form.addRow("País:", self.cmb_pais)
 
         self.cmb_moneda = QComboBox()
-        self.cmb_moneda.addItems(list(MONEDAS.keys()))
+        self.cmb_moneda.addItems(list(monedas().keys()))
         self.cmb_moneda.setMinimumHeight(34)
-        form.addRow("Moneda:", self.cmb_moneda)
+        fila_mon = QHBoxLayout()
+        fila_mon.addWidget(self.cmb_moneda, 1)
+        # Monedas propias (issue #13): la lista de fábrica no tiene todas.
+        btn_monedas = QPushButton("Monedas…")
+        btn_monedas.setMinimumHeight(34)
+        btn_monedas.setToolTip("Añadir o editar monedas (nombre, símbolo y separadores)")
+        btn_monedas.clicked.connect(self._editar_monedas)
+        fila_mon.addWidget(btn_monedas)
+        form.addRow("Moneda:", fila_mon)
 
         self.inp_etiqueta = QLineEdit()
         self.inp_etiqueta.setMinimumHeight(34)
@@ -91,6 +99,16 @@ class PaisForm(QWidget):
         self.inp_etiqueta.setText(p['id'])
         self.inp_imp_nombre.setText(p['imp'][0])
         self.spn_imp_pct.setValue(p['imp'][1])
+
+    def _editar_monedas(self):
+        from views.monedas_dialog import MonedasDialog
+        actual = self.cmb_moneda.currentText()
+        MonedasDialog(self).exec()
+        self.cmb_moneda.blockSignals(True)
+        self.cmb_moneda.clear()
+        self.cmb_moneda.addItems(list(monedas().keys()))
+        self.cmb_moneda.setCurrentText(actual)
+        self.cmb_moneda.blockSignals(False)
 
     def iso(self) -> str:
         return self.cmb_pais.currentData()

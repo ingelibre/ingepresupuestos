@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QDate, QSize, QThread
 from PySide6.QtGui import QFont, QColor, QIntValidator
 
-from core.config import MONEDAS, ESTADOS_PROYECTO
+from core.config import monedas, ESTADOS_PROYECTO
 from core.database import get_db, get_config
 from models.usuario import Usuario
 from utils.icons import icon, icon_colored
@@ -760,7 +760,7 @@ class NuevoProyectoView(QWidget):
         grid.addWidget(_costo_cont, 3, 1)
 
         grid.addWidget(_label(tr("Moneda")), 3, 2)
-        self.cmb_moneda = _cmb([(m, m) for m in MONEDAS])
+        self.cmb_moneda = _cmb([(m, m) for m in monedas()])
         _moneda_def = get_config('moneda_defecto', 'Soles')
         _idx_mon = self.cmb_moneda.findData(_moneda_def)
         if _idx_mon >= 0:

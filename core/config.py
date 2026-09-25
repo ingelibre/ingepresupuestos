@@ -229,5 +229,78 @@ TIPOS_RECURSO_LARGOS = {
 # 32 = Flete Terrestre (genérico razonable para sub-contratos/servicios)
 INEI_DEFAULT = {'MO': '47', 'EQ': '48', 'MAT': '39', 'SC': '32'}
 
+# ── Monedas propias (issue #13) ─────────────────────────────────────────────
+# El usuario añade monedas (o corrige una de fábrica: el dólar de Ecuador se
+# escribe «$», no «US$») con nombre, símbolo y separadores. Solo FORMATO: no
+# hay tipo de cambio. Viven en `configuracion` como JSON bajo esta clave y se
+# leen con caché, porque `fmt` pide la moneda miles de veces al pintar un
+# presupuesto.
+CLAVE_MONEDAS_PROPIAS = 'monedas_propias'
+SEPARADORES = ((',', '.'), ('.', ','), (' ', ','), ("'", '.'))   # (miles, decimal)
+_propias_cache: dict | None = None
+
+
+def _moneda_valida(cfg) -> dict | None:
+    if not isinstance(cfg, dict):
+        return None
+    sim = str(cfg.get('simbolo') or '').strip()
+    par = (str(cfg.get('sep_miles', ',')), str(cfg.get('sep_dec', '.')))
+    if not sim or par not in SEPARADORES:
+        return None
+    return {'simbolo': sim, 'sep_miles': par[0], 'sep_dec': par[1]}
+
+
+def monedas_propias() -> dict:
+    """{nombre: {simbolo, sep_miles, sep_dec}} del usuario. Lo ilegible se
+    ignora (un JSON roto no deja al programa sin monedas)."""
+    global _propias_cache
+    if _propias_cache is None:
+        import json
+        try:
+            from core.database import get_config
+            texto = get_config(CLAVE_MONEDAS_PROPIAS, '') or '{}'
+        except Exception:
+            # BD aún sin crear (arranque): sin caché, para leer de verdad
+            # en cuanto exista.
+            return {}
+        try:
+            crudo = json.loads(texto)
+        except ValueError:
+            crudo = {}
+        out = {}
+        if isinstance(crudo, dict):
+            for nombre, cfg in crudo.items():
+                v = _moneda_valida(cfg)
+                if v and str(nombre).strip():
+                    out[str(nombre).strip()] = v
+        _propias_cache = out
+    return dict(_propias_cache)
+
+
+def guardar_monedas_propias(propias: dict):
+    import json
+    from core.database import set_config
+    limpias = {}
+    for nombre, cfg in (propias or {}).items():
+        v = _moneda_valida(cfg)
+        if v and str(nombre).strip():
+            limpias[str(nombre).strip()] = v
+    set_config(CLAVE_MONEDAS_PROPIAS, json.dumps(limpias, ensure_ascii=False))
+    olvidar_monedas_propias()
+
+
+def olvidar_monedas_propias():
+    """Vacía la caché (al guardar, o en los tests al cambiar de BD)."""
+    global _propias_cache
+    _propias_cache = None
+
+
+def monedas() -> dict:
+    """Todas las monedas: las de fábrica y las del usuario. Una propia con el
+    nombre de una de fábrica la reemplaza. Es lo que deben listar los
+    desplegables; `MONEDAS` queda como las de fábrica."""
+    return {**MONEDAS, **monedas_propias()}
+
+
 def moneda_cfg(moneda: str) -> dict:
-    return MONEDAS.get(moneda, MONEDAS['Soles'])
+    return monedas().get(moneda) or MONEDAS['Soles']
