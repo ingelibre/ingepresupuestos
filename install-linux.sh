@@ -100,13 +100,13 @@ cat > "$DESKTOP_FILE" <<EOF
 Type=Application
 Name=ingePresupuestos
 GenericName=Presupuestos de obra
-Comment=Sistema de presupuestos para obras peruanas (CAPECO, RNE)
+Comment=Sistema de presupuestos para obras peruanas
 Exec=${APP_DIR}/ingepresupuestos
 Icon=ingepresupuestos
 Terminal=false
 Categories=Office;Finance;
 StartupWMClass=ingepresupuestos
-Keywords=presupuesto;obra;ACU;CAPECO;construccion;
+Keywords=presupuesto;obra;ACU;construccion;
 MimeType=application/x-ingepresupuestos-db;
 EOF
 chmod +x "$DESKTOP_FILE"

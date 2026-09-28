@@ -78,9 +78,8 @@ modules:
       - grep -vE '^\s*(pyinstaller|pyodbc)\b' requirements.txt > reqs.txt
       - pip3 install --prefix=${FLATPAK_DEST} --no-warn-script-location -r reqs.txt
       # 2. Código y datos de la app — se instala el FUENTE .py.
-      #    La 2.9.0 compilaba a bytecode y borraba los .py para ocultar el
-      #    código al cerrarlo; con GPL-3.0-or-later eso no tiene sentido.
-      #    NO reintroducir compileall -b ni el borrado de .py.
+      #    Software libre GPL-3.0-or-later: NO usar compileall -b ni borrar
+      #    los .py.
       - mkdir -p ${FLATPAK_DEST}/ingepresupuestos
       - cp -a core models utils views widgets worker resources main.py presupuestos_seed.db LICENSE THIRD-PARTY-NOTICES.txt ${FLATPAK_DEST}/ingepresupuestos/
       # __pycache__ que se hubiera colado desde el árbol de origen

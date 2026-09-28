@@ -38,7 +38,7 @@ cleanup:
   - '*.a'
 
 modules:
-  # mdbtools: permite importar PowerCost .prs DENTRO del sandbox (sin host).
+  # mdbtools: permite importar archivos .prs DENTRO del sandbox (sin host).
   - name: mdbtools
     buildsystem: autotools
     sources:

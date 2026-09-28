@@ -130,7 +130,7 @@ hiddenimports = [
     'cryptography.hazmat.primitives.serialization',
     'cryptography.hazmat.primitives.asymmetric.padding',
     'cryptography.hazmat.primitives.hashes',
-    # ODBC — lectura de .prs (PowerCost MS Access) en Windows.
+    # ODBC — lectura de .prs (MS Access) en Windows.
     'pyodbc',
     # Fallback para .prs con contraseña (lee MDB sin ODBC).
     'access_parser',

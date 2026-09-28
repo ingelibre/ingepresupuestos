@@ -10,8 +10,8 @@ necesariamente escribir código.
   archivo `.db` del proyecto donde falla (o uno reducido que lo reproduzca).
 - **Contar cómo lo usas.** Qué te falta, qué te sobra, qué reporte imprimes y
   luego corriges a mano. Eso vale más que una lista de funciones deseadas.
-- **Probar con software real.** Archivos `.prs` de PowerCost, `.sqlite` de
-  Delphin, `.S2K` de S10 que no importen bien. Los importadores se rompen con
+- **Probar con software real.** Archivos `.prs`, bases `.sqlite` o copias
+  `.bak`/`.S2K` que no importen bien. Los importadores se rompen con
   la variedad del mundo real, no en el laboratorio.
 - **Hacer un tutorial.** El proyecto es libre justamente para que cualquiera
   pueda enseñarlo sin pedir permiso.

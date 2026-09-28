@@ -1,7 +1,7 @@
 # IngePresupuestos snap — strict confinement over the PyInstaller bundle.
 # Staged by CI (build-linux.yml, job "snap"): @VERSION@ substituted, onedir
 # in ./payload, desktop entry in snap/gui/. mdbtools is staged because the
-# PowerCost importer shells out to it; LibreOffice integrations degrade
+# .prs importer shells out to it; LibreOffice integrations degrade
 # gracefully when absent (same story as the Flatpak).
 name: ingepresupuestos
 base: core22
@@ -16,8 +16,8 @@ description: |
 
   Tus presupuestos existentes entran directo:
 
-  - Importadores nativos de S10 (.S2K), PowerCost (.prs), Delphin
-    (.sqlite), Excel e IFC.
+  - Abre archivos .prs, bases .sqlite, copias de seguridad .bak,
+    Excel e IFC.
   - Exporta a Excel, Word y PDF listos para entregar.
   - Asistente IA opcional con tu propia clave.
   - Base de datos propia, abierta y portable (.db).
@@ -27,11 +27,8 @@ description: |
 
   IngePresupuestos is free, open-source construction budgeting software
   for the Peruvian market: unit price analysis, quantity takeoffs, INEI
-  index-based escalation formulas, and native importers for S10,
-  PowerCost, Delphin, Excel and IFC. Spanish UI.
-
-  S10 y PowerCost son marcas de sus respectivos titulares; IngePresupuestos
-  es un proyecto independiente, sin afiliación con ellos.
+  index-based escalation formulas, and native importers for .prs,
+  .sqlite, .bak, Excel and IFC files. Spanish UI.
 license: GPL-3.0-or-later
 website: https://ingepresupuestos.com
 contact: https://github.com/ingelibre/ingepresupuestos/issues
@@ -55,7 +52,7 @@ apps:
     environment:
       QT_QPA_PLATFORM: xcb
       FONTCONFIG_PATH: $SNAP/etc/fonts
-      # The PowerCost importer finds mdb-* on PATH; they live in the snap.
+      # The .prs importer finds mdb-* on PATH; they live in the snap.
       PATH: $SNAP/usr/bin:$PATH
 
 parts:

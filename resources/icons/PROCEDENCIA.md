@@ -1,14 +1,5 @@
 # Procedencia de la iconografía
 
-> **Estado: iconos de elementary restaurados** (15 de agosto de 2026, v3.0).
->
-> Los 55 iconos de Tabler que entraron en la 2.9.0 fueron sustituidos por los
-> originales de elementary de la v2.8.8. El motivo del cambio anterior ya no
-> existe: se reemplazaron porque eran GPL/CC-BY-SA y el producto pasaba a ser
-> propietario. **IngePresupuestos volvió a ser software libre bajo
-> GPL-3.0-or-later, y con esa licencia los iconos de elementary son
-> plenamente compatibles.**
-
 ## Set actual — `elementary/24/`
 
 61 archivos (48 SVG · 11 PNG · 2 ICO).

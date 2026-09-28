@@ -1,9 +1,7 @@
-# Edición Flathub — REACTIVADA (v3.0, software libre)
+# Edición Flathub
 
-Esta carpeta es la candidatura a Flathub. Estuvo congelada mientras el código
-fue propietario —Flathub construye desde el fuente público y eso era
-incompatible con el cierre—, pero **IngePresupuestos volvió a ser software
-libre bajo GPL-3.0-or-later**, así que el impedimento ya no existe.
+Esta carpeta es la candidatura a Flathub. Flathub construye desde el fuente
+público, y **IngePresupuestos es software libre bajo GPL-3.0-or-later**.
 
 Publicar en Flathub es prioritario por dos razones:
 
@@ -26,9 +24,8 @@ Publicar en Flathub es prioritario por dos razones:
 
 El canal Flatpak que hoy funciona es la **edición sideload**
 (`installer/flatpak/`), publicada firmada en R2 vía `publish-flatpak.yml`.
-Ambas ediciones instalan el **código fuente `.py`**: el paso de bytecode
-(`compileall -b` + borrado de los `.py`) que introdujo la 2.9.0 para ocultar
-el fuente se revirtió al volver a GPL. **No reintroducirlo.**
+Ambas ediciones instalan el **código fuente `.py`**. **No compilar a bytecode
+ni borrar los `.py`** (`compileall -b`).
 
 Diferencia real entre las dos: la sideload usa el LibreOffice del host vía
 `flatpak-spawn` para ODT/ODS; en Flathub eso está bloqueado y esos botones se

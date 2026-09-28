@@ -22,13 +22,13 @@ Copyright (C) 2026 Marco Sumari
 
 - **Presupuestos** con árbol jerárquico, sub-presupuestos, **ACU** (Análisis de Costos Unitarios) editable y precios por proyecto. Cada proyecto guarda sus propios precios; el botón **«Precios del catálogo»** muestra cuáles cambiaron en el catálogo y deja elegir cuáles traer, con vista previa.
 - **Catálogo de insumos** y **biblioteca de costos unitarios** reutilizables entre proyectos, con edición y duplicado de insumos sin salir del ACU.
-- **Cronograma** completo estilo MS Project: **Gantt** interactivo con ruta crítica (CPM), colores por nivel, Valorizado, **Curva S** y Adquisiciones.
+- **Cronograma**: **Gantt** interactivo con ruta crítica (CPM), exporta a MS Project (XML), colores por nivel, Valorizado, **Curva S** y Adquisiciones.
 - **Ida y vuelta con Microsoft Project**: exporta el cronograma como XML, edítalo en Project y el botón **«Desde Project»** trae las duraciones y predecesoras que cambiaron, mostrando los cambios antes de aplicarlos. Cada partida viaja con su identificador, así que las dependencias se traducen a la numeración correcta.
 - **Control de Obra**: requerimientos, almacén/kárdex, cuaderno de obra, valorizaciones con reajuste por fórmula polinómica y curva S real (programado vs reprogramado vs real).
 - **Hoja de Metrados** con soporte de **acero** (diámetros peruanos, NTP 341.031 / ASTM A615).
 - **Fórmula polinómica** (D.S. 011-79-VC) por **índices unificados del INEI**, con las dos bases vigentes (Julio 1992 y Diciembre 2025 = 100, R.J. 016-2026-INEI), el Diccionario de Elementos de la Construcción y el histórico de índices actualizado cada mes desde el propio repositorio.
 - **13 reportes** consistentes en **PDF · Excel · ODS · Word · ODT**, con formato configurable: logo y razón social, márgenes, tamaño del texto, encabezado y pie, y **esquemas de colores para los títulos** de fábrica o propios.
-- **Importadores nativos**: S10 (`.S2K`), PowerCost (`.prs`), Delphin (`.sqlite`), Excel, IFC y `.db` nativo.
+- **Importadores nativos**: archivos `.prs`, bases `.sqlite`, copias de seguridad `.bak`/`.bkf`/`.S2K` (vía IngeConverter), Excel, IFC y `.db` nativo.
 - **Asistente IA (Tuxia)** con la clave del propio usuario —Groq, Gemini y OpenRouter tienen plan gratuito; Ollama corre sin internet— y **«Sugerir partidas»** con búsqueda semántica local (RAG). Sin clave, el asistente sigue respondiendo con análisis locales del proyecto.
 
 Las novedades de cada versión están en [Releases](https://github.com/ingelibre/ingepresupuestos/releases); la 3.0.8, la 3.0.10, la 3.0.12 y la 3.0.14 (septiembre de 2026) salieron de las observaciones que envió un usuario, David Ramos López, y la 3.0.16 de los reportes de los usuarios que llegaron desde Colombia y el resto de Latinoamérica.
@@ -54,7 +54,7 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
-> **Linux:** para exportar ODT/ODS se usa LibreOffice headless (`sudo apt install libreoffice`). Para importar `.prs` de PowerCost: `sudo apt install -y mdbtools`.
+> **Linux:** para exportar ODT/ODS se usa LibreOffice headless (`sudo apt install libreoffice`). Para importar archivos `.prs`: `sudo apt install -y mdbtools`.
 
 ## Tecnología
 
@@ -72,7 +72,7 @@ ni registro: proyectos, presupuestos, ACU, cronograma Gantt con ruta crítica y
 sincronización con MS Project, metrados, fórmula polinómica con índices INEI al
 día, Control de Obra completo, los 13 reportes en todos sus formatos (PDF ·
 Excel · ODS · Word · ODT · MS Project) con formato y colores configurables, los
-importadores de S10, PowerCost, Delphin, Excel, IFC y `.db`, y el asistente IA
+importadores de `.prs`, `.sqlite`, `.bak`, Excel, IFC y `.db`, y el asistente IA
 con la clave del propio usuario.
 
 Si el programa te sirve y estás en condiciones de aportar, eso es lo que lo
