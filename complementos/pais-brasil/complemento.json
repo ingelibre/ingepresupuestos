@@ -2,10 +2,10 @@
   "esquema": 1,
   "id": "pais-brasil",
   "nombre": "Brasil",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "autor": "IngePresupuestos, con las pruebas de la comunidad (issue #21)",
   "licencia": "GPL-3.0-or-later",
-  "descripcion": "Brasil: CNPJ/CPF, pie con BDI en portugués y formato de los insumos de SINAPI para el importador de Excel. No incluye datos de SINAPI: usa la planilla que tú descargas.\n\nEl BDI queda en 0 % y lo pone cada obra.",
+  "descripcion": "Brasil: CNPJ/CPF, pie con BDI en portugués y formato de los insumos de SINAPI para el importador de Excel. No incluye datos de SINAPI: usa la planilla que tú descargas.\n\nEl BDI queda en 0 % y lo pone cada obra. Además calcula el BDI (TCU Ac. 2622/2013) con su composición y la planilha orçamentária: son reportes y no cambian precios ni totales, el porcentaje se copia a mano. El INCC viene vacío: se importa de un CSV.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/21",
   "paises": [
     {
@@ -13,46 +13,161 @@
       "nombre": "Brasil",
       "moneda": "Reales",
       "identificacion": "CNPJ/CPF",
-      "impuesto": {"nombre": "Impostos", "pct": 0},
-      "indirectos": {"gastos_generales": 0, "utilidad": 0},
+      "impuesto": {
+        "nombre": "Impostos",
+        "pct": 0
+      },
+      "indirectos": {
+        "gastos_generales": 0,
+        "utilidad": 0
+      },
       "pie": [
-        {"codigo": "GG", "nombre": "BDI", "tipo": "pct_cd", "pct": 0},
-        {"codigo": "SUB", "nombre": "Subtotal", "tipo": "subtotal"},
-        {"codigo": "IGV", "nombre": "{impuesto}", "tipo": "pct_sub", "pct": "impuesto"}
+        {
+          "codigo": "GG",
+          "nombre": "BDI",
+          "tipo": "pct_cd",
+          "pct": 0
+        },
+        {
+          "codigo": "SUB",
+          "nombre": "Subtotal",
+          "tipo": "subtotal"
+        },
+        {
+          "codigo": "IGV",
+          "nombre": "{impuesto}",
+          "tipo": "pct_sub",
+          "pct": "impuesto"
+        }
       ]
     }
   ],
   "importadores_excel": [
     {
       "nombre": "SINAPI — insumos",
-      "detectar": ["Classificação", "Código do Insumo"],
+      "detectar": [
+        "Classificação",
+        "Código do Insumo"
+      ],
       "columnas": {
-        "tipo": ["Classificação"],
-        "codigo": ["Código do Insumo"],
-        "descripcion": ["Descrição do Insumo", "Descrição"],
-        "unidad": ["Unidade"]
+        "tipo": [
+          "Classificação"
+        ],
+        "codigo": [
+          "Código do Insumo"
+        ],
+        "descripcion": [
+          "Descrição do Insumo",
+          "Descrição"
+        ],
+        "unidad": [
+          "Unidade"
+        ]
       },
       "tipos": {
-        "MO": ["MÃO DE OBRA", "ENCARGOS COMPLEMENTARES", "ENCARGOS"],
-        "MAT": ["MATERIAL", "ESPECIAIS"],
-        "EQ": ["EQUIPAMENTO"],
-        "SC": ["SERVIÇOS", "SERVIÇO"]
+        "MO": [
+          "MÃO DE OBRA",
+          "ENCARGOS COMPLEMENTARES",
+          "ENCARGOS"
+        ],
+        "MAT": [
+          "MATERIAL",
+          "ESPECIAIS"
+        ],
+        "EQ": [
+          "EQUIPAMENTO"
+        ],
+        "SC": [
+          "SERVIÇOS",
+          "SERVIÇO"
+        ]
       },
       "aviso": "Elige en «Precio» la columna de tu estado (AC, AL… TO) y la hoja del régimen que usas (ISD, ICD o ISE)."
     }
   ],
   "categorias": [
     "paises",
-    "importar"
+    "importar",
+    "reportes"
   ],
   "traducciones": {
     "en": {
       "nombre": "Brazil",
-      "descripcion": "Brazil: CNPJ/CPF, a Portuguese footer with BDI and the SINAPI resource format for the Excel importer. No SINAPI data included: it uses the spreadsheet you download.\n\nBDI starts at 0% and is set per project."
+      "descripcion": "Brazil: CNPJ/CPF, a Portuguese footer with BDI and the SINAPI resource format for the Excel importer. No SINAPI data included: it uses the spreadsheet you download.\n\nBDI starts at 0% and is set per project. It also calculates the BDI (TCU Ac. 2622/2013) with its breakdown and the planilha orçamentária: they are reports and do not change prices or totals, the percentage is copied by hand. The INCC comes empty: import it from a CSV."
     },
     "pt_BR": {
       "nombre": "Brasil",
-      "descripcion": "Brasil: CNPJ/CPF, rodapé com BDI em português e formato dos insumos do SINAPI para o importador de Excel. Não inclui dados do SINAPI: usa a planilha que você baixa.\n\nO BDI fica em 0 % e é definido em cada obra."
+      "descripcion": "Brasil: CNPJ/CPF, rodapé com BDI em português e formato dos insumos do SINAPI para o importador de Excel. Não inclui dados do SINAPI: usa a planilha que você baixa.\n\nO BDI fica em 0 % e é definido em cada obra. Também calcula o BDI (TCU Ac. 2622/2013) com sua composição e a planilha orçamentária: são relatórios e não alteram preços nem totais, o percentual se copia à mão. O INCC vem vazio: é importado de um CSV."
     }
-  }
+  },
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "imagen": "imagen.png",
+  "vocabulario": [
+    {
+      "idioma": "pt_BR",
+      "pais": "BR",
+      "textos": {
+        "<b>{n}</b> índices · costo directo <b>{cd}</b> · gastos generales y utilidad <b>{gu}</b> · base <b>{base}</b>": "<b>{n}</b> índices · custo direto <b>{cd}</b> · custos indiretos e lucro <b>{gu}</b> · base <b>{base}</b>",
+        "Agregar monomio": "Adicionar termo",
+        "Agregar rubro": "Adicionar parcela",
+        "Al cambiar de fórmula se recargan los monomios guardados.": "Ao trocar de fórmula, os termos salvos são recarregados.",
+        "Al salir de aquí se recargan los monomios guardados.": "Ao sair daqui, os termos salvos são recarregados.",
+        "Composición del monomio": "Composição do termo",
+        "Desglose del pie por rubro (GG, Supervisión, Expediente, Liquidación) con su detalle y subtotales.": "Desdobramento do fechamento por parcela (CI, Fiscalização, Elaboração de projetos, Encerramento da obra) com seu detalhe e subtotais.",
+        "El código es el que publica el INEI. Los insumos y los monomios de la fórmula polinómica lo referencian por ese número.": "O código é o que o INEI publica. Os insumos e os termos da fórmula de reajuste o referenciam por esse número.",
+        "El extracto del presupuesto no lleva gastos generales, utilidad ni IGV: esos porcentajes son del proyecto completo.": "O extrato do orçamento não inclui custos indiretos, lucro nem IGV: esses percentuais são do projeto completo.",
+        "El índice del monomio es el de mayor peso; al calcular K se promedian los tres de más peso. Cambia la columna «Monomio» para mover un índice, o haz doble clic en uno para ver de qué insumos y partidas sale su monto.": "O índice do termo é o de maior peso; ao calcular K, faz-se a média dos três de maior peso. Altere a coluna «Termo» para mover um índice, ou dê duplo clique em um para ver de quais insumos e serviços sai o seu valor.",
+        "El índice ya está en otro monomio": "O índice já está em outro termo",
+        "El índice {rival} se parece casi igual. Asignar mal el índice mueve costo de un monomio a otro de la fórmula: confirma este a mano.": "O índice {rival} é quase igualmente parecido. Atribuir o índice errado move custo de um termo para outro da fórmula: confirme este manualmente.",
+        "Eliminar monomio": "Excluir termo",
+        "Este monomio no tiene composición guardada: se escribió a mano o viene de una versión anterior. Usa «Auto-calcular desde ACU» para derivarla del presupuesto.": "Este termo não tem composição salva: foi escrito à mão ou vem de uma versão anterior. Use «Calcular a partir das CPU» para derivá-la do orçamento.",
+        "Este proyecto es por <b>Contrata</b> pero no tiene <b>fórmula polinómica</b> configurada. La RNE la exige para reajustes de precios.": "Este projeto é por <b>Empreitada</b> mas não tem <b>fórmula de reajuste</b> configurada. O RNE a exige para reajustes de preços.",
+        "Este rubro no tiene ítems con detalle para guardar.": "Esta parcela não tem itens com detalhe para salvar.",
+        "Esto reemplazará los monomios actuales por {n} monomio(s) derivados del ACU, agrupando los insumos por su índice unificado.\n\n¿Continuar?": "Isto substituirá os termos atuais por {n} termo(s) derivados das CPU, agrupando os insumos pelo seu índice unificado.\n\nContinuar?",
+        "Exportar Fórmula Polinómica": "Exportar Fórmula de reajuste",
+        "Exportar Fórmula Polinómica a PDF": "Exportar Fórmula de reajuste para PDF",
+        "Fórmula Polinómica": "Fórmula de reajuste",
+        "Fórmula polinómica": "Fórmula de reajuste",
+        "Fórmula polinómica del proyecto. Cada una cubre los subpresupuestos que se le asignen.": "Fórmula de reajuste do projeto. Cada uma cobre os suborçamentos que lhe forem atribuídos.",
+        "Fórmula polinómica guardada ({n} monomios).": "Fórmula de reajuste salva ({n} termos).",
+        "Fórmulas polinómicas de la obra": "Fórmulas de reajuste da obra",
+        "Gastos Generales %:": "Custos Indiretos %:",
+        "Gastos generales": "Custos indiretos",
+        "La fórmula polinómica los reparte por el índice de su tipo, que es un supuesto — clasificarlos la vuelve exacta.<br>Las propuestas se apoyan primero en el <b>Diccionario de Elementos de la Construcción</b> del INEI ({n} elementos, Anexo 2 de la RJ 016-2026-INEI) y después en tu propia biblioteca.": "A fórmula de reajuste os distribui pelo índice do seu tipo, o que é uma suposição — classificá-los a torna exata.<br>As sugestões se apoiam primeiro no <b>Dicionário de Elementos da Construção</b> do INEI ({n} elementos, Anexo 2 da RJ 016-2026-INEI) e depois na sua própria biblioteca.",
+        "La fórmula tiene cambios sin guardar ({n} monomios).\n\n{motivo}\n\n¿Guardarlos antes de continuar?": "A fórmula tem alterações não salvas ({n} termos).\n\n{motivo}\n\nSalvá-las antes de continuar?",
+        "Los gastos generales, utilidad e IGV se configuran en Pie de presupuesto.": "Os custos indiretos, o lucro e o IGV são configurados no Fechamento do orçamento.",
+        "Monomio": "Termo",
+        "Monomio eliminado": "Termo excluído",
+        "Monomios": "Termos",
+        "Monto total del rubro:": "Valor total da parcela:",
+        "Mover este índice a otro monomio": "Mover este índice para outro termo",
+        "Máximo 8 monomios por fórmula (tienes {n}).": "Máximo de 8 termos por fórmula (você tem {n}).",
+        "No hay monomios definidos. Crea o auto-calcula la fórmula primero.": "Não há termos definidos. Crie ou calcule a fórmula primeiro.",
+        "Pie de presupuesto (gastos generales)": "Fechamento do orçamento (custos indiretos)",
+        "Precios unitarios «a todo costo» (incluyen gastos generales y utilidad disueltos en el PU), SIN desglose de costos. Ideal para entregar a clientes.": "Preços unitários «a preço fechado» (com custos indiretos e lucro embutidos no PU), SEM detalhamento de custos. Ideal para entregar a clientes.",
+        "Qué índice unificado le corresponde a cada insumo — es lo que usa la fórmula polinómica para agrupar el costo": "Qual índice unificado corresponde a cada insumo — é o que a fórmula de reajuste usa para agrupar o custo",
+        "Selecciona un monomio para ver los índices unificados que lo forman.": "Selecione um termo para ver os índices unificados que o formam.",
+        "Sin composición: auto-calcula para ver de qué índices sale cada monomio.": "Sem composição: calcule automaticamente para ver de quais índices sai cada termo.",
+        "Sin tablas de detalle activas.\nActiva rubros tipo «Con detalle» en Plantillas.": "Sem tabelas de detalhe ativas.\nAtive parcelas do tipo «Com detalhe» em Modelos.",
+        "Todavía no está en ningún monomio: auto-calcula la fórmula.": "Ainda não está em nenhum termo: calcule a fórmula automaticamente.",
+        "Todos los índices unificados de la obra, con su incidencia y en qué monomio quedaron": "Todos os índices unificados da obra, com sua incidência e em qual termo ficaram",
+        "Tu fórmula polinómica suma ΣK = {sk:.4f}, debería ser exactamente 1.000.": "Sua fórmula de reajuste soma ΣK = {sk:.4f}, deveria ser exatamente 1.000.",
+        "tuxia · falta fórmula polinómica": "tuxia · falta fórmula de reajuste",
+        "tuxia · fórmula polinómica": "tuxia · fórmula de reajuste",
+        "{n} insumo(s) clasificados. Vuelve a auto-calcular la fórmula polinómica de tus proyectos para que lo tome.": "{n} insumo(s) classificados. Calcule de novo a fórmula de reajuste dos seus projetos para que isso seja considerado.",
+        "{n} monomio(s) de fórmulas guardadas": "{n} termo(s) de fórmulas salvas",
+        "«{nombre}» ({monto}) ya forma parte del monomio «{origen}».\n\n¿Moverlo a «{destino}»?\n\nSi no lo mueves, su monto sigue contando en «{origen}» y este monomio se queda sin composición, con coeficiente cero.": "«{nombre}» ({monto}) já faz parte do termo «{origen}».\n\nMovê-lo para «{destino}»?\n\nSe não o mover, seu valor continua contando em «{origen}» e este termo fica sem composição, com coeficiente zero.",
+        "«{nombre}» es el único índice de este monomio.\nMover el último dejaría el monomio vacío: elimínalo con la papelera si ya no lo quieres.": "«{nombre}» é o único índice deste termo.\nMover o último deixaria o termo vazio: exclua-o com a lixeira se não o quiser mais.",
+        "¿Eliminar «{nombre}» con sus monomios?": "Excluir «{nombre}» com os seus termos?",
+        "⚠  Faltan valores INEI para {n} monomio(s). El K mostrado es parcial. Carga valores en el editor de INEI.": "⚠  Faltam valores INEI para {n} termo(s). O K exibido é parcial. Carregue valores no editor de INEI."
+      }
+    }
+  ],
+  "indices": [
+    {
+      "clave": "INCC",
+      "nombre": "INCC (Índice Nacional de Custo da Construção)"
+    }
+  ]
 }
