@@ -13,6 +13,7 @@ El residente solo edita la columna «Metr. actual»; todo lo demás se deriva en
 `core/valorizacion.py`. SOLO LEE del presupuesto, nunca lo modifica.
 Ver `[[project_modulo_ejecucion_obra]]`.
 """
+from shiboken6 import isValid
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton, QLabel,
     QStackedWidget, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -1712,6 +1713,10 @@ class _CuadernoPanel(QWidget):
 
     def eventFilter(self, obj, ev):
         # Mantener el overlay de estado vacío cubriendo el viewport de los días.
+        # Al destruirse la vista, Qt puede haber borrado ya la tabla y seguir
+        # mandando eventos: usarla lanzaría dentro del filtro.
+        if not isValid(self.tbl_dias):
+            return False
         if obj is self.tbl_dias.viewport() and ev.type() == QEvent.Resize:
             self._lbl_dias_vacio.setGeometry(self.tbl_dias.viewport().rect())
         elif obj is self._lbl_dias_vacio and ev.type() == QEvent.MouseButtonRelease:

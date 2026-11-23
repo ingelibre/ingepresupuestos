@@ -23,6 +23,7 @@ de monomios quedaba en 70 px, fila y media visible.
 """
 from __future__ import annotations
 
+from shiboken6 import isValid
 from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent
 from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
@@ -918,6 +919,10 @@ class FormulaView(QWidget):
         Acá se cortan además los movimientos de mouse CON botón pulsado sobre
         la tabla, para que ni siquiera la fila resaltada se arrastre.
         """
+        # Al destruirse la vista, Qt puede haber borrado ya la tabla y seguir
+        # mandando eventos: usarla lanzaría dentro del filtro.
+        if not isValid(self.tbl):
+            return False
         if obj is self.tbl.viewport():
             if (ev.type() == QEvent.MouseMove
                     and ev.buttons() != Qt.NoButton):
@@ -927,7 +932,7 @@ class FormulaView(QWidget):
             # se conoce después de que la tabla procese la tecla.
             if ev.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End,
                             Qt.Key_PageUp, Qt.Key_PageDown):
-                QTimer.singleShot(0, self._fijar_monomio_actual)
+                QTimer.singleShot(0, lambda: self._fijar_monomio_actual() if isValid(self) else None)
         return super().eventFilter(obj, ev)
 
     def _fijar_monomio_actual(self):
@@ -948,7 +953,7 @@ class FormulaView(QWidget):
         selección legítima. Al correr después, `_monomio_activo` ya está puesto
         y no hay nada que restaurar.
         """
-        QTimer.singleShot(0, self._restaurar_seleccion)
+        QTimer.singleShot(0, lambda: self._restaurar_seleccion() if isValid(self) else None)
 
     def _restaurar_seleccion(self):
         activo = self._monomio_activo
