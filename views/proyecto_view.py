@@ -4643,7 +4643,7 @@ class ProyectoView(QWidget):
         conn.close()
 
         def _guardar_fijo(cod, texto):
-            val = parse_num_opt(texto)
+            val = parse_num_opt(texto, self._moneda)
             if val is None or val == fijos.get(cod):
                 return
             fijos[cod] = val
@@ -4823,7 +4823,7 @@ class ProyectoView(QWidget):
                     row_hl.addWidget(lbl_p)
                 elif es_fijo:
                     inp_f = _StyledLineEdit(
-                        f"{fijos[rub['codigo']]:,.{get_decimales_ppto()}f}")
+                        fmt_doc(fijos[rub['codigo']], get_decimales_ppto(), moneda=self._moneda))
                     inp_f.setFixedWidth(88)
                     inp_f.setAlignment(Qt.AlignRight)
                     inp_f.setToolTip(tr("Monto fijo de la línea"))
@@ -8284,8 +8284,9 @@ class ProyectoView(QWidget):
             for c, v in enumerate((
                     '', f"        {tipo} · {h['descripcion'] or ''}", h['unidad'] or '',
                     self._texto_cuadrilla(tipo, h['unidad'], h['cuadrilla'] or 0),
-                    f"{h['cantidad'] or 0:.{get_decimales_cant_acu(tipo)}f}",
-                    f"{h['precio'] or 0:.{dec}f}",
+                    fmt_doc(h['cantidad'] or 0, get_decimales_cant_acu(tipo),
+                            moneda=self._moneda, miles=False),
+                    fmt_doc(h['precio'] or 0, dec, moneda=self._moneda, miles=False),
                     fmt(h['parcial'] or 0, self._moneda, dec),
                     (h['indice_inei'] or ''))):
                 cell = QTableWidgetItem(v)

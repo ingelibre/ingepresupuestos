@@ -273,7 +273,8 @@ class BimVisor(QWidget):
         self._leyenda.setTextFormat(Qt.RichText)
         self._leyenda.setText("&nbsp;&nbsp;".join(
             f'<span style="color:{QColor(*COLOR_ESTADO[e]).name()}">&#9632;</span> '
-            f'{tr(TEXTO_ESTADO[e])}' for e in ESTADOS))
+            f'{tr(TEXTO_ESTADO[e])}' for e in ESTADOS
+            if e != 'cambio'))      # nadie lo calcula todavía
         self._leyenda.hide()
         barra.addWidget(self._leyenda)
         self._combo_color = QComboBox()

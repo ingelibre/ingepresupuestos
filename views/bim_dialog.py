@@ -358,7 +358,13 @@ class ImportarBimDialog(_Base):
             self.cmb.addItem(tr("Crear un proyecto nuevo"), None)
             c = get_db()
             try:
-                for r in c.execute("SELECT id, nombre, estado FROM proyectos ORDER BY id DESC"):
+                # Los mismos proyectos que muestra el Inicio a este usuario.
+                usuario = getattr(parent.window() if parent else None, 'usuario', None)
+                cond, par = '', ()
+                if usuario is not None and not usuario.es_admin:
+                    cond, par = " WHERE usuario_id=? OR usuario_id IS NULL", (usuario.id,)
+                for r in c.execute("SELECT id, nombre, estado FROM proyectos" + cond
+                                   + " ORDER BY id DESC", par):
                     if not puede_editar(r['estado'] or 'elaboracion', 'presupuesto'):
                         continue
                     self.cmb.addItem(tr("Añadir a: {p}").format(p=r['nombre']), r['id'])

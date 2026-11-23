@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from core import subpartidas as SP
 from core.database import get_db, get_decimales_ppto
-from utils.formatting import norm_busqueda, parse_num
+from utils.formatting import fmt_doc, norm_busqueda, parse_num
 from utils.i18n import tr
 
 
@@ -208,6 +208,8 @@ class SubpartidasTab(QWidget):
 
     def cargar(self, seleccionar: int | None = None):
         conn = get_db()
+        self._moneda = conn.execute("SELECT moneda FROM proyectos WHERE id=?",
+                                    (self.proyecto_id,)).fetchone()[0]
         filas = SP.listar(conn, self.proyecto_id)
         conn.close()
         dec = get_decimales_ppto()
@@ -215,7 +217,7 @@ class SubpartidasTab(QWidget):
         self.tbl.setRowCount(len(filas))
         for r, f in enumerate(filas):
             for c, v in enumerate((f['item'], f['descripcion'], f['unidad'] or '',
-                                   f"{f['precio_unitario'] or 0:,.{dec}f}", str(f['n_usos']))):
+                                   fmt_doc(f['precio_unitario'], dec, moneda=self._moneda), str(f['n_usos']))):
                 it = QTableWidgetItem(v)
                 if c >= 3:
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -275,7 +277,7 @@ class SubpartidasTab(QWidget):
         sid = self.seleccionada()
         if sid is None:
             return tr("Elija una sub-partida del proyecto.")
-        cant = parse_num(self.inp_cant.text())
+        cant = parse_num(self.inp_cant.text(), self._moneda)
         if cant <= 0:
             return tr("La cantidad debe ser mayor que cero.")
         conn = get_db()
