@@ -568,7 +568,11 @@ def _guardar_doc(doc, archivo: str) -> None:
                     # 0,19 cm de margen de celda por lado (el de Word).
                     libre = celda.width.pt - 2 * 5.4
                     for par in celda.paragraphs:
-                        if not _RE_MONTO_CELDA.match(par.text.strip()):
+                        txt = par.text.strip()
+                        # «01.02.03» a la izquierda es un código, no un monto.
+                        if (not _RE_MONTO_CELDA.match(txt)
+                                or (txt[0].isdigit() and par.alignment
+                                    != WD_ALIGN_PARAGRAPH.RIGHT)):
                             continue
                         ancho = 0.0
                         for run in par.runs:
@@ -578,8 +582,7 @@ def _guardar_doc(doc, archivo: str) -> None:
                                                 else 10) * 10))
                             f.setBold(bool(run.bold))
                             ancho += QFontMetricsF(f).horizontalAdvance(run.text) / 10
-                        # Con holgura: quien abre puede tener otra fuente.
-                        if libre <= 0 or ancho <= libre * 0.95:
+                        if libre <= 0 or ancho <= libre:
                             continue
                         esc = max(50, int(90 * libre / ancho))
                         for run in par.runs:
