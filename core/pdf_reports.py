@@ -24,6 +24,7 @@ import re
 import io
 import json
 import os
+from contextvars import ContextVar
 from datetime import datetime
 from html import escape
 from typing import Optional
@@ -221,19 +222,44 @@ LEGACY_EMPRESA = {
 }
 
 
-def get_formato() -> dict:
-    """Lee la configuración de formato — devuelve dict con todos los campos."""
+def formato_propio() -> dict:
+    """Lo que guardó el usuario, SIN tema. Es lo que se edita y se vuelve a
+    guardar; para dibujar un documento, `get_formato`."""
     out = {}
     for k, default in FORMATO_CLAVES.items():
         out[k] = get_config(k, default) or default
     return out
 
 
+def get_formato(pid: int | None = None) -> dict:
+    """El formato con que sale un documento: lo del usuario y, encima, el tema
+    del proyecto (`core.temas`). Sin `pid`, el del documento en curso."""
+    out = formato_propio()
+    from core import temas
+    from utils.formatting import proyecto_en_curso
+    pid = pid if pid is not None else proyecto_en_curso()
+    tema = temas.activo(pid)
+    if tema is None:
+        return out
+    try:
+        return temas.aplicar(out, tema, _proyecto_info(pid) if pid else {})
+    except Exception:  # noqa: BLE001 — con el tema roto, el de fábrica
+        import traceback
+        traceback.print_exc()
+        return out
+
+
+def _familia(formato: dict | None = None) -> str:
+    if formato is None:
+        formato = get_formato()
+    return (formato.get('_tema') or {}).get('_familia') or 'Inter'
+
+
 def empresa_info() -> dict:
     """Datos de la empresa ya resueltos: ``{nombre, subtitulo, ruc, direccion,
     telefono, logo_b64}``. Punto único para quien necesite la razón social
     fuera de los reportes (TDR, Control de Obra…)."""
-    f = get_formato()
+    f = formato_propio()
     return {
         'nombre':    f.get('rep_empresa_nombre') or '',
         'subtitulo': f.get('rep_empresa_subtitulo') or '',
@@ -559,7 +585,7 @@ def agrupar_items_por_sub(pid: int, items: list) -> list[tuple[str, list]]:
             for g in grupos_def if por_id.get(g['id'])]
 
 
-def _brand_colors() -> tuple[str, str, str]:
+def _brand_colors(formato: dict | None = None) -> tuple[str, str, str]:
     """Lee el toggle 'Reportes sobrios' y devuelve (color, dark, soft).
 
     Wrapper local sobre `utils.theme.accent_reportes()` para no
@@ -570,9 +596,66 @@ def _brand_colors() -> tuple[str, str, str]:
     """
     try:
         from utils.theme import accent_reportes
-        return accent_reportes()
+        base = accent_reportes()
     except Exception:
-        return (ORANGE, ORANGE_DARK, ORANGE_SOFT)
+        base = (ORANGE, ORANGE_DARK, ORANGE_SOFT)
+    if formato is not None:
+        tema = formato.get('_tema') or {}
+    else:
+        from core import temas
+        from utils.formatting import proyecto_en_curso
+        t = temas.activo(proyecto_en_curso())
+        tema = t.datos if t else {}
+    col = tema.get('colores') or {}
+    if not col:
+        return base
+    o = col.get('acento') or base[0]
+    return (o, col.get('acento_oscuro') or (o if col.get('acento') else base[1]),
+            col.get('suave') or base[2])
+
+
+def _linea_tema(formato: dict) -> str:
+    """El borde de las celdas que pide el tema («1px solid #…»), o ''."""
+    from core.temas import BORDES
+    tema = formato.get('_tema') or {}
+    borde = (tema.get('colores') or {}).get('borde')
+    px = BORDES[tema.get('bordes', 'finos' if borde else 'ninguno')]
+    return f"{px}px solid {borde or SLATE_300}" if px else ''
+
+
+def _css_tema(formato: dict) -> str:
+    """Lo que el tema cambia de la hoja de estilos. Solo números y colores ya
+    validados por el esquema: un tema no trae CSS."""
+    tema = formato.get('_tema')
+    if not tema:
+        return ''
+    out = []
+    col = tema.get('colores') or {}
+    linea = _linea_tema(formato)
+    if linea:
+        # Las filas de título traen bordes propios: se igualan al resto.
+        sel = ['table.data td', 'table.data th', 'table.data td.r'] + [
+            f'table.data tr.titulo{n} td' for n in range(1, N_NIVELES + 1)]
+        out += [f"  {x} {{ border: {linea}; padding: 2px 5px; }}\n" for x in sel]
+        out.append("  table.data tr.spacer td { border: none; padding: 0; }\n")
+    if col.get('cebra'):
+        out.append(f"  table.data tr.alt td {{ background: {col['cebra']}; }}\n")
+    return ''.join(out)
+
+
+def _firmas_html(formato: dict) -> str:
+    firmas = (formato.get('_tema') or {}).get('firmas') or []
+    if not firmas:
+        return ''
+    ancho = int(100 / len(firmas))
+    celdas = ''.join(
+        f'<td width="{ancho}%" align="center" style="border:none;padding:0 12pt">'
+        f'<p style="margin-top:46pt;color:{SLATE_700}">____________________________</p>'
+        f'<p style="font-weight:700">{escape(f["nombre"])}</p>'
+        f'<p style="font-size:8pt;color:{SLATE_500}">{escape(f["cargo"])}</p></td>'
+        for f in firmas)
+    return (f'<table border="0" cellspacing="0" cellpadding="0" width="100%">'
+            f'<tr>{celdas}</tr></table>')
 
 
 def _base_css(formato: dict | None = None) -> str:
@@ -580,7 +663,9 @@ def _base_css(formato: dict | None = None) -> str:
     para que respete el toggle 'Reportes sobrios' en tiempo real sin
     requerir reiniciar la app. Los colores de título salen del esquema
     activo (`colores_titulos`)."""
-    o, od, os_ = _brand_colors()
+    if formato is None:
+        formato = get_formato()
+    o, od, os_ = _brand_colors(formato)
     _t = colores_titulos(formato)
     # Del 6 al 9 se ven como el 5 (cursiva, 8.5 pt); solo cambia el color.
     _css_niveles_extra = "".join(
@@ -593,7 +678,7 @@ def _base_css(formato: dict | None = None) -> str:
     return f"""
 <style>
   body {{
-    font-family: 'Inter', 'DejaVu Sans', 'Segoe UI', Arial, sans-serif;
+    font-family: '{_familia(formato)}', 'DejaVu Sans', 'Segoe UI', Arial, sans-serif;
     color: {SLATE_900};
     font-size: 9pt;
   }}
@@ -762,7 +847,7 @@ def _base_css(formato: dict | None = None) -> str:
     margin: 6pt 0;
   }}
   .pagebreak {{ page-break-before: always; }}
-</style>
+{_css_tema(formato)}</style>
 """
 
 
@@ -809,12 +894,15 @@ def _html_meta_proyecto(proy: dict) -> str:
 # en cada punto; un `colspan` sobre dos columnas ensancha Ítem para TODAS
 # las filas — las dos cosas se probaron).
 _FM_ITEM_CACHE: dict = {}
+#: La tipografía con que se miden los códigos (la fija `_w_item_fijo`).
+_familia_en_curso: ContextVar = ContextVar('tipografia_del_reporte', default='')
 
 
 def _fm_item(pt: float, bold: bool) -> QFontMetricsF:
-    k = (pt, bold)
+    fam = _familia_en_curso.get() or 'Inter'
+    k = (pt, bold) if fam == 'Inter' else (pt, bold, fam)
     if k not in _FM_ITEM_CACHE:
-        f = QFont('Inter'); f.setPointSizeF(pt); f.setBold(bold)
+        f = QFont(fam); f.setPointSizeF(pt); f.setBold(bold)
         _FM_ITEM_CACHE[k] = QFontMetricsF(f)
     return _FM_ITEM_CACHE[k]
 
@@ -833,6 +921,7 @@ def _ancho_codigo_px(item: str, pt: float, bold: bool, upper: bool = False) -> i
 def _w_item_fijo(filas) -> int:
     """`filas`: (item, pt, bold, upper). El ancho fijo = el mayor de los
     códigos de hasta cinco tramos (mínimo 40 px)."""
+    _familia_en_curso.set(_familia())
     return max([_ancho_codigo_px(i, pt, b, u) for i, pt, b, u in filas
                 if len((i or '').split('.')) <= ITEM_TRAMOS_POR_LINEA] or [40])
 
@@ -959,14 +1048,31 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     # Columnas del PU por tipo (issue #54) y especificación bajo la partida
     # (issue #41). El «Presupuesto para Cliente» nunca abre sus costos.
     _formato = get_formato()
-    cols_pu = [] if todo_costo else desglose_ppto(_formato)
+    from core import temas
+    cols = temas.columnas(_formato, 'presupuesto')
+    _campos = [c['campo'] for c in cols]
+    cols_pu = ([] if todo_costo or 'desglose' not in _campos
+               else desglose_ppto(_formato))
     pu_tipo = desglose_pu_partidas(items) if cols_pu else {}
     con_spec = especificacion_en_ppto(_formato)
-    n_col = 5 + len(cols_pu)
+    _orden = [c for c in cols if c['campo'] != 'desglose']
+    n_col = len(_orden) + len(cols_pu)
+    # Cuántas celdas hay antes y después de la del parcial.
+    _antes = (sum(len(cols_pu) if c == 'desglose' else 1
+                  for c in _campos[:_campos.index('parcial')])
+              if 'parcial' in _campos else n_col)
+    _despues = max(0, n_col - _antes - 1)
+
+    def _fila_ancha(celda: str, total: str) -> str:
+        """Un texto que ocupa hasta el parcial, y el parcial."""
+        return celda + (total if 'parcial' in _campos else '') + (
+            f'<td colspan="{_despues}"></td>' if _despues else '')
 
     parts = []
     if incluir_meta:
-        parts.append('<h2>Presupuesto</h2>')
+        _nom = ((get_formato().get('_tema') or {}).get('nombres') or {}).get(
+            'presupuesto_cerrado' if todo_costo else 'presupuesto')
+        parts.append(f'<h2>{escape(_nom or "Presupuesto")}</h2>')
 
     # Tabla de partidas
     rows = []
@@ -976,6 +1082,9 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     # Contador propio de filas-partida (ignora títulos) para zebra CONTINUO.
     # QTextDocument ignora `tr.alt td { background }` del CSS, por eso
     # aplicamos `style="background:..."` INLINE en cada `<td>` de partidas.
+    _borde = _linea_tema(_formato)
+    _cebra = ((_formato.get('_tema') or {}).get('colores') or {}).get(
+        'cebra') or '#FBFCFD'
     partida_idx = 0
     # Profundidad para los tabs de la columna Descripción: relativa al ítem más
     # superficial (replica la sangría del árbol on-screen, que usa el
@@ -1042,16 +1151,16 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             # Sin fondo sólido: mismo criterio que los títulos de partida
             # (texto subrayado). Una banda oscura pesaba demasiado en la
             # página y competía con la jerarquía de los títulos.
-            rows.append(
-                f'<tr><td colspan="{n_col - 1}" style="background:white;color:%s;'
+            rows.append('<tr>' + _fila_ancha(
+                f'<td colspan="{_antes}" style="background:white;color:%s;'
                 'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
                 'text-transform:uppercase;letter-spacing:0.5pt;'
                 'text-decoration:underline;border:none;">%s</td>'
+                % (_col_sub, escape(_nom_sub)),
                 '<td align="right" style="background:white;color:%s;'
                 'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
-                'text-decoration:underline;border:none;">%s %s</td></tr>'
-                % (_col_sub, escape(_nom_sub), _col_sub,
-                   sym, _fmt(_cd_sub * factor, dec))
+                'text-decoration:underline;border:none;">%s %s</td>'
+                % (_col_sub, sym, _fmt(_cd_sub * factor, dec))) + '</tr>'
             )
 
         if es_titulo:
@@ -1061,7 +1170,9 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             zebra = (partida_idx % 2 == 1)
             partida_idx += 1
             cls = ""
-            row_bg_inline = 'background:#FBFCFD;' if zebra else ''
+            row_bg_inline = f'background:{_cebra};' if zebra else ''
+            if row_bg_inline and _borde:      # un `style` propio pierde el del CSS
+                row_bg_inline += f'border:{_borde};padding:2px 5px;'
 
         if es_titulo:
             desc = escape(p.get("descripcion") or "")
@@ -1088,10 +1199,10 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                     f'font-size:{h}pt;line-height:{h}pt">&nbsp;</td></tr>'
                 )
             rows.append(
-                f'<tr class="{cls}">'
-                f'<td colspan="{n_col - 1}">{_item_desc(p, desc, _depth, subrayar=(nivel == 1))}</td>'
-                f'<td class="r">{_fmt(total * factor, dec)}</td>'
-                f'</tr>'
+                f'<tr class="{cls}">' + _fila_ancha(
+                    f'<td colspan="{_antes}">{_item_desc(p, desc, _depth, subrayar=(nivel == 1))}</td>',
+                    f'<td class="r">{_fmt(total * factor, dec)}</td>')
+                + '</tr>'
             )
         else:
             # bg inline en cada td — QTextDocument ignora `tr.alt td { bg }`.
@@ -1102,16 +1213,16 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                 f'padding-left:2pt;padding-right:5pt">'
                 f'{_fmt(val_pu[t], dec) if val_pu and val_pu[t] else ""}</td>'
                 for t in cols_pu)
-            rows.append(
-                f'<tr class="{cls}">'
-                f'<td{sty}>{_item_desc(p, escape(p.get("descripcion") or ""), _depth)}</td>'
-                f'<td class="c"{sty}>{escape(p.get("unidad") or "")}</td>'
-                f'<td class="r"{sty}>{_fmt(p.get("metrado"), get_decimales_metrado())}</td>'
-                f'{celdas_pu}'
-                f'<td class="r"{sty}>{_fmt((p.get("precio_unitario") or 0) * factor, dec)}</td>'
-                f'<td class="r"{sty}>{_fmt(total * factor, dec)}</td>'
-                f'</tr>'
-            )
+            celda = {
+                'descripcion': f'<td{sty}>{_item_desc(p, escape(p.get("descripcion") or ""), _depth)}</td>',
+                'unidad': f'<td class="c"{sty}>{escape(p.get("unidad") or "")}</td>',
+                'cantidad': f'<td class="r"{sty}>{_fmt(p.get("metrado"), get_decimales_metrado())}</td>',
+                'desglose': celdas_pu,
+                'precio': f'<td class="r"{sty}>{_fmt((p.get("precio_unitario") or 0) * factor, dec)}</td>',
+                'parcial': f'<td class="r"{sty}>{_fmt(total * factor, dec)}</td>',
+            }
+            rows.append(f'<tr class="{cls}">'
+                        + ''.join(celda[c] for c in _campos) + '</tr>')
         if con_spec:
             # Una fila por párrafo: así una especificación larga se reparte
             # entre páginas en vez de saltar entera a la siguiente.
@@ -1127,6 +1238,25 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         f'<th style="width:46pt;text-align:right;padding-left:2pt;'
         f'padding-right:5pt;background:{_os_hp}">{rotulo_pu[t]}</th>'
         for t in cols_pu)
+    _rot = {c['campo']: escape(c['titulo']) for c in cols}
+    _w = {c['campo']: c['ancho'] for c in cols if c['ancho']}
+    _th_desc = (_cabecera_item_desc(_W_ITEM) if _rot['descripcion'] == 'Descripción'
+                else _cabecera_item_desc(_W_ITEM).replace('>Descripción<',
+                                                          f'>{_rot["descripcion"]}<'))
+
+    def _th(campo, ancho, alinear):
+        if campo not in _rot:
+            return ''
+        return (f'<th style="width:{_w.get(campo, ancho):g}pt;text-align:{alinear};'
+                f'background:{_os_hp}">{_rot[campo]}</th>')
+    ths = {
+        'descripcion': f'<th style="background:{_os_hp}">{_th_desc}</th>',
+        'unidad': _th('unidad', 40, 'center'),
+        'cantidad': _th('cantidad', 60 if cols_pu else 70, 'right'),
+        'desglose': th_pu,
+        'precio': _th('precio', 68 if cols_pu else 88, 'right'),
+        'parcial': _th('parcial', 76 if cols_pu else 94, 'right'),
+    }
     parts.append(
         # width="100%" inline OBLIGATORIO — sin esto, QTextDocument calcula el
         # ancho de la tabla en base al contenido y las descripciones largas
@@ -1136,12 +1266,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         # para que actúe como divisor visual antes de los datos.
         '<table class="data" width="100%">'
         '<thead><tr>'
-        f'<th style="background:{_os_hp}">{_cabecera_item_desc(_W_ITEM)}</th>'
-        f'<th style="width:40pt;text-align:center;background:{_os_hp}">Und</th>'
-        f'<th style="width:{60 if cols_pu else 70}pt;text-align:right;background:{_os_hp}">Cantidad</th>'
-        f'{th_pu}'
-        f'<th style="width:{68 if cols_pu else 88}pt;text-align:right;background:{_os_hp}">Precio</th>'
-        f'<th style="width:{76 if cols_pu else 94}pt;text-align:right;background:{_os_hp}">Parcial</th>'
+        + ''.join(ths[c] for c in _campos) +
         '</tr></thead>'
         f'<tbody>{"".join(rows)}</tbody>'
         '</table>'
@@ -1195,6 +1320,9 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         f' color:{SLATE_700};font-size:9.5pt">'
         f'Son: {escape(total_letras)}.</p>'
     )
+    firmas = _firmas_html(_formato)
+    if firmas:
+        parts.append(firmas)
     return "\n".join(parts)
 
 
@@ -3265,6 +3393,12 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
     dec = get_decimales_ppto()
 
+    from core import temas
+    cols = temas.columnas(get_formato(), 'insumos')
+    _campos = [c['campo'] for c in cols]
+    n_col = len(cols)
+    _antes = _campos.index('parcial') if 'parcial' in _campos else n_col
+    _despues = max(0, n_col - _antes - 1)
     parts = []
 
     if not insumos:
@@ -3304,7 +3438,7 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
         # Espaciador antes de cada sección (excepto la primera)
         if not primer_tipo:
             all_rows.append(
-                '<tr><td colspan="6" style="border:none;padding:0;font-size:10pt">&nbsp;</td></tr>'
+                f'<tr><td colspan="{n_col}" style="border:none;padding:0;font-size:10pt">&nbsp;</td></tr>'
             )
         primer_tipo = False
 
@@ -3312,7 +3446,7 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
         bar_color = TIPO_COLOR[t]
         bar_soft  = TIPO_SOFT[t]
         all_rows.append(
-            f'<tr><td colspan="6" style="'
+            f'<tr><td colspan="{n_col}" style="'
             f'background:{bar_soft};color:{bar_color};'
             f'padding:8pt 12pt;'
             f'font-size:11pt;font-weight:700;letter-spacing:0.6pt;'
@@ -3324,37 +3458,45 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
         for j, r in enumerate(lst):
             cls = "alt" if (j % 2) else ""
             oculta = solo_monto and es_herramienta_pct(t, r.get('unidad'))
-            all_rows.append(
-                f'<tr class="{cls}">'
-                f'<td>{escape(r.get("codigo") or "")}</td>'
-                f'<td>{escape(r.get("descripcion") or "")}</td>'
-                f'<td class="c">{"" if oculta else escape(r.get("unidad") or "")}</td>'
-                f'<td class="r">{"" if oculta else _fmt(r.get("cantidad_total"), 4)}</td>'
-                f'<td class="r">{"" if oculta else _fmt(r.get("precio"), dec)}</td>'
-                f'<td class="r">{_fmt(r.get("parcial_total"), dec)}</td>'
-                f'</tr>'
-            )
+            celda = {
+                'codigo': f'<td>{escape(r.get("codigo") or "")}</td>',
+                'descripcion': f'<td>{escape(r.get("descripcion") or "")}</td>',
+                'unidad': f'<td class="c">{"" if oculta else escape(r.get("unidad") or "")}</td>',
+                'cantidad': f'<td class="r">{"" if oculta else _fmt(r.get("cantidad_total"), 4)}</td>',
+                'precio': f'<td class="r">{"" if oculta else _fmt(r.get("precio"), dec)}</td>',
+                'parcial': f'<td class="r">{_fmt(r.get("parcial_total"), dec)}</td>',
+            }
+            all_rows.append(f'<tr class="{cls}">'
+                            + ''.join(celda[c] for c in _campos) + '</tr>')
         # Subtotal del tipo — color del tipo en texto + borde slate sutil
         all_rows.append(
             f'<tr style="background:white;border-top:1pt solid {SLATE_700}">'
-            f'<td colspan="5" class="r" style="font-weight:700;color:{bar_color}">'
+            f'<td colspan="{_antes}" class="r" style="font-weight:700;color:{bar_color}">'
             f'Subtotal {escape(label)}</td>'
-            f'<td class="r" style="font-weight:700;color:{bar_color}">'
-            f'{_fmt(subtotal_tipo.get(t, 0), dec)}</td>'
-            f'</tr>'
+            + ((f'<td class="r" style="font-weight:700;color:{bar_color}">'
+                f'{_fmt(subtotal_tipo.get(t, 0), dec)}</td>')
+               if 'parcial' in _campos else '')
+            + (f'<td colspan="{_despues}"></td>' if _despues else '') +
+            '</tr>'
         )
 
     # Header con bg accent_soft (espejo del Presupuesto): la fila de
     # cabecera (Código · Descripción · ...) actúa como divisor visual.
+    _estilo = {'codigo': (60, ''), 'descripcion': (None, ''),
+               'unidad': (35, 'text-align:center;'),
+               'cantidad': (65, 'text-align:right;'),
+               'precio': (60, 'text-align:right;'),
+               'parcial': (75, 'text-align:right;')}
+
+    def _th(c):
+        w, alinear = _estilo[c['campo']]
+        w = c['ancho'] or w
+        return (f'<th style="{f"width:{w:g}pt;" if w else ""}{alinear}'
+                f'background:{_os}">{escape(c["titulo"])}</th>')
     parts.append(
         '<table class="data" width="100%">'
         '<thead><tr>'
-        f'<th style="width:60pt;background:{_os}">Código</th>'
-        f'<th style="background:{_os}">Descripción</th>'
-        f'<th style="width:35pt;text-align:center;background:{_os}">Und</th>'
-        f'<th style="width:65pt;text-align:right;background:{_os}">Cantidad</th>'
-        f'<th style="width:60pt;text-align:right;background:{_os}">Precio</th>'
-        f'<th style="width:75pt;text-align:right;background:{_os}">Parcial</th>'
+        + ''.join(_th(c) for c in cols) +
         '</tr></thead>'
         f'<tbody>{"".join(all_rows)}</tbody></table>'
     )
@@ -4038,7 +4180,8 @@ class _PdfRenderer:
         self.proyecto = proyecto
         self.titulo = titulo_reporte
         self.with_cover = with_cover
-        self.formato = get_formato()
+        self.formato = get_formato(proyecto.get('id') if proyecto else None)
+        self._tema = self.formato.get('_tema') or {}
         self.paper = paper if paper in self.PAPER_SIZES_IN else 'A4'
         self.orient = 'landscape' if str(orient).lower() == 'landscape' else 'portrait'
         # Numeración continua: si `pie_total` se especifica, el footer usa
@@ -4118,6 +4261,24 @@ class _PdfRenderer:
 
     # --- HTML helpers --------------------------------------------------------
 
+    def _qf(self, pt: int) -> QFont:
+        return QFont(self._tema.get('_familia') or 'Inter', pt)
+
+    def _texto_tema(self, seccion: str, clave: str, page_index=None,
+                    page_count=None) -> str | None:
+        """El texto del tema para ese hueco, ya con sus marcadores; None si el
+        tema no dice nada."""
+        texto = (self._tema.get(seccion) or {}).get(clave)
+        if texto is None:
+            return None
+        from core import temas
+        mas = {'titulo': self.titulo}
+        if page_index is not None:
+            mas['pagina'] = page_index + 1 + (self.pie_offset if self.pie_total else 0)
+            mas['paginas'] = self.pie_total or page_count
+        return temas.expandir(texto, temas.valores_de(self.proyecto, self.formato,
+                                                      **mas))
+
     def _wrap_html(self, body_html: str) -> str:
         return f"<html><head>{_base_css(self.formato)}</head><body>{body_html}</body></html>"
 
@@ -4127,7 +4288,7 @@ class _PdfRenderer:
         cx = self.page_w / 2
         # Si el usuario configuró un color custom (rep_color_marca) lo respetamos;
         # si no, fallback al color de marca actual (naranja o slate sobrio).
-        _o, _od, _os = _brand_colors()
+        _o, _od, _os = _brand_colors(self.formato)
         color_marca = QColor(self.formato.get('rep_color_marca') or _o)
         empresa     = self.formato.get('rep_empresa_nombre') or 'ingePresupuestos'
 
@@ -4143,26 +4304,26 @@ class _PdfRenderer:
             painter.drawImage(QRectF(self.margin_x, 18, w, h), img)
             txt_x = self.margin_x + w + 12
 
-        _o2, _od2, _os2 = _brand_colors()
+        _o2, _od2, _os2 = _brand_colors(self.formato)
         color_marca_dk = QColor(self.formato.get('rep_color_marca_dk') or _od2)
         # La fecha ocupa la derecha; dejar holgura para no pisarla.
         txt_w = self.page_w - self.margin_r - txt_x - 150
         if txt_w >= 90:
-            f = QFont('Inter', 14); f.setBold(True)
+            f = self._qf(14); f.setBold(True)
             painter.setFont(f); painter.setPen(color_marca_dk)
             painter.drawText(QRectF(txt_x, 18, txt_w, 30),
                              Qt.AlignVCenter | Qt.AlignLeft,
                              QFontMetrics(f).elidedText(empresa, Qt.ElideRight,
                                                         int(txt_w)))
 
-        f2 = QFont('Inter', 9)
+        f2 = self._qf(9)
         painter.setFont(f2); painter.setPen(QColor(SLATE_300))
         painter.drawText(QRectF(0, 18, self.page_w - self.margin_r, 30),
                          Qt.AlignVCenter | Qt.AlignRight, _hoy_formateado())
 
         # Tipo de reporte (eyebrow)
         y = 160
-        f3 = QFont('Inter', 11); f3.setLetterSpacing(QFont.AbsoluteSpacing, 2.0)
+        f3 = self._qf(11); f3.setLetterSpacing(QFont.AbsoluteSpacing, 2.0)
         painter.setFont(f3); painter.setPen(QColor(SLATE_500))
         painter.drawText(QRectF(0, y, self.page_w, 20),
                          Qt.AlignCenter, (self.titulo_cover or self.titulo).upper())
@@ -4175,7 +4336,7 @@ class _PdfRenderer:
         # Nombre del proyecto (título grande, multi-línea centrado)
         y += 30
         nombre = proy.get('nombre') or '—'
-        f4 = QFont('Inter', 22); f4.setBold(True)
+        f4 = self._qf(22); f4.setBold(True)
         painter.setFont(f4); painter.setPen(QColor(SLATE_900))
         rect_nombre = QRectF(self.margin_x + 20, y,
                              self.page_w - self.margin_x - self.margin_r - 40, 200)
@@ -4189,7 +4350,7 @@ class _PdfRenderer:
         sub = proy.get('sub_presupuesto') or ''
         if sub:
             y_after_title += 8
-            f5 = QFont('Inter', 11); f5.setItalic(True)
+            f5 = self._qf(11); f5.setItalic(True)
             painter.setFont(f5); painter.setPen(QColor(SLATE_500))
             painter.drawText(QRectF(self.margin_x, y_after_title,
                                      self.page_w - self.margin_x - self.margin_r, 22),
@@ -4220,8 +4381,8 @@ class _PdfRenderer:
             ("Monto Total",    monto_total_txt),
         ]
 
-        f_k = QFont('Inter', 10); f_k.setItalic(True)
-        f_v = QFont('Inter', 11); f_v.setBold(True)
+        f_k = self._qf(10); f_k.setItalic(True)
+        f_v = self._qf(11); f_v.setBold(True)
         fm_k = QFontMetrics(f_k); fm_v = QFontMetrics(f_v)
 
         # Anchos de columnas y de bloque. Fijamos un ancho de valor amplio
@@ -4277,12 +4438,12 @@ class _PdfRenderer:
             ry += rh
 
         # Footer del proyecto
-        f_foot = QFont('Inter', 9)
+        f_foot = self._qf(9)
         painter.setFont(f_foot); painter.setPen(QColor(SLATE_300))
         painter.drawText(QRectF(0, self.page_h - 80, self.page_w, 14),
                          Qt.AlignCenter,
                          f"Documento generado el {_hoy_formateado()}")
-        f_foot2 = QFont('Inter', 8); f_foot2.setItalic(True)
+        f_foot2 = self._qf(8); f_foot2.setItalic(True)
         painter.setFont(f_foot2)
         sub = self.formato.get('rep_empresa_subtitulo') or 'Sistema de Presupuestos de Obra Pública'
         painter.drawText(QRectF(0, self.page_h - 60, self.page_w, 14),
@@ -4300,7 +4461,7 @@ class _PdfRenderer:
              if self.formato.get('rep_empresa_telefono') else ''),
         ) if t]
         if _datos:
-            f_foot3 = QFont('Inter', 8)
+            f_foot3 = self._qf(8)
             painter.setFont(f_foot3); painter.setPen(QColor(SLATE_300))
             painter.drawText(QRectF(0, self.page_h - 46, self.page_w, 14),
                              Qt.AlignCenter, "  ·  ".join(_datos))
@@ -4327,7 +4488,7 @@ class _PdfRenderer:
             painter.restore()
 
     def _draw_header_contenido(self, painter: QPainter):
-        _o, _od, _os = _brand_colors()
+        _o, _od, _os = _brand_colors(self.formato)
         color_marca    = QColor(self.formato.get('rep_color_marca') or _o)
         color_marca_dk = QColor(self.formato.get('rep_color_marca_dk') or _od)
         empresa        = self.formato.get('rep_empresa_nombre') or 'ingePresupuestos'
@@ -4364,7 +4525,7 @@ class _PdfRenderer:
             txt_w = left_w - w - 10
 
         if txt_w >= 70:      # menos que esto no cabe ni el nombre elidido
-            f = QFont('Inter', pt_emp)
+            f = self._qf(pt_emp)
             f.setBold(True)
             fm_e = QFontMetrics(f)
             painter.setPen(color_marca_dk)
@@ -4373,7 +4534,7 @@ class _PdfRenderer:
                              Qt.AlignLeft | Qt.AlignVCenter,
                              fm_e.elidedText(empresa, Qt.ElideRight, int(txt_w)))
 
-            f2 = QFont('Inter', 7)
+            f2 = self._qf(7)
             painter.setFont(f2)
             painter.setPen(QColor(SLATE_300))
             painter.drawText(QRectF(txt_x, y + 18, txt_w, 14),
@@ -4384,21 +4545,24 @@ class _PdfRenderer:
         # Centro: título reporte (en banda visual)
         center_x = self.margin_x + left_w + 12
         center_w = self.page_w - self.margin_x - self.margin_r - left_w - right_w - 24
-        f3 = QFont('Inter', 10)
+        f3 = self._qf(10)
         f3.setBold(True)
         painter.setFont(f3)
         painter.setPen(QColor(SLATE_900))
         rect_titulo = QRectF(center_x, y, center_w, 18)
-        painter.drawText(rect_titulo, Qt.AlignCenter | Qt.AlignVCenter, self.titulo)
+        _tt = self._texto_tema('encabezado', 'titulo')
+        painter.drawText(rect_titulo, Qt.AlignCenter | Qt.AlignVCenter,
+                         self.titulo if _tt is None else _tt)
 
         # Centro: nombre proyecto (hasta 3 líneas con elide en la última si no cabe)
         MAX_LINES = 3
-        f4 = QFont('Inter', 7)
+        f4 = self._qf(7)
         f4.setItalic(True)
         painter.setFont(f4)
         painter.setPen(QColor(SLATE_500))
         fm = QFontMetrics(f4)
-        nombre = (self.proyecto.get('nombre') or '').strip()
+        _tl = self._texto_tema('encabezado', 'linea')
+        nombre = (self.proyecto.get('nombre') or '').strip() if _tl is None else _tl
         line_h = fm.lineSpacing()
         # Wrap greedy a MAX_LINES líneas; la última se elide si no entra todo
         words = nombre.split()
@@ -4422,19 +4586,22 @@ class _PdfRenderer:
                          texto_lineas)
 
         # Derecha: solo costo al (cliente lo movemos al pie)
+        _td = self._texto_tema('encabezado', 'derecha')
         right_x = self.page_w - self.margin_r - right_w
-        f5 = QFont('Inter', 8)
+        f5 = self._qf(8)
         f5.setBold(True)
         painter.setFont(f5)
         painter.setPen(QColor(SLATE_700))
         painter.drawText(QRectF(right_x, y, right_w, 16),
                          Qt.AlignRight | Qt.AlignVCenter,
-                         f"Costo al: {_clean_costo_al(self.proyecto.get('costo_al'))}")
-        f6 = QFont('Inter', 7)
+                         f"Costo al: {_clean_costo_al(self.proyecto.get('costo_al'))}"
+                         if _td is None else _td)
+        f6 = self._qf(7)
         f6.setItalic(True)
         painter.setFont(f6)
         painter.setPen(QColor(SLATE_300))
-        modalidad = self.proyecto.get('modalidad') or ''
+        _td2 = self._texto_tema('encabezado', 'derecha2')
+        modalidad = (self.proyecto.get('modalidad') or '') if _td2 is None else _td2
         painter.drawText(QRectF(right_x, y + 18, right_w, 14),
                          Qt.AlignRight | Qt.AlignVCenter,
                          modalidad)
@@ -4465,7 +4632,7 @@ class _PdfRenderer:
             painter.drawLine(self.margin_x, y,
                              self.page_w - self.margin_r, y)
 
-        f = QFont('Inter', 7)
+        f = self._qf(7)
         painter.setFont(f)
         painter.setPen(QColor(SLATE_300))
 
@@ -4476,6 +4643,8 @@ class _PdfRenderer:
             pie_izq = f"Cliente: {cliente}" if cliente else ''
         if _oculto(self.formato, 'rep_pie_izq_oculto'):
             pie_izq = ''
+        elif self._texto_tema('pie', 'izquierda') is not None:
+            pie_izq = self._texto_tema('pie', 'izquierda', page_index, page_count)
         if pie_izq:
             fm = QFontMetrics(f)
             elided = fm.elidedText(pie_izq, Qt.ElideRight, 320)
@@ -4485,6 +4654,8 @@ class _PdfRenderer:
         # Centro: pie central custom o fecha
         if not _oculto(self.formato, 'rep_pie_cen_oculto'):
             pie_cen = self.formato.get('rep_pie_central') or _hoy_formateado()
+            if self._texto_tema('pie', 'centro') is not None:
+                pie_cen = self._texto_tema('pie', 'centro', page_index, page_count)
             rect_c = QRectF(0, y + 6, self.page_w, 14)
             painter.drawText(rect_c, Qt.AlignCenter, pie_cen)
 
@@ -4497,6 +4668,8 @@ class _PdfRenderer:
         else:
             pie_der = self.formato.get('rep_pie_derecho') or \
                       f"Página {page_index + 1} de {page_count}"
+        if self._texto_tema('pie', 'derecha') is not None:
+            pie_der = self._texto_tema('pie', 'derecha', page_index, page_count)
         if _oculto(self.formato, 'rep_pie_der_oculto'):
             pie_der = ''
         if pie_der:
@@ -4508,6 +4681,8 @@ class _PdfRenderer:
         del usuario, o vacío si la apagó)."""
         if _oculto(self.formato, 'rep_pie_der_oculto'):
             return ''
+        if self._texto_tema('pie', 'derecha') is not None:
+            return self._texto_tema('pie', 'derecha', page_index, page_count)
         if self.pie_total:
             return (f"Página {page_index + 1 + self.pie_offset} "
                     f"de {self.pie_total}")
@@ -4521,7 +4696,7 @@ class _PdfRenderer:
         painter.drawImage(r, self.franja_pie)
         pie_der = self._texto_pagina(page_index, page_count)
         if pie_der:
-            painter.setFont(QFont('Inter', 7))
+            painter.setFont(self._qf(7))
             painter.setPen(QColor(SLATE_300))
             painter.drawText(QRectF(self.page_w - self.margin_r - 160, r.top() - 16, 160, 14),
                              Qt.AlignRight | Qt.AlignVCenter, pie_der)
@@ -5063,6 +5238,12 @@ def filtrar_items_por_pids(items: list, solo_pids) -> list:
 
 @con_moneda_del_proyecto
 def _build_html_for(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict]:
+    titulo, body, proy = _build_html_de_fabrica(tipo, pid, solo_pids)
+    nombre = ((get_formato(pid).get('_tema') or {}).get('nombres') or {}).get(tipo)
+    return (nombre if nombre and not solo_pids else titulo), body, proy
+
+
+def _build_html_de_fabrica(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict]:
     """Devuelve (titulo, body_html, proy) para el tipo de reporte solicitado.
 
     `solo_pids` restringe el reporte a un subconjunto de partidas (impresión

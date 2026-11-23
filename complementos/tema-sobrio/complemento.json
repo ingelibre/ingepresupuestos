@@ -1,0 +1,31 @@
+{
+  "esquema": 1,
+  "id": "tema-sobrio",
+  "nombre": "Tema Sobrio",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Reportes en blanco y negro, con letra con remates, sin filas alternas y con el pie «página/páginas». Pensado para fotocopiar.",
+  "temas": [
+    {
+      "clave": "sobrio",
+      "nombre": "Sobrio",
+      "colores": {
+        "marca": "#000000",
+        "marca_oscuro": "#000000",
+        "acento": "#000000",
+        "acento_oscuro": "#000000",
+        "suave": "#FFFFFF",
+        "borde": "#808080",
+        "cebra": "#FFFFFF",
+        "titulos": ["#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000"],
+        "subpresupuesto": "#000000"
+      },
+      "tipografia": {"familia": "Times New Roman", "sustituta": "Liberation Serif", "escala": 90},
+      "margenes": {"superior": 15, "inferior": 18, "izquierdo": 25, "derecho": 15},
+      "bordes": "finos",
+      "encabezado": {"mostrar": true, "derecha2": ""},
+      "pie": {"mostrar": true, "linea": true, "izquierda": "{empresa}", "centro": "", "derecha": "{pagina}/{paginas}"}
+    }
+  ]
+}

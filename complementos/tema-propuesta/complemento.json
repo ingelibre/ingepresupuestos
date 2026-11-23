@@ -1,0 +1,43 @@
+{
+  "esquema": 1,
+  "id": "tema-propuesta",
+  "nombre": "Tema Propuesta",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Para entregar a un cliente: azul, título «Propuesta económica», la unidad después de la cantidad y dos firmas al final del presupuesto.",
+  "temas": [
+    {
+      "clave": "propuesta",
+      "nombre": "Propuesta",
+      "colores": {
+        "marca": "#0D52BF",
+        "marca_oscuro": "#082A66",
+        "acento": "#0D52BF",
+        "acento_oscuro": "#082A66",
+        "suave": "#EAF1FB",
+        "borde": "#C9D8EE",
+        "cebra": "#FFFFFF",
+        "titulos": ["#082A66", "#0D52BF", "#1E6FD9", "#3B82C4"],
+        "subpresupuesto": "#082A66"
+      },
+      "bordes": "finos",
+      "encabezado": {"titulo": "{titulo}", "linea": "{proyecto}", "derecha": "{fecha}", "derecha2": "{ubicacion}"},
+      "pie": {"izquierda": "Cliente: {cliente}", "centro": "{empresa}", "derecha": "Página {pagina} de {paginas}"},
+      "nombres": {"presupuesto": "Propuesta económica", "presupuesto_cerrado": "Propuesta económica"},
+      "columnas": {
+        "presupuesto": [
+          {"campo": "descripcion", "titulo": "Concepto"},
+          {"campo": "cantidad"},
+          {"campo": "unidad"},
+          {"campo": "precio", "titulo": "P. unitario"},
+          {"campo": "parcial", "titulo": "Importe"}
+        ]
+      },
+      "firmas": [
+        {"nombre": "", "cargo": "Elaborado por"},
+        {"nombre": "", "cargo": "Aceptado por el cliente"}
+      ]
+    }
+  ]
+}

@@ -770,6 +770,8 @@ def init_db():
         ('total_nombre',  "ALTER TABLE proyectos ADD COLUMN total_nombre TEXT DEFAULT ''"),
         # Gantt: títulos contraídos en pantalla, ids separados por comas (#33).
         ('gantt_plegado', "ALTER TABLE proyectos ADD COLUMN gantt_plegado TEXT DEFAULT ''"),
+        # Tema de los reportes: '' = el de todos los proyectos, '-' = de fábrica.
+        ('tema_reporte', "ALTER TABLE proyectos ADD COLUMN tema_reporte TEXT DEFAULT ''"),
         # Hash del código de recuperación de la cuenta (issue #32).
         ('usr_recuperacion', "ALTER TABLE usuarios ADD COLUMN recuperacion_hash TEXT DEFAULT ''"),
         # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,

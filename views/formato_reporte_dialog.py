@@ -60,7 +60,7 @@ class FormatoReporteDialog(QDialog):
         self._dimensionar()
         self.setStyleSheet(f"QDialog {{ background:{SILVER_100}; }}")
 
-        self._formato = pdf_reports.get_formato()
+        self._formato = pdf_reports.formato_propio()
         self._build_ui()
         self._load_values()
 

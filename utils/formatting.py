@@ -265,6 +265,24 @@ def partir_item(item, sep: str = "\n", max_tramos: int = ITEM_TRAMOS_POR_LINEA) 
 _moneda_doc: '_ContextVar[str]' = _ContextVar('moneda_del_documento', default='')
 
 
+#: Proyecto del documento en curso: su tema de reportes (`core.temas`).
+_proyecto_doc: '_ContextVar[int | None]' = _ContextVar('proyecto_del_documento',
+                                                       default=None)
+
+
+@_contextmanager
+def proyecto_documento(pid):
+    ficha = _proyecto_doc.set(pid)
+    try:
+        yield
+    finally:
+        _proyecto_doc.reset(ficha)
+
+
+def proyecto_en_curso() -> 'int | None':
+    return _proyecto_doc.get()
+
+
 @_contextmanager
 def moneda_documento(moneda: str):
     ficha = _moneda_doc.set(moneda or '')
@@ -310,16 +328,39 @@ def con_moneda_del_proyecto(fn):
 
     @_functools.wraps(fn)
     def envoltura(*a, **k):
+        pid = None
         try:
             args = firma.bind_partial(*a, **k).arguments
+            pid = _pid_de_args(args)
             moneda = _moneda_de_args(args)
         except Exception:
             moneda = None            # sin proyecto a la vista: lo que haya
-        if moneda is None:
-            return fn(*a, **k)
-        with moneda_documento(moneda):
-            return fn(*a, **k)
+        with proyecto_documento(pid if pid is not None else _proyecto_doc.get()):
+            if moneda is None:
+                return fn(*a, **k)
+            with moneda_documento(moneda):
+                return fn(*a, **k)
     return envoltura
+
+
+def _pid_de_args(args: dict) -> 'int | None':
+    proy = args.get('proy')
+    if proy is not None and 'id' in proy.keys():
+        return proy['id']
+    for nombre in ('pid', 'proyecto_id'):
+        if args.get(nombre) is not None:
+            return args[nombre]
+    for nombre, tabla in (('val_id', 'valorizaciones'), ('req_id', 'requerimientos')):
+        if args.get(nombre) is not None:
+            from core.database import get_db
+            conn = get_db()
+            try:
+                f = conn.execute(f"SELECT proyecto_id FROM {tabla} WHERE id=?",
+                                 (args[nombre],)).fetchone()
+            finally:
+                conn.close()
+            return f[0] if f else None
+    return None
 
 
 def _moneda_de_args(args: dict) -> 'str | None':

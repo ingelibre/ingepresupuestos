@@ -293,11 +293,165 @@ def _indice(v: _V, x, d):
             'valores': valores_indice(v, x.get('valores', []), f"{d}.valores")}
 
 
+_RE_HEX = re.compile(r'#[0-9A-Fa-f]{6}\Z')
+_RE_IMAGEN = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,60}\.(png|jpe?g)\Z', re.I)
+MAX_IMAGEN, MAX_LADO = 1_000_000, 4000
+
+
+def tipo_imagen(b: bytes) -> str | None:
+    """'png' | 'jpg' mirando el CONTENIDO, con sus topes; None si no vale."""
+    if not b or len(b) > MAX_IMAGEN:
+        return None
+    if b[:8] == b'\x89PNG\r\n\x1a\n' and b[12:16] == b'IHDR' and len(b) > 24:
+        w, h = int.from_bytes(b[16:20], 'big'), int.from_bytes(b[20:24], 'big')
+        return 'png' if 0 < w <= MAX_LADO and 0 < h <= MAX_LADO else None
+    if b[:3] == b'\xff\xd8\xff':
+        i = 2
+        while i + 9 < len(b) and b[i] == 0xFF:
+            m, largo = b[i + 1], int.from_bytes(b[i + 2:i + 4], 'big')
+            if 0xC0 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
+                h = int.from_bytes(b[i + 5:i + 7], 'big')
+                w = int.from_bytes(b[i + 7:i + 9], 'big')
+                return 'jpg' if 0 < w <= MAX_LADO and 0 < h <= MAX_LADO else None
+            if largo < 2:
+                return None
+            i += 2 + largo
+    return None
+
+
+def _plantilla(v: _V, x, d, maximo=200):
+    from core.temas import MARCADORES
+    t = v.texto(x, d, maximo, vacio=True)
+    m = marcadores(t)
+    if m is None or {c for c, _s, _v in m} - set(MARCADORES) \
+            or any(s or c for _n, s, c in m):
+        v.mal(d, "solo admite: " + " ".join('{%s}' % k for k in MARCADORES))
+    return t
+
+
+def _color(v: _V, x, d):
+    if not isinstance(x, str) or not _RE_HEX.match(x):
+        v.mal(d, "debe ser un color #RRGGBB")
+        return '#000000'
+    return x
+
+
+def _familia(v: _V, x, d):
+    t = v.texto(x, d, 60)
+    if not re.fullmatch(r"[\w .&+-]+", t or '-'):
+        v.mal(d, "nombre de tipografía no admitido")
+    return t
+
+
+def _tema(v: _V, x, d):
+    """Se devuelve con la MISMA forma que se escribe: un tema se vuelve a
+    guardar y a exportar."""
+    from core import temas
+    secciones = ('colores', 'tipografia', 'margenes', 'encabezado', 'pie', 'logo',
+                 'bordes', 'nombres', 'columnas', 'firmas')
+    x = v.obj(x, d, dict.fromkeys(('clave', 'nombre', *secciones)),
+              ('clave', 'nombre'))
+    clave = x.get('clave', 'x')
+    if not isinstance(clave, str) or not _RE_CLAVE.match(clave):
+        v.mal(f"{d}.clave", "letras, números, «-» y «_» (hasta 24)")
+        clave = 'x'
+    out = {'clave': clave, 'nombre': v.texto(x.get('nombre', '-'), f"{d}.nombre", 60)}
+
+    def sub(nombre, campos):
+        """{campo: validador} → dict validado con solo lo que venga."""
+        if nombre not in x:
+            return
+        s = v.obj(x[nombre], f"{d}.{nombre}", campos)
+        out[nombre] = {k: campos[k](v, val, f"{d}.{nombre}.{k}")
+                       for k, val in s.items()}
+
+    def titulos(v, t, dd):
+        return [_color(v, c, f"{dd}[{i}]")
+                for i, c in enumerate(v.lista(t, dd, 9, 1))]
+
+    def escala(v, n, dd):
+        if type(n) is not int or n not in (100, 90, 80, 75):
+            v.mal(dd, "debe ser 100, 90, 80 o 75")
+            return 100
+        return n
+
+    def margen(v, n, dd):
+        return v.num(n, dd, 5, 40)
+
+    def logico(v, b, dd):
+        return v.logico(b, dd)
+
+    def imagen(v, n, dd):
+        if not isinstance(n, str) or not _RE_IMAGEN.match(n):
+            v.mal(dd, "un .png o .jpg en la raíz del paquete")
+            return 'logo.png'
+        return n
+
+    def tam_logo(v, n, dd):
+        return int(v.num(n, dd, 50, 200))
+    sub('colores', {**dict.fromkeys(('marca', 'marca_oscuro', 'acento',
+                                     'acento_oscuro', 'suave', 'borde', 'cebra',
+                                     'subpresupuesto'), _color),
+                    'titulos': titulos})
+    sub('tipografia', {'familia': _familia, 'sustituta': _familia, 'escala': escala})
+    sub('margenes', dict.fromkeys(('superior', 'inferior', 'izquierdo', 'derecho'),
+                                  margen))
+    sub('encabezado', {'mostrar': logico,
+                       **dict.fromkeys(('subtitulo', 'titulo', 'linea', 'derecha',
+                                        'derecha2'), _plantilla)})
+    sub('pie', {'mostrar': logico, 'linea': logico,
+                **dict.fromkeys(('izquierda', 'centro', 'derecha'), _plantilla)})
+    sub('logo', {'archivo': imagen, 'escala': tam_logo})
+    if 'bordes' in x:
+        out['bordes'] = v.de(x['bordes'], f"{d}.bordes", tuple(temas.BORDES))
+    if 'nombres' in x:
+        from core.pdf_reports import REPORT_TYPES
+        sub('nombres', dict.fromkeys((t[0] for t in REPORT_TYPES if t[0] != 'completo'),
+                                     lambda v, t, dd: v.texto(t, dd, 80)))
+    if 'columnas' in x:
+        out['columnas'] = {}
+        s = v.obj(x['columnas'], f"{d}.columnas", dict.fromkeys(temas.COLUMNAS))
+        for rep, cols in s.items():
+            dr, lista, vistos = f"{d}.columnas.{rep}", [], set()
+            for i, c in enumerate(v.lista(cols, dr, 8, 1)):
+                dc = f"{dr}[{i}]"
+                c = v.obj(c, dc, dict.fromkeys(('campo', 'titulo', 'ancho')),
+                          ('campo',))
+                n = {'campo': v.de(c.get('campo', 'descripcion'), f"{dc}.campo",
+                                   tuple(temas.COLUMNAS[rep]))}
+                if n['campo'] in vistos:
+                    v.mal(f"{dc}.campo", "repetido")
+                vistos.add(n['campo'])
+                if 'titulo' in c:
+                    n['titulo'] = v.texto(c['titulo'], f"{dc}.titulo", 30)
+                if 'ancho' in c:
+                    n['ancho'] = v.num(c['ancho'], f"{dc}.ancho", 20, 300)
+                lista.append(n)
+            if 'descripcion' not in vistos:
+                v.mal(dr, "falta «descripcion»")
+            campos = [c['campo'] for c in lista]
+            if 'parcial' in campos and 'descripcion' in campos and \
+                    campos.index('parcial') < campos.index('descripcion'):
+                v.mal(dr, "«parcial» va después de «descripcion»")
+            if rep == 'presupuesto' and lista and lista[0]['campo'] != 'descripcion':
+                v.mal(dr, "«descripcion» (con el ítem) va primero")
+            out['columnas'][rep] = lista
+    if 'firmas' in x:
+        out['firmas'] = []
+        for i, f in enumerate(v.lista(x['firmas'], f"{d}.firmas", 4)):
+            df = f"{d}.firmas[{i}]"
+            f = v.obj(f, df, dict.fromkeys(('nombre', 'cargo')))
+            out['firmas'].append({k: v.texto(f.get(k, ''), f"{df}.{k}", 80, vacio=True)
+                                  for k in ('nombre', 'cargo')})
+    return out
+
+
 _LISTAS = {
     'paises': (_pais, 30, 'iso'), 'monedas': (_moneda, 30, 'nombre'),
     'vocabulario': (_vocabulario, 10, None),
     'importadores_excel': (_excel, 20, 'nombre'),
     'indices': (_indice, 50, 'clave'),
+    'temas': (_tema, 10, 'clave'),
 }
 _CAMPOS = ('esquema', 'id', 'nombre', 'version', 'autor', 'licencia',
            'descripcion', 'web', 'api_version', 'codigo', 'titulos', 'unidades',

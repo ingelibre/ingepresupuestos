@@ -70,7 +70,7 @@ def _html(doc: api.Documento, moneda: api.Moneda) -> str:
                        + (f"<b>{t}</b>" if b.negrita else t) + "</p>")
         elif isinstance(b, api.Campos):
             out.append('<table class="meta-info">' + "".join(
-                f'<tr><td class="k">{escape(str(k))}</td>'
+                f'<tr><td class="k" width="150">{escape(str(k))}</td>'
                 f'<td class="v">{escape(str(v))}</td></tr>'
                 for k, v in b.pares) + '</table>')
         elif isinstance(b, api.SaltoPagina):

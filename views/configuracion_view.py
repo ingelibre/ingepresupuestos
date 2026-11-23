@@ -62,10 +62,10 @@ _BTN_SAVE = BTN_PRIMARY_SS  # alias retro-compatible
 
 def _fmt_rep() -> dict:
     """Formato de reportes (claves `rep_*`) — fuente única de los datos de
-    empresa. `get_formato` cae a las claves antiguas `empresa_*` si la `rep_*`
+    empresa. `formato_propio` cae a las claves antiguas `empresa_*` si la `rep_*`
     está vacía, así que no se pierde lo ya configurado."""
     from core import pdf_reports
-    return pdf_reports.get_formato()
+    return pdf_reports.formato_propio()
 
 
 def _set_logo_rep(b64: str):
@@ -73,7 +73,7 @@ def _set_logo_rep(b64: str):
     «Guardar»): es lo que hacía la versión anterior con su clave propia y
     mantener ese comportamiento evita sorpresas."""
     from core import pdf_reports
-    fmt = pdf_reports.get_formato()
+    fmt = pdf_reports.formato_propio()
     fmt['rep_logo_b64'] = b64 or ''
     pdf_reports.set_formato(fmt)
 
@@ -561,7 +561,7 @@ class ConfiguracionView(QWidget):
         de los reportes. Ahora edita exactamente lo mismo que «Editar
         formato»."""
         from core import pdf_reports
-        fmt = pdf_reports.get_formato()
+        fmt = pdf_reports.formato_propio()
         fmt['rep_empresa_nombre']    = self._inp_emp_nombre.text().strip()
         fmt['rep_empresa_ruc']       = self._inp_emp_ruc.text().strip()
         fmt['rep_empresa_direccion'] = self._inp_emp_direccion.text().strip()

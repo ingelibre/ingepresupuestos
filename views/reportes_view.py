@@ -12,6 +12,8 @@ Layout:
 """
 from __future__ import annotations
 
+import functools
+
 import os
 import tempfile
 from pathlib import Path
@@ -344,6 +346,17 @@ class _CardsPanel(QWidget):
         self.orden_cambiado.emit([c.codigo for c in cards])
 
 
+def _del_proyecto(metodo):
+    """Lo que se genere dentro sale con el tema de este proyecto (también el
+    Gantt y la Curva S, que no pasan por los generadores decorados)."""
+    @functools.wraps(metodo)
+    def envoltura(self, *a, **k):
+        from utils.formatting import proyecto_documento
+        with proyecto_documento(self.pid):
+            return metodo(self, *a, **k)
+    return envoltura
+
+
 class _PdfWorker(QThread):
     finished_ok = Signal(str)        # path al PDF temporal
     failed      = Signal(str)        # mensaje de error
@@ -411,6 +424,7 @@ class ReportesView(QWidget):
             # Creada sin auto-selección (por Ctrl+P) y ahora se abre de verdad.
             self._on_card_clicked(pdf_reports.REPORT_TYPES[0][0])
 
+    @_del_proyecto
     def generar_pdf_sincrono(self, tipo: str, *, rapido: bool = True,
                              progress=None) -> Optional[str]:
         """El MISMO PDF que la vista previa de este Centro para `tipo`, con
@@ -849,6 +863,24 @@ class ReportesView(QWidget):
         btn_fmt.clicked.connect(self._abrir_editor_formato)
         hl.addWidget(btn_fmt)
 
+        # Tema de los reportes (complementos de aspecto)
+        from PySide6.QtWidgets import QMenu
+        self._btn_tema = QPushButton(tr("Tema"))
+        self._btn_tema.setCursor(Qt.PointingHandCursor)
+        self._btn_tema.setFixedHeight(38)
+        self._btn_tema.setStyleSheet(btn_fmt.styleSheet())
+        menu_tema = QMenu(self._btn_tema)
+        menu_tema.setToolTipsVisible(True)
+        menu_tema.aboutToShow.connect(self._llenar_menu_tema)
+        self._btn_tema.setMenu(menu_tema)
+        hl.addWidget(self._btn_tema)
+        self._lbl_tema = QLabel()
+        self._lbl_tema.setWordWrap(True)
+        self._lbl_tema.setTextFormat(Qt.PlainText)
+        self._lbl_tema.setStyleSheet(f"color:{ORANGE_DARK}; font-size:11px;")
+        hl.addWidget(self._lbl_tema)
+        self._avisar_tema()
+
         hl.addStretch(1)
 
         def mk(text: str, primary: bool, handler):
@@ -927,6 +959,25 @@ class ReportesView(QWidget):
         if dlg.exec() == FormatoReporteDialog.Accepted:
             # Regenerar la vista previa con el nuevo formato
             self._regenerar_preview()
+
+    def _llenar_menu_tema(self):
+        from utils.auth import usuario_actual
+        from views.temas_ui import llenar_menu
+        llenar_menu(self._btn_tema.menu(), self, self.pid, self._tema_cambiado,
+                    invitado=getattr(usuario_actual(), 'es_invitado', False))
+
+    def _tema_cambiado(self):
+        self._avisar_tema()
+        self._regenerar_preview()
+
+    def _avisar_tema(self):
+        from views.temas_ui import texto_aviso
+        try:
+            texto = texto_aviso(self.pid)
+        except Exception:
+            texto = ''
+        self._lbl_tema.setText(texto)
+        self._lbl_tema.setVisible(bool(texto))
 
     # ─── Lógica ──────────────────────────────────────────────────────────────
 
@@ -1069,6 +1120,7 @@ class ReportesView(QWidget):
             self._progress.setValue(max(0, min(100, int(frac * 100))))
         QApplication.processEvents()
 
+    @_del_proyecto
     def _regenerar_preview(self):
         if not self._tipo_actual:
             return
@@ -1152,6 +1204,7 @@ class ReportesView(QWidget):
         self._worker.failed.connect(self._on_pdf_falla)
         self._worker.start()
 
+    @_del_proyecto
     def _render_gantt_rich_pdf(self) -> Optional[str]:
         """Renderiza el Gantt usando el pipeline rico de CronogramaView
         (con barras gráficas redondeadas, flechas tipadas, hitos coloreados,
@@ -1639,6 +1692,7 @@ class ReportesView(QWidget):
             QMessageBox.critical(self, tr("Reportes"),
                 tr("No se pudo exportar a PNG:\n{e}").format(e=e))
 
+    @_del_proyecto
     def _guardar_excel(self):
         if not self._tipo_actual:
             return
@@ -1688,6 +1742,7 @@ class ReportesView(QWidget):
             traceback.print_exc()
             QMessageBox.critical(self, tr("Reportes"), tr("No se pudo exportar a Excel:\n{e}").format(e=e))
 
+    @_del_proyecto
     def _guardar_word(self):
         if not self._tipo_actual:
             return
@@ -1722,6 +1777,7 @@ class ReportesView(QWidget):
             QMessageBox.critical(self, tr("Reportes"),
                 tr("No se pudo exportar a Word:\n{e}").format(e=e))
 
+    @_del_proyecto
     def _guardar_odt(self):
         if not self._tipo_actual:
             return
@@ -1784,6 +1840,7 @@ class ReportesView(QWidget):
             QMessageBox.critical(self, tr("Reportes"),
                 tr("No se pudo exportar a ODT:\n{e}").format(e=e))
 
+    @_del_proyecto
     def _guardar_ods(self):
         if not self._tipo_actual:
             return
@@ -1935,6 +1992,7 @@ class ReportesView(QWidget):
             painter.end()
         return tmp.name
 
+    @_del_proyecto
     def _render_completo_merged_pdf(self, progress=None, rapido: bool = False) -> Optional[str]:
         """Genera el Reporte Completo como merge de varios PDFs:
         - Núcleo HTML A4 portrait (memoria → resumen → presupuesto → ACU →
@@ -2268,6 +2326,7 @@ class ReportesView(QWidget):
         self._save_dir(os.path.join(d, "_"))
         return d
 
+    @_del_proyecto
     def _guardar_pack_office(self):
         """Descarga todos los archivos editables Office (Word/Excel/MPP) en
         una carpeta. Reporta al final qué se generó y qué falló."""
@@ -2356,6 +2415,7 @@ class ReportesView(QWidget):
                 if any(o.startswith('gantt') for o in ok) else None)
         self._mostrar_pack_resultado("Pack Office", carpeta, ok, fallos, nota=nota)
 
+    @_del_proyecto
     def _guardar_pack_libre(self):
         """Descarga todos los archivos editables LibreOffice (ODT/ODS).
         Convierte vía LibreOffice headless."""

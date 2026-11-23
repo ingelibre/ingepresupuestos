@@ -30,6 +30,7 @@ _SECCIONES = {
     'vocabulario': N_("Vocabulario"),
     'importadores_excel': N_("Formatos de Excel"), 'indices': N_("Índices"),
     'titulos': N_("Títulos"), 'unidades': N_("Unidades"),
+    'temas': N_("Temas de reportes"),
 }
 
 

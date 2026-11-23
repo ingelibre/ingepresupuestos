@@ -127,6 +127,13 @@ def _armar(archivos: dict) -> Paquete:
             raise ErrorPaquete(f"{r}: hay código, pero {esquema.ARCHIVO} no "
                                "declara «codigo»")
         raise ErrorPaquete(f"{r}: tipo de archivo no admitido")
+    for t in m['temas']:
+        a = (t.get('logo') or {}).get('archivo')
+        if a and a not in archivos:
+            raise ErrorPaquete(f"tema «{t['nombre']}»: falta el archivo {a}")
+        if a and esquema.tipo_imagen(archivos[a]) is None:
+            raise ErrorPaquete(f"{a}: el logo debe ser PNG o JPG, de hasta 1 MB "
+                               "y 4000 px de lado")
     if m['codigo'] and m['codigo'] not in archivos:
         raise ErrorPaquete(f"falta el archivo de código {m['codigo']}")
     return Paquete(m, dict(archivos), huella(archivos))
