@@ -201,7 +201,7 @@ ACU_SECTION = {
 _NEUTRAL_BG = QColor('#F0F2F5')   # fondo neutro para celdas no editables
 
 def _cols_acu():
-    return [tr("Tipo"), tr("Descripción"), "Und.", tr("Cuadrilla"), tr("Cantidad"), tr("Precio"), tr("Parcial"), "INEI"]
+    return [tr("Tipo"), tr("Descripción"), tr("Und."), tr("Cuadrilla"), tr("Cantidad"), tr("Precio"), tr("Parcial"), "INEI"]
 COLS_ACU  = ["Tipo", "Descripción", "Und.", "Cuadrilla", "Cantidad", "Precio", "Parcial", "INEI"]
 
 
@@ -921,14 +921,14 @@ class _InputCellDelegate(QStyledItemDelegate):
 
 
 def _cols_ppto():
-    return [tr("Ítem"), tr("Descripción"), "Und.", tr("Cantidad"), "P.U.", tr("Parcial")]
+    return [tr("Ítem"), tr("Descripción"), tr("Und."), tr("Cantidad"), tr("P.U."), tr("Parcial")]
 def _cols_ins():
-    return [tr("Tipo"), tr("Descripción"), "Und.", tr("Cantidad"), tr("Precio"), tr("Parcial"), "INEI"]
+    return [tr("Tipo"), tr("Descripción"), tr("Und."), tr("Cantidad"), tr("Precio"), tr("Parcial"), "INEI"]
 def _cols_met():
-    return [tr("Descripción"), "N°Est.", "N°Elem.", tr("Área"), tr("Largo"), tr("Ancho"), tr("Alto"), tr("Parcial")]
+    return [tr("Descripción"), tr("N°Est."), tr("N°Elem."), tr("Área"), tr("Largo"), tr("Ancho"), tr("Alto"), tr("Parcial")]
 def _cols_acero():
-    return ["#", tr("Descripción"), tr("Diámetro"), "N°Estr.", "N°Elem.", "N°Var.",
-            tr("Longitud"), "Parc.(m)", "kg/ml", "Parc.(kg)", ""]
+    return ["#", tr("Descripción"), tr("Diámetro"), tr("N°Estr."), tr("N°Elem."), tr("N°Var."),
+            tr("Longitud"), tr("Parc.(m)"), "kg/ml", tr("Parc.(kg)"), ""]
 COLS_PPTO = ["Ítem", "Descripción", "Unid.", "Metrado", "P.U.", "Parcial"]
 COLS_INS  = ["Tipo", "Descripción", "Und.", "Cantidad", "Precio U.", "Parcial", "INEI"]
 # Columna del índice INEI del insumo, al final de ACU e Insumos (David Ramos,
@@ -947,8 +947,8 @@ def _celda_inei(recurso: dict) -> QTableWidgetItem:
     it = QTableWidgetItem(cod)
     it.setTextAlignment(Qt.AlignCenter)
     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-    it.setToolTip(f"Índice INEI {cod}" if cod
-                  else "Sin índice INEI — se asigna en el Catálogo de insumos")
+    it.setToolTip(tr("Índice INEI {cod}").format(cod=cod) if cod
+                  else tr("Sin índice INEI — se asigna en el Catálogo de insumos"))
     return it
 COLS_MET   = ["Descripción", "N°Est.", "N°Elem.", "Área", "Largo", "Ancho", "Alto", "Parcial"]
 COLS_ACERO = ["#", "Descripción", "Diámetro", "N°Estr.", "N°Elem.", "N°Var.",

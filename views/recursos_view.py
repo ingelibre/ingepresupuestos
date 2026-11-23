@@ -28,7 +28,7 @@ from utils.formatting import fmt, parse_num, moneda_defecto
 from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
-from utils.i18n import tr
+from utils.i18n import N_, tr
 from views.unidades_dialog import poner_lista
 
 
@@ -47,10 +47,10 @@ RED_500    = C.error
 TIPO_FONDO = {'MO': C.mo_bg, 'MAT': C.mat_bg, 'EQ': C.eq_bg, 'SC': C.sc_bg}
 TIPO_TEXTO = {'MO': C.mo_fg, 'MAT': C.mat_fg, 'EQ': C.eq_fg, 'SC': C.sc_fg}
 TIPO_LARGO = {
-    'MO': 'Mano de Obra',
-    'MAT': 'Material',
-    'EQ': 'Equipo / Herram.',
-    'SC': 'Sub-contrato / Servicio',
+    'MO': N_('Mano de Obra'),
+    'MAT': N_('Material'),
+    'EQ': N_('Equipo / Herram.'),
+    'SC': N_('Sub-contrato / Servicio'),
 }
 
 
@@ -115,7 +115,7 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         super().__init__(parent)
         self.recurso = recurso or {}
         self.es_edicion = bool(recurso and recurso.get('id'))
-        self.setWindowTitle("Editar insumo" if self.es_edicion else "Nuevo insumo")
+        self.setWindowTitle(tr("Editar insumo") if self.es_edicion else tr("Nuevo insumo"))
         self.setMinimumWidth(480)
         self._build()
         if self.es_edicion:
@@ -139,7 +139,7 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         ico_h = QLabel()
         ico_h.setPixmap(icon("editar" if self.es_edicion else "add").pixmap(20, 20))
         hl.addWidget(ico_h)
-        hl.addWidget(QLabel("Editar insumo" if self.es_edicion else "Nuevo insumo"))
+        hl.addWidget(QLabel(tr("Editar insumo") if self.es_edicion else tr("Nuevo insumo")))
         v.addWidget(head)
 
         form = QFormLayout()
@@ -150,22 +150,22 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         # Tipo
         self.cmb_tipo = QComboBox()
         for t in TIPOS_RECURSO:
-            self.cmb_tipo.addItem(f"{t} — {TIPO_LARGO[t]}", t)
+            self.cmb_tipo.addItem(f"{t} — {tr(TIPO_LARGO[t])}", t)
         self.cmb_tipo.currentIndexChanged.connect(self._on_tipo_change)
-        form.addRow("Tipo *:", self.cmb_tipo)
+        form.addRow(tr("Tipo *:"), self.cmb_tipo)
 
         # Índice INEI
         self.cmb_inei = QComboBox()
         self.cmb_inei.setEditable(True)
-        self.cmb_inei.addItem("— Seleccione índice INEI —", "")
+        self.cmb_inei.addItem(tr("— Seleccione índice INEI —"), "")
         for cod, desc in catalogo_inei():
             self.cmb_inei.addItem(f"{cod} — {desc}", cod)
-        self.cmb_inei.addItem("Otro (ingresar manualmente)", "OTRO")
+        self.cmb_inei.addItem(tr("Otro (ingresar manualmente)"), "OTRO")
         self.cmb_inei.currentIndexChanged.connect(self._on_inei_change)
-        form.addRow("Índice INEI *:", self.cmb_inei)
+        form.addRow(tr("Índice INEI *:"), self.cmb_inei)
 
         self.inp_inei_libre = QLineEdit()
-        self.inp_inei_libre.setPlaceholderText("Código de 2 dígitos, ej: 15")
+        self.inp_inei_libre.setPlaceholderText(tr("Código de 2 dígitos, ej: 15"))
         self.inp_inei_libre.setMaxLength(2)
         self.inp_inei_libre.setVisible(False)
         self.inp_inei_libre.textChanged.connect(self._auto_codigo)
@@ -177,10 +177,10 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         cod_row.setSpacing(6)
         self.inp_codigo = QLineEdit()
         self.inp_codigo.setMaxLength(7)
-        self.inp_codigo.setPlaceholderText("Se genera al elegir el índice")
+        self.inp_codigo.setPlaceholderText(tr("Se genera al elegir el índice"))
         self.inp_codigo.setReadOnly(True)
         self._codigo_lock_style(True)
-        self.btn_codigo_manual = QPushButton("Editar")
+        self.btn_codigo_manual = QPushButton(tr("Editar"))
         # Ancho al contenido y alto del campo de al lado: con 56 px fijos el
         # texto salía cortado («dita») y el botón sobresalía 8 px por abajo.
         self.btn_codigo_manual.setMinimumWidth(72)
@@ -190,31 +190,31 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         self.btn_codigo_manual.setStyleSheet(
             "QPushButton { min-height:19px; padding:3px 12px; }")
         self.btn_codigo_manual.setCursor(Qt.PointingHandCursor)
-        self.btn_codigo_manual.setToolTip("Editar manualmente")
+        self.btn_codigo_manual.setToolTip(tr("Editar manualmente"))
         self.btn_codigo_manual.clicked.connect(self._toggle_codigo_manual)
         cod_row.addWidget(self.inp_codigo, 1)
         cod_row.addWidget(self.btn_codigo_manual)
         wcod = QWidget()
         wcod.setLayout(cod_row)
-        form.addRow("Código:", wcod)
+        form.addRow(tr("Código:"), wcod)
         self._codigo_manual = False
 
         # Descripción
         self.inp_desc = QLineEdit()
-        self.inp_desc.setPlaceholderText("Descripción del insumo")
-        form.addRow("Descripción *:", self.inp_desc)
+        self.inp_desc.setPlaceholderText(tr("Descripción del insumo"))
+        form.addRow(tr("Descripción *:"), self.inp_desc)
 
         # Unidad
         self.inp_unidad = QLineEdit()
         self.inp_unidad.setPlaceholderText("hh · m³ · kg · glb …")
         poner_lista(self.inp_unidad)
         self.inp_unidad.textEdited.connect(self._auto_superindice_unidad)
-        form.addRow("Unidad:", self.inp_unidad)
+        form.addRow(tr("Unidad:"), self.inp_unidad)
 
         # Precio
         self.inp_precio = QLineEdit("0.00")
         self.inp_precio.setMaximumWidth(140)
-        form.addRow("Precio:", self.inp_precio)
+        form.addRow(tr("Precio:"), self.inp_precio)
 
         v.addLayout(form)
 
@@ -226,7 +226,7 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         # Botones
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.button(QDialogButtonBox.Ok).setText(
-            "Guardar cambios" if self.es_edicion else "Crear insumo"
+            tr("Guardar cambios") if self.es_edicion else tr("Crear insumo")
         )
         btns.accepted.connect(self._aceptar)
         btns.rejected.connect(self.reject)
@@ -249,9 +249,9 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         self._codigo_manual = not self._codigo_manual
         self.inp_codigo.setReadOnly(not self._codigo_manual)
         self._codigo_lock_style(not self._codigo_manual)
-        self.btn_codigo_manual.setText("Auto" if self._codigo_manual else "Editar")
+        self.btn_codigo_manual.setText(tr("Auto") if self._codigo_manual else tr("Editar"))
         self.btn_codigo_manual.setToolTip(
-            "Volver a auto-generado" if self._codigo_manual else "Editar manualmente"
+            tr("Volver a auto-generado") if self._codigo_manual else tr("Editar manualmente")
         )
 
     def _on_tipo_change(self):
@@ -319,13 +319,13 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
     def _aceptar(self):
         desc = self.inp_desc.text().strip()
         if not desc:
-            self.lbl_err.setText("La descripción es obligatoria.")
+            self.lbl_err.setText(tr("La descripción es obligatoria."))
             self.inp_desc.setFocus()
             return
 
         inei = self._inei_actual()
         if not (len(inei) == 2 and inei.isdigit()):
-            self.lbl_err.setText("El Índice INEI es obligatorio (2 dígitos).")
+            self.lbl_err.setText(tr("El Índice INEI es obligatorio (2 dígitos)."))
             self.cmb_inei.setFocus()
             return
 
@@ -377,29 +377,29 @@ class RecursosView(CatalogoTablaMixin, QWidget):
 
     # -- construcción UI -------------------------------------------------------
     def _build(self):
-        layout, top, pie = self._armar_marco_catalogo("paquete", "Catálogo de Insumos", "0 insumos")
+        layout, top, pie = self._armar_marco_catalogo("paquete", tr("Catálogo de Insumos"), tr("{n} insumos").format(n=0))
 
-        self.btn_nuevo = self._mk_btn("Nuevo insumo", primary=True, icon_name="add", on_dark=True)
+        self.btn_nuevo = self._mk_btn(tr("Nuevo insumo"), primary=True, icon_name="add", on_dark=True)
         self.btn_nuevo.clicked.connect(self._nuevo)
         top.addWidget(self.btn_nuevo)
 
         # Menú Importar (Excel / JSON)
         from PySide6.QtWidgets import QMenu as _QMenu
-        self.btn_import = self._mk_btn("Importar ▾", icon_name="importar", on_dark=True)
+        self.btn_import = self._mk_btn(tr("Importar ▾"), icon_name="importar", on_dark=True)
         menu_imp = _QMenu(self.btn_import)
-        a_xlsx_i = menu_imp.addAction(icon("xlsx"), "Desde Excel (.xlsx)")
+        a_xlsx_i = menu_imp.addAction(icon("xlsx"), tr("Desde Excel (.xlsx)"))
         a_xlsx_i.triggered.connect(self._importar_excel)
-        a_json_i = menu_imp.addAction(icon("rep-presupuesto"), "Desde JSON (.json)")
+        a_json_i = menu_imp.addAction(icon("rep-presupuesto"), tr("Desde JSON (.json)"))
         a_json_i.triggered.connect(self._importar_json)
         self.btn_import.setMenu(menu_imp)
         top.addWidget(self.btn_import)
 
         # Menú Exportar (Excel / JSON)
-        self.btn_export = self._mk_btn("Exportar ▾", icon_name="exportar", on_dark=True)
+        self.btn_export = self._mk_btn(tr("Exportar ▾"), icon_name="exportar", on_dark=True)
         menu_exp = _QMenu(self.btn_export)
-        a_xlsx_e = menu_exp.addAction(icon("xlsx"), "A Excel (.xlsx) — vista filtrada")
+        a_xlsx_e = menu_exp.addAction(icon("xlsx"), tr("A Excel (.xlsx) — vista filtrada"))
         a_xlsx_e.triggered.connect(self._exportar_excel)
-        a_json_e = menu_exp.addAction(icon("rep-presupuesto"), "A JSON (.json) — catálogo completo")
+        a_json_e = menu_exp.addAction(icon("rep-presupuesto"), tr("A JSON (.json) — catálogo completo"))
         a_json_e.triggered.connect(self._exportar_json)
         self.btn_export.setMenu(menu_exp)
         top.addWidget(self.btn_export)
@@ -410,13 +410,13 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         top.addWidget(self.btn_unidades)
 
         # ── Tarjetas KPI ──
-        self.kpi_total = self._mk_kpi("Insumos", "0", SLATE_500)
-        self.kpi_mo = self._mk_kpi("Mano de Obra", "0", TIPO_TEXTO['MO'])
-        self.kpi_mat = self._mk_kpi("Materiales", "0", TIPO_TEXTO['MAT'])
-        self.kpi_eq = self._mk_kpi("Equipos", "0", TIPO_TEXTO['EQ'])
-        self.kpi_sc = self._mk_kpi("Sub-contratos", "0", TIPO_TEXTO['SC'])
+        self.kpi_total = self._mk_kpi(tr("Insumos"), "0", SLATE_500)
+        self.kpi_mo = self._mk_kpi(tr("Mano de Obra"), "0", TIPO_TEXTO['MO'])
+        self.kpi_mat = self._mk_kpi(tr("Materiales"), "0", TIPO_TEXTO['MAT'])
+        self.kpi_eq = self._mk_kpi(tr("Equipos"), "0", TIPO_TEXTO['EQ'])
+        self.kpi_sc = self._mk_kpi(tr("Sub-contratos"), "0", TIPO_TEXTO['SC'])
         from utils.theme import accent_color as _acc
-        self.kpi_valor = self._mk_kpi("Valor catálogo", fmt(0, moneda_defecto()), _acc())
+        self.kpi_valor = self._mk_kpi(tr("Valor catálogo"), fmt(0, moneda_defecto()), _acc())
         for k in (self.kpi_total, self.kpi_mo, self.kpi_mat,
                   self.kpi_eq, self.kpi_sc, self.kpi_valor):
             pie.addWidget(k)
@@ -436,7 +436,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         ico_search.setFixedSize(20, 20)
         fl.addWidget(ico_search)
         self.inp_q = QLineEdit()
-        self.inp_q.setPlaceholderText("Buscar por descripción o código…")
+        self.inp_q.setPlaceholderText(tr("Buscar por descripción o código…"))
         self.inp_q.setClearButtonEnabled(True)
         self._timer_q = QTimer(self)
         self._timer_q.setSingleShot(True)
@@ -445,27 +445,27 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         fl.addWidget(self.inp_q, 2)
 
         self.cmb_tipo = QComboBox()
-        self.cmb_tipo.addItem("Todos los tipos", "")
+        self.cmb_tipo.addItem(tr("Todos los tipos"), "")
         for t in TIPOS_RECURSO:
-            self.cmb_tipo.addItem(TIPO_LARGO[t], t)
+            self.cmb_tipo.addItem(tr(TIPO_LARGO[t]), t)
         self.cmb_tipo.currentIndexChanged.connect(self.cargar)
         fl.addWidget(self.cmb_tipo)
 
         self.cmb_inei = QComboBox()
-        self.cmb_inei.addItem("Todos los índices INEI", "")
+        self.cmb_inei.addItem(tr("Todos los índices INEI"), "")
         for cod, desc in catalogo_inei():
             self.cmb_inei.addItem(f"{cod} — {desc}", cod)
         self.cmb_inei.currentIndexChanged.connect(self.cargar)
         fl.addWidget(self.cmb_inei)
 
         self.cmb_uso = QComboBox()
-        self.cmb_uso.addItem("Todos", "")
-        self.cmb_uso.addItem("En uso", "usados")
-        self.cmb_uso.addItem("Sin uso", "no_usados")
+        self.cmb_uso.addItem(tr("Todos"), "")
+        self.cmb_uso.addItem(tr("En uso"), "usados")
+        self.cmb_uso.addItem(tr("Sin uso"), "no_usados")
         self.cmb_uso.currentIndexChanged.connect(self.cargar)
         fl.addWidget(self.cmb_uso)
 
-        self.btn_limpiar = self._mk_btn("Limpiar", icon_name="limpiar")
+        self.btn_limpiar = self._mk_btn(tr("Limpiar"), icon_name="limpiar")
         self.btn_limpiar.clicked.connect(self._limpiar_filtros)
         fl.addWidget(self.btn_limpiar)
 
@@ -474,7 +474,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         # ── Tabla ──
         self.tbl = QTableWidget(0, 7)
         self.tbl.setHorizontalHeaderLabels(
-            ["Código", "Tipo", "Descripción", "Unidad", "Precio", "INEI", "Usos"]
+            [tr("Código"), tr("Tipo"), tr("Descripción"), tr("Unidad"), tr("Precio"), "INEI", tr("Usos")]
         )
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setAlternatingRowColors(True)
@@ -488,7 +488,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.tbl.itemChanged.connect(self._on_item_changed)
         self.tbl.setItemDelegateForColumn(1, _TipoBadgeDelegate(self.tbl))
         # Hint visual: doble clic edita, clic derecho menú
-        self.tbl.setToolTip("Doble clic: editar  ·  Clic derecho: menú  ·  Del: eliminar")
+        self.tbl.setToolTip(tr("Doble clic: editar  ·  Clic derecho: menú  ·  Del: eliminar"))
 
         h = self.tbl.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -649,9 +649,11 @@ class RecursosView(CatalogoTablaMixin, QWidget):
 
         n_filt = len(rows)
         if n_filt == n_total:
-            self.lbl_subt.setText(f"{n_total} insumo{'s' if n_total != 1 else ''}")
+            self.lbl_subt.setText(
+                tr("1 insumo") if n_total == 1 else tr("{n} insumos").format(n=n_total))
         else:
-            self.lbl_subt.setText(f"{n_filt} de {n_total} insumos")
+            self.lbl_subt.setText(
+                tr("{n} de {total} insumos").format(n=n_filt, total=n_total))
 
     # -- helper: obtener rid robusto a sorting --------------------------------
     # -- edición inline del precio --------------------------------------------
@@ -743,18 +745,19 @@ class RecursosView(CatalogoTablaMixin, QWidget):
                 ids
             ).fetchall()
             if usados:
-                detalle = "\n".join(f"  • {u['descripcion']}  ({u['n']} usos)" for u in usados[:5])
-                extra = f"\n  …y {len(usados) - 5} más" if len(usados) > 5 else ""
+                detalle = "\n".join(f"  • {u['descripcion']}  " + tr("({n} usos)").format(n=u['n']) for u in usados[:5])
+                extra = "\n  " + tr("…y {n} más.").format(n=len(usados) - 5) if len(usados) > 5 else ""
                 QMessageBox.warning(
-                    self, "No se puede eliminar",
-                    f"{len(usados)} recurso(s) están en uso por análisis de costos:\n\n"
-                    f"{detalle}{extra}\n\nElimine primero los ítems del ACU."
+                    self, tr("No se puede eliminar"),
+                    tr("{n} recurso(s) están en uso por análisis de costos:\n\n"
+                       "{detalle}\n\nElimine primero los ítems del ACU.").format(
+                           n=len(usados), detalle=detalle + extra)
                 )
                 return
             n = len(ids)
-            msg = (f"¿Eliminar {n} insumos del catálogo?" if n > 1
-                   else "¿Eliminar este insumo del catálogo?")
-            res = QMessageBox.question(self, "Confirmar eliminación", msg,
+            msg = (tr("¿Eliminar {n} insumos del catálogo?").format(n=n) if n > 1
+                   else tr("¿Eliminar este insumo del catálogo?"))
+            res = QMessageBox.question(self, tr("Confirmar eliminación"), msg,
                                        QMessageBox.Yes | QMessageBox.No)
             if res != QMessageBox.Yes:
                 return
