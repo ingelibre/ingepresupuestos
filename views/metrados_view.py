@@ -67,6 +67,39 @@ ACERO_COLS = [N_("Ítem"), N_("Descripción"), N_("Diámetro"), N_("N°Estr."), 
               N_("N°Var."), N_("Longitud"), N_("Parc.(m)"), "kg/ml", N_("Parc.(kg)")]
 
 
+def _acero_de(conn, pid, todas) -> set:
+    """IDs de partidas de acero: las que tienen planilla de acero + las
+    vacías que la heurística reconoce como acero (kg + descripción). Una
+    partida con metrados normales NO se reclasifica."""
+    con_acero = {r['partida_id'] for r in conn.execute(
+        "SELECT DISTINCT partida_id FROM acero_detalle "
+        "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
+        (pid,)).fetchall()}
+    con_met = {r['partida_id'] for r in conn.execute(
+        "SELECT DISTINCT partida_id FROM metrados_detalle "
+        "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
+        (pid,)).fetchall()}
+    ids = set(con_acero)
+    for p in todas:
+        if p['es_titulo'] or p['id'] in con_acero:
+            continue
+        tm = p['id'] in con_met
+        if partida_usa_acero(False, tm, p['metrado_tipo'],
+                             p['descripcion'], p['unidad']):
+            ids.add(p['id'])
+    return ids
+
+
+def acero_de_proyecto(pid: int) -> set:
+    """Las partidas que la Hoja enseña en su pestaña «Acero»."""
+    conn = get_db()
+    try:
+        return _acero_de(conn, pid, conn.execute(
+            "SELECT * FROM partidas_ppto WHERE proyecto_id=?", (pid,)).fetchall())
+    finally:
+        conn.close()
+
+
 class MetradosView(QWidget):
     """Hoja de metrados completa del proyecto (todas las partidas)."""
 
@@ -336,26 +369,7 @@ class MetradosView(QWidget):
             self._cargar_acero()
 
     def _acero_partida_set(self, conn, todas) -> set:
-        """IDs de partidas de acero: las que tienen planilla de acero + las
-        vacías que la heurística reconoce como acero (kg + descripción). Una
-        partida con metrados normales NO se reclasifica."""
-        con_acero = {r['partida_id'] for r in conn.execute(
-            "SELECT DISTINCT partida_id FROM acero_detalle "
-            "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
-            (self.pid,)).fetchall()}
-        con_met = {r['partida_id'] for r in conn.execute(
-            "SELECT DISTINCT partida_id FROM metrados_detalle "
-            "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
-            (self.pid,)).fetchall()}
-        ids = set(con_acero)
-        for p in todas:
-            if p['es_titulo'] or p['id'] in con_acero:
-                continue
-            tm = p['id'] in con_met
-            if partida_usa_acero(False, tm, p['metrado_tipo'],
-                                 p['descripcion'], p['unidad']):
-                ids.add(p['id'])
-        return ids
+        return _acero_de(conn, self.pid, todas)
 
     # ── Pestaña Acero (solo lectura) ─────────────────────────────────────────
     def _build_acero_page(self) -> QWidget:

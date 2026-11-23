@@ -2302,7 +2302,7 @@ class ProyectoView(QWidget):
         _tbtn(f"{_tr('Editar')} ▾", None, menu=self._build_editar_menu())
         _tbtn(f"{_tr('Reportes')} ▾", None, sep_after=True,
               menu=self._build_reportes_menu())
-        _tbtn(_tr("Metrados"),    self._ir_metrados)
+        _tbtn(f"{_tr('Metrados')} ▾", None, menu=self._build_metrados_menu())
         _tbtn(f"{_tr('Cronogramas')} ▾", None, menu=self._build_cronograma_menu())
         _tbtn(f"{_tr('Control de Obra')} ▾", None, menu=self._build_control_obra_menu())
         _tbtn(_tr("Fórmula Polinómica"), self._ir_formula)
@@ -10756,6 +10756,25 @@ class ProyectoView(QWidget):
     # Centro de Reportes — vista anclada (page del root_stack)
     # ══════════════════════════════════════════════════════════════════════════
 
+    def _build_metrados_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        menu.addAction(tr("Hoja de Metrados")).triggered.connect(
+            lambda *_: self._ir_metrados(0))
+        a_ac = menu.addAction(tr("Planilla de acero"))
+        a_ac.triggered.connect(lambda *_: self._ir_metrados(1))
+
+        def _al_abrir():
+            # El mismo criterio con que la Hoja enseña su pestaña «Acero».
+            from views.metrados_view import acero_de_proyecto
+            hay = bool(acero_de_proyecto(self.pid))
+            a_ac.setEnabled(hay)
+            a_ac.setToolTip('' if hay else tr(
+                "Este proyecto no tiene partidas de acero (unidad kg)."))
+        menu.aboutToShow.connect(_al_abrir)
+        return menu
+
     def _build_reportes_menu(self):
         """QMenu del botón "Reportes ▾": el Centro y, de un clic, cada reporte
         ya elegido en él (con su vista previa; aquí no se exporta nada)."""
@@ -11608,7 +11627,7 @@ class ProyectoView(QWidget):
         self._proy = self._cargar_proyecto()
         self._cargar_sub_pptos()
 
-    def _ir_metrados(self):
+    def _ir_metrados(self, pestana: int | None = None):
         # Recrear la Hoja si no existe o si cambió la editabilidad (p.ej. el
         # usuario cambió el estado del proyecto desde el chip).
         ed = self._ed_presupuesto
@@ -11628,7 +11647,14 @@ class ProyectoView(QWidget):
             self._root_stack.addWidget(self._metrados_view)
         idx = self._root_stack.indexOf(self._metrados_view)
         self._root_stack.setCurrentIndex(idx)
-        QTimer.singleShot(0, self._metrados_view.cargar)
+        mv = self._metrados_view
+
+        def _cargar():
+            mv.cargar()
+            if pestana is not None and (
+                    pestana == 0 or mv.btn_tab_acero.isVisibleTo(mv)):
+                mv._select_tab(pestana)
+        QTimer.singleShot(0, mv, _cargar)
 
     def _volver_de_metrados(self):
         """Al volver de la Hoja de Metrados, los metrados editados cambiaron

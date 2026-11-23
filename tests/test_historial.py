@@ -467,3 +467,27 @@ def test_menu_reportes_abre_el_centro_con_el_reporte(vista, monkeypatch):
     assert a_sub.isVisible() == bool(hay)
     compl = next(x for x in m.findChildren(QMenu) if x.title() == 'Complementos')
     assert not compl.menuAction().isVisible()
+
+
+def test_menu_metrados_hoja_y_acero(vista):
+    v = vista
+    m = v._build_metrados_menu()
+    hoja, acero = m.actions()
+    sql("DELETE FROM acero_detalle WHERE partida_id IN (SELECT id FROM partidas"
+        " WHERE proyecto_id=?)", PID)
+    sql("UPDATE partidas SET unidad='und', metrado_tipo=NULL WHERE proyecto_id=?", PID)
+    m.aboutToShow.emit()
+    assert hoja.isEnabled() and not acero.isEnabled()
+    p = partida()
+    sql("DELETE FROM metrados_detalle WHERE partida_id=?", p)
+    sql("UPDATE partidas SET unidad='kg', descripcion='ACERO CORRUGADO FY=4200'"
+        " WHERE id=?", p)
+    m.aboutToShow.emit()
+    assert acero.isEnabled()
+    acero.trigger()
+    girar()
+    assert v._root_stack.currentWidget() is v._metrados_view
+    assert v._metrados_view._content_stack.currentIndex() == 1
+    hoja.trigger()
+    girar()
+    assert v._metrados_view._content_stack.currentIndex() == 0
