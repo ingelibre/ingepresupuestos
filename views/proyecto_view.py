@@ -6569,7 +6569,8 @@ class ProyectoView(QWidget):
             partidas = conn.execute(
                 "SELECT DISTINCT ai.partida_id FROM acu_items ai"
                 " JOIN partidas p ON p.id = ai.partida_id"
-                " WHERE ai.recurso_id=? AND p.proyecto_id=?",
+                " WHERE ai.recurso_id=? AND p.proyecto_id=?"
+                " AND ai.sub_partida_id IS NULL",
                 (recurso_id_viejo, self.pid)
             ).fetchall()
             part_ids = [r['partida_id'] for r in partidas]
@@ -6587,7 +6588,8 @@ class ProyectoView(QWidget):
             colisiones = conn.execute(
                 f"SELECT partida_id, id, cuadrilla, cantidad, precio"
                 f" FROM acu_items"
-                f" WHERE recurso_id=? AND partida_id IN ({placeholders})",
+                f" WHERE recurso_id=? AND sub_partida_id IS NULL"
+                f" AND partida_id IN ({placeholders})",
                 (nuevo_id, *part_ids)
             ).fetchall()
             colision_por_part = {c['partida_id']: c for c in colisiones}
@@ -6597,7 +6599,8 @@ class ProyectoView(QWidget):
             for pid_aff in part_ids:
                 viejo = conn.execute(
                     "SELECT id, cuadrilla, cantidad, precio FROM acu_items"
-                    " WHERE recurso_id=? AND partida_id=?",
+                    " WHERE recurso_id=? AND partida_id=?"
+                    " AND sub_partida_id IS NULL",
                     (recurso_id_viejo, pid_aff)
                 ).fetchone()
                 if not viejo:

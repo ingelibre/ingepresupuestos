@@ -125,6 +125,28 @@ def test_monto_fijo_del_pie_se_ve_y_se_lee_en_su_moneda(uy, conn, monkeypatch): 
                         " tipo='manual'", (pid,)).fetchone()[0] == 1234
 
 
+def test_reemplazar_insumo_no_toca_las_lineas_de_subpartida(vista, conn, monkeypatch):  # noqa: F811
+    rid = conn.execute("SELECT recurso_id FROM acu_items WHERE sub_partida_id=? LIMIT 1",
+                       (vista.x['sub'],)).fetchone()[0]
+
+    class _Dlg:
+        selected_id = vista.x['rec']['lad']
+
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return QDialog.Accepted
+    monkeypatch.setattr(pv, '_SeleccionarRecursoDialog', _Dlg)
+    monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+    pu = _pu(conn, vista.x['b'])
+    vista._ins_reemplazar_recurso(rid, 'SUB-PARTIDA')
+    filas = conn.execute("SELECT recurso_id, cantidad FROM acu_items WHERE sub_partida_id=?",
+                         (vista.x['sub'],)).fetchall()
+    assert len(filas) == 2 and {f[0] for f in filas} == {rid}
+    assert _pu(conn, vista.x['b']) == pu
+
+
 def test_gasto_general_de_siete_cifras_no_pierde_digitos(uy, conn):  # noqa: F811
     """Con «:g» salía «1.23457e+06», que al duplicar la fila se leía 1.2345706."""
     pid = uy.x['pid']
