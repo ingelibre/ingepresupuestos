@@ -121,8 +121,9 @@ def test_pdf_igual_con_todo_contraido():
         doc = QPdfDocument()
         doc.load(ruta)
         assert doc.pageCount() > 0
-        # La imagen vive mientras se compara: sus bits no son una copia.
-        return [doc.render(i, QSize(700, 500)).copy()
+        # La imagen vive mientras se compara: sus bits no son una copia. Sin
+        # el pie de página, que lleva la hora de impresión.
+        return [doc.render(i, QSize(700, 500)).copy(0, 0, 700, 460)
                 for i in range(doc.pageCount())]
     g.mostrar_hasta_nivel(None)
     antes = texto()
