@@ -215,3 +215,72 @@ def test_puerta_del_mcp_e_iluminar_en_ingetrazo(base, monkeypatch):
     monkeypatch.setitem(sys.modules, 'views.ingetrazo_traer', doble)
     bv.ModeloBimDialog(pid, part)._mostrar()
     assert vistos == [sorted(muros)]
+
+
+class _VisorDoble:
+    """Solo lo que usa el diálogo: la ventana 3D de verdad necesita GPU."""
+
+    def __new__(cls, parent=None):
+        from PySide6.QtCore import Signal
+        from PySide6.QtWidgets import QWidget
+
+        class V(QWidget):
+            seleccion_cambiada = Signal(list)
+            cargado = Signal()
+
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.log = []
+
+            def abrir(self, ruta, estados):
+                self.log.append(('abrir', ruta))
+                self.estados = estados
+
+            def set_estados(self, e):
+                self.estados = e
+
+            def resaltar(self, ids, encuadrar=False):
+                self.resaltado = list(ids)
+
+            def cerrar(self):
+                self.log.append(('cerrar',))
+        return V(parent)
+
+
+def test_vista_3d_va_y_vuelve_con_la_partida(base, monkeypatch):
+    from views import bim_visor
+    monkeypatch.setattr(bim_visor, 'BimVisor', _VisorDoble)
+    pid, part = _proyecto()
+    ruta = os.path.join(FX, 'takeoff-ejemplo.ifc')
+    m = bim.leer_ifc(ruta)
+    mid = bim.registrar_modelo(pid, m, ruta)
+    muros = [e.global_id for e in m.elementos if e.clase == 'IfcWall']
+    otro = next(e.global_id for e in m.elementos if e.clase == 'IfcSlab')
+    bim.vincular(part, mid, muros)
+    dlg = bv.ModeloBimDialog(pid)
+    dlg.b_3d.click()
+    v = dlg.visor
+    assert v.log == [('abrir', ruta)]
+    assert v.estados[muros[0]] == 'vinculado' and v.estados[otro] == 'sin'
+    # De la vista a la partida, sin pisar lo que se acaba de elegir.
+    v.resaltado = None
+    v.seleccion_cambiada.emit([muros[0]])
+    assert dlg.partida_id == part and v.resaltado is None
+    assert [e.global_id for e in dlg.arbol.marcados()] == [muros[0]]
+    # Un elemento suelto se marca y la partida elegida no se mueve.
+    dlg.ed_filtro.setText('nada-de-esto')
+    dlg._cargar_arbol()
+    v.seleccion_cambiada.emit([otro])
+    assert [e.global_id for e in dlg.arbol.marcados()] == [otro]
+    assert dlg.partida_id == part
+    # De la partida a la vista.
+    dlg.tp.setCurrentItem(None)
+    dlg.tp.setCurrentItem(dlg.tp.topLevelItem(0))
+    assert sorted(v.resaltado) == sorted(muros)
+    # Al desvincular se recolorea sin volver a leer el archivo.
+    bim.desvincular(part, mid, muros)
+    dlg._refrescar()
+    assert v.estados[muros[0]] == 'sin' and len([x for x in v.log if x[0] == 'abrir']) == 1
+    dlg.done(0)
+    assert v.log[-1] == ('cerrar',)
+    dlg.deleteLater()

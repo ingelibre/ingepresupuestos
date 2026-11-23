@@ -223,6 +223,26 @@ class ArbolElementos(QTreeWidget):
         self.blockSignals(False)
         self.marcados_cambian.emit()
 
+    def marcar(self, gids):
+        """Deja marcados exactamente esos elementos."""
+        gids = set(gids)
+        self.blockSignals(True)
+        for g in self._grupos.values():
+            g['marca'] = {e.global_id for e in g['els'] if e.global_id in gids}
+            np = g['nodo']
+            for i in range(np.childCount()):
+                h = np.child(i)
+                h.setCheckState(0, Qt.Checked if h.data(0, Qt.UserRole + 1) in g['marca']
+                                else Qt.Unchecked)
+            self._pintar_piso(np)
+        for i in range(self.topLevelItemCount()):
+            nc = self.topLevelItem(i)
+            for j in range(nc.childCount()):
+                self._pintar_padre(nc.child(j))
+            self._pintar_padre(nc)
+        self.blockSignals(False)
+        self.marcados_cambian.emit()
+
     def _marcar_rama(self, it, marca):
         g = self._grupos.get(it.data(0, Qt.UserRole))
         it.setCheckState(0, Qt.Checked if marca else Qt.Unchecked)
@@ -547,11 +567,15 @@ class ModeloBimDialog(_Base):
         self.b_agregar = _boton(tr("Agregar modelo…"), self._agregar)
         self.b_actualizar = _boton(tr("Actualizar desde archivo…"), self._actualizar)
         self.b_quitar = _boton(tr("Quitar"), self._quitar)
-        for b in (self.b_agregar, self.b_actualizar, self.b_quitar):
+        self.b_3d = _boton(tr("Vista 3D"), self._alternar_3d)
+        self.b_3d.setCheckable(True)
+        self.visor = None
+        self._desde_visor = False
+        for b in (self.b_agregar, self.b_actualizar, self.b_quitar, self.b_3d):
             arriba.addWidget(b)
         self.v.addLayout(arriba)
 
-        sp = QSplitter(Qt.Horizontal)
+        sp = self._sp = QSplitter(Qt.Horizontal)
         izq = QWidget()
         li = QVBoxLayout(izq)
         li.setContentsMargins(0, 0, 0, 0)
@@ -655,6 +679,8 @@ class ModeloBimDialog(_Base):
         self.cmb_medida.setCurrentIndex(max(0, self.cmb_medida.findData(ant) if ant else 0))
         self._cargar_arbol()
         self._cargar_vinculos()
+        if self.visor is not None and self.b_3d.isChecked():
+            self._abrir_3d()
 
     def _cargar_arbol(self):
         extra = {}
@@ -690,11 +716,93 @@ class ModeloBimDialog(_Base):
         self.b_agregar.setEnabled(e)
         self.b_actualizar.setEnabled(e and hay)
         self.b_quitar.setEnabled(e and hay)
+        self.b_3d.setEnabled(hay or self.b_3d.isChecked())
         self.b_crear.setEnabled(e and hay and n > 0)
         self.b_vincular.setEnabled(e and hay and n > 0 and self.partida_id is not None)
         self.b_desvincular.setEnabled(e and self.tv.topLevelItemCount() > 0)
         self.b_mostrar.setEnabled(n > 0 or self.tv.topLevelItemCount() > 0)
         self.b_acu.setEnabled(e and self.partida_id is not None)
+
+    # ── Vista 3D ─────────────────────────────────────────────────────────────
+    def _alternar_3d(self):
+        if not self.b_3d.isChecked():
+            if self.visor is not None:
+                self.visor.cerrar()
+                self.visor.hide()
+                self._ruta_3d = None
+            return
+        if self.visor is None:
+            from views.bim_visor import BimVisor
+            self.visor = BimVisor(self)
+            self.visor.seleccion_cambiada.connect(self._elegido_en_3d)
+            self.visor.cargado.connect(self._cargar_vinculos)
+            self._sp.addWidget(self.visor)
+            self._sp.setSizes([360, 360, 560])
+        self.visor.show()
+        self._abrir_3d()
+
+    def _estados_3d(self):
+        return {e.global_id: 'vinculado' if e.global_id in self._extra else 'sin'
+                for e in self._els}
+
+    def _abrir_3d(self):
+        """El modelo elegido, en 3D. Lo traído de IngeTrazo no trae archivo: se
+        pide su IFC (comparte los GlobalId)."""
+        mid = self.modelo_id
+        if mid is None:
+            self._ruta_3d = None
+            return self.visor.cerrar()
+        m = next(x for x in bim.modelos(self.pid) if x['id'] == mid)
+        rutas = self.__dict__.setdefault('_rutas_3d', {})
+        ruta = rutas.get(mid) or m['ruta'] or ''
+        if not (ruta.lower().endswith('.ifc') and Path(ruta).is_file()):
+            from views.bim_visor import motivo_no_disponible
+            ruta = '' if motivo_no_disponible() else QFileDialog.getOpenFileName(
+                self, tr("Elige el IFC de este modelo para verlo en 3D"), "",
+                tr("Modelos IFC") + " (*.ifc *.IFC)")[0]
+            if not ruta and not motivo_no_disponible():
+                self.b_3d.setChecked(False)
+                return self._alternar_3d()
+            rutas[mid] = ruta
+        # Mismo archivo ya abierto: solo cambian los colores. Un IFC
+        # reescrito tiene otra fecha y sí se vuelve a leer.
+        clave = (ruta, Path(ruta).stat().st_mtime_ns if ruta else 0)
+        if clave == getattr(self, '_ruta_3d', None):
+            return self.visor.set_estados(self._estados_3d())
+        self._ruta_3d = clave
+        self.visor.abrir(ruta, self._estados_3d())
+
+    def _elegido_en_3d(self, gids):
+        """Clic en el modelo: marca los elementos y va a su partida."""
+        if any(g not in {e.global_id for g2 in self.arbol._grupos.values() for e in g2['els']}
+               for g in gids) and (self.ed_filtro.text() or self.chk_sueltos.isChecked()):
+            self.ed_filtro.clear()
+            self.chk_sueltos.blockSignals(True)
+            self.chk_sueltos.setChecked(False)
+            self.chk_sueltos.blockSignals(False)
+            self._cargar_arbol()
+        self.arbol.marcar(gids)
+        if not gids:
+            return
+        suyas = bim.partidas_de(self.modelo_id, gids[0])
+        if not suyas or self.partida_id in suyas:
+            return
+        self._desde_visor = True
+        try:
+            for i in range(self.tp.topLevelItemCount()):
+                it = self.tp.topLevelItem(i)
+                if it.data(0, Qt.UserRole) == suyas[0]:
+                    self.ed_partida.clear()
+                    self.tp.setCurrentItem(it)
+                    self.tp.scrollToItem(it)
+                    break
+        finally:
+            self._desde_visor = False
+
+    def done(self, r):
+        if self.visor is not None:
+            self.visor.cerrar()
+        super().done(r)
 
     def _pedir_archivo(self):
         ruta, _f = QFileDialog.getOpenFileName(self, tr("Elegir modelo"), "", FILTRO)
@@ -814,6 +922,9 @@ class ModeloBimDialog(_Base):
             it.setData(0, Qt.UserRole, (v['modelo_id'], v['global_id']))
             self.tv.addTopLevelItem(it)
         self._estado()
+        if self.visor is not None and not self._desde_visor:
+            self.visor.resaltar([v['global_id'] for v in filas
+                                 if v['modelo_id'] == self.modelo_id])
 
     def _motivos(self, omitidos):
         cuenta: dict = {}
