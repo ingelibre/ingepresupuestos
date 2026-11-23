@@ -232,7 +232,11 @@ class _Editor(api.Editor):
         self._hacer(self._ops._escribir, '', self._pid, 'presupuesto',
                     self._cambio_precios(precios))
 
+    _espera = None
+
     def simular_precios(self, precios):
+        if self._espera is not None:
+            self._espera()          # se llama muchas veces: la ventana respira
         cambio = self._cambio_precios(precios)
         self._ops.simular = True
         try:
@@ -254,6 +258,10 @@ def _numero(x, donde) -> float:
     return float(x)
 
 
+class Cancelado(Exception):
+    """El usuario pulsó «Cancelar» mientras el complemento calculaba."""
+
+
 class ContextoReal(api.Contexto):
     """`interfaz` da avisar/preguntar/pedir_archivo (la pone la ventana)."""
 
@@ -263,6 +271,7 @@ class ContextoReal(api.Contexto):
         self._pid, self._usuario, self._ui = pid, usuario, interfaz
         self.operaciones = OperacionesComplemento(usuario, cargado.id, pila)
         self.editar = _Editor(self.operaciones, pid)
+        self.editar._espera = getattr(interfaz, 'trabajando', None)
 
     @property
     def presupuesto(self):

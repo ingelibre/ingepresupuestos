@@ -20,10 +20,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox, QScrollArea,
-    QSpinBox, QVBoxLayout, QWidget,
-)
+                               QProgressDialog)
 
 from core.complementos import cargador
+from core.complementos.contexto import Cancelado
 from ingepresupuestos import api
 from utils.i18n import tr
 
@@ -116,7 +116,33 @@ class Interfaz:
     def __init__(self, padre, titulo: str):
         self._padre, self._titulo = padre, titulo
 
+    _espera = None
+
+    def trabajando(self):
+        """Aviso de «Calculando…» con Cancelar. La ventana queda bloqueada por
+        él (modal), pero se sigue pintando."""
+        if self._espera is None:
+            d = self._espera = QProgressDialog(
+                tr("Calculando…"), tr("Cancelar"), 0, 0, self._padre)
+            d.setWindowTitle(self._titulo)
+            d.setWindowModality(Qt.ApplicationModal)
+            d.setMinimumDuration(0)
+            d.setAutoClose(False)
+            d.setAutoReset(False)
+            d.show()
+        QApplication.processEvents()
+        if self._espera is not None and self._espera.wasCanceled():
+            self.fin()
+            raise Cancelado
+
+    def fin(self):
+        if self._espera is not None:
+            d, self._espera = self._espera, None
+            d.hide()
+            d.deleteLater()
+
     def _caja(self, icono, texto, botones=QMessageBox.Ok):
+        self.fin()
         box = QMessageBox(icono, self._titulo, '', botones, self._padre)
         box.setTextFormat(Qt.PlainText)
         box.setText(texto[:4000])
@@ -134,11 +160,13 @@ class Interfaz:
                           QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes
 
     def pedir_datos(self, titulo, campos, texto=''):
+        self.fin()
         dlg = DatosDialog(titulo, campos, texto, self._padre)
         dlg.setWindowModality(Qt.WindowModal)
         return dlg.valores() if dlg.exec() == QDialog.Accepted else None
 
     def pedir_archivo(self, extensiones=()):
+        self.fin()
         filtro = " ".join(f"*.{e}" for e in extensiones)
         ruta, _ = QFileDialog.getOpenFileName(
             self._padre, self._titulo, '', filtro and f"({filtro})")
@@ -158,6 +186,8 @@ def _proteger(padre, cargado, registro, fn) -> bool:
     try:
         fn()
         return True
+    except Cancelado:
+        return False
     except (Exception, SystemExit) as e:  # noqa: BLE001
         while QApplication.overrideCursor() is not None:
             QApplication.restoreOverrideCursor()
@@ -196,6 +226,7 @@ def ejecutar_accion(padre, ventana, cargado, registro, pid) -> bool:
         try:
             registro.funcion(ctx)
         finally:
+            ctx._ui.fin()
             _refrescar(ventana, ctx)
     return _proteger(padre, cargado, registro, hacer)
 

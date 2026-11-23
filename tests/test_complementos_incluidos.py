@@ -368,3 +368,46 @@ def test_zapata_agrega_en_un_paso(obra, admin, tmp_path):
     ctx, f = _accion('zapatas', obra[0], admin, tmp_path, Ui(Z, si=False))
     f(ctx)
     assert len(ctx.presupuesto.partidas) == 2
+
+
+# ── Espera y cancelar, con la ventana de verdad ─────────────────────────────
+
+def test_ajustar_muestra_la_espera_y_se_puede_cancelar(obra, admin, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
+    import views.complementos_menu as cm
+    pid, _rec, _part = obra
+    QApplication.instance() or QApplication([])
+    padre = QWidget()
+    padre.show()
+    c = _cargar('ajustar-total')
+    monkeypatch.setattr(cm, '_usuario', lambda: admin)
+    monkeypatch.setattr(cm.Interfaz, 'pedir_datos', lambda self, t, campos, x='': {
+        **{k.clave: k.valor for k in campos}, 'objetivo': 650.0})
+    preguntas, vistos = [], []
+
+    def preguntar(self, texto):
+        self.fin()
+        preguntas.append(texto)
+        return False
+    monkeypatch.setattr(cm.Interfaz, 'preguntar', preguntar)
+    errores = []
+    monkeypatch.setattr(cm.Interfaz, 'error', lambda self, t: errores.append(t))
+    normal = cm.Interfaz.trabajando
+
+    def espia(self):
+        normal(self)
+        vistos.append(self._espera is not None and self._espera.isVisible())
+    monkeypatch.setattr(cm.Interfaz, 'trabajando', espia)
+    r = c.de('accion')[0]
+    assert cm.ejecutar_accion(padre, padre, c, r, pid)
+    assert preguntas and vistos and all(vistos) and not errores
+    assert not any(d.isVisible() for d in padre.findChildren(QProgressDialog))
+
+    def cancela(self):
+        normal(self)
+        self._espera.cancel()
+    monkeypatch.setattr(cm.Interfaz, 'trabajando', cancela)
+    preguntas.clear()
+    assert not cm.ejecutar_accion(padre, padre, c, r, pid)
+    assert not preguntas and not errores
+    assert not any(d.isVisible() for d in padre.findChildren(QProgressDialog))
