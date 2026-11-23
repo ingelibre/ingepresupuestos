@@ -1,0 +1,12 @@
+{
+  "esquema": 1,
+  "id": "impuesto-materiales",
+  "nombre": "Impuesto sobre materiales",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #57)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Reporte con el impuesto sobre los materiales (por ejemplo, ITBIS 18 % en República Dominicana) por partida y en total, con la tasa y el nombre editables por proyecto. No altera precios ni totales.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/57",
+  "api_version": 2,
+  "codigo": "complemento.py"
+}
