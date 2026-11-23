@@ -221,7 +221,9 @@ def test_el_menu_dice_que_se_deshace(vista):
     v = vista
     m = v._build_editar_menu()
     textos = [a.text().split('\t')[0] for a in m.actions()]
-    assert 'Datos del proyecto…' in textos and 'Buscar y reemplazar…' in textos
+    assert [x for x in textos if x] == [
+        'Deshacer', 'Rehacer', 'Cortar', 'Copiar', 'Pegar', 'Duplicar', 'Eliminar',
+        'Datos del proyecto…']
     m.aboutToShow.emit()
     assert not m.actions()[0].isEnabled()
     sql("UPDATE partidas SET metrado=12 WHERE id=?", partida())
