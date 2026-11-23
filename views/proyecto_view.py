@@ -3757,7 +3757,7 @@ class ProyectoView(QWidget):
         all_subs=True usa el CD global del proyecto (todos los subpresupuestos)."""
         # El cálculo es `core.pie.calcular_pie`, el mismo del PDF y el Excel
         # (issue #3: estaba copiado cinco veces y ninguna redondeaba).
-        from core.pie import calcular_pie
+        from core.pie import calcular_pie, nombre_total
         cd = self._total_proyecto(all_subs=all_subs)
         conn = get_db()
         lineas, total = calcular_pie(conn, self.pid, cd)
@@ -3768,10 +3768,11 @@ class ProyectoView(QWidget):
         filas = [(tr("COSTO DIRECTO"), _rn(cd, get_decimales_ppto()), SLATE_700, True)]
         for l in lineas or []:
             if l['tipo'] == 'subtotal':
-                filas.append((l['nombre'], l['valor'], SLATE_700, True))
+                filas.append((l['nombre'], l['valor'],
+                              BLUE_500 if l['destacado'] else SLATE_700, True))
             else:
                 filas.append((l['nombre'], l['valor'], SLATE_500, False))
-        filas.append((tr("PRESUPUESTO TOTAL"), total, BLUE_500, True))
+        filas.append((nombre_total(self.pid, tr("PRESUPUESTO TOTAL")), total, BLUE_500, True))
         return filas, total
 
     def _build_resumen_card(self, title=N_("RESUMEN DE COSTOS"), all_subs: bool = False):
@@ -4625,6 +4626,24 @@ class ProyectoView(QWidget):
 
         # Lista drag & drop
         self._pl_data = [dict(r) for r in rubros]
+        # Montos fijos (líneas «Con detalle» en modo monto manual): se ven y
+        # se editan aquí mismo (issue #34).
+        conn = get_db()
+        fijos = {r['rubro']: r['precio'] or 0 for r in conn.execute(
+            "SELECT rubro, precio FROM gastos_generales"
+            " WHERE proyecto_id=? AND tipo='manual'", (self.pid,))}
+        conn.close()
+
+        def _guardar_fijo(cod, texto):
+            val = parse_num_opt(texto)
+            if val is None or val == fijos.get(cod):
+                return
+            fijos[cod] = val
+            conn = get_db()
+            conn.execute("UPDATE gastos_generales SET precio=? WHERE proyecto_id=?"
+                         " AND rubro=? AND tipo='manual'", (val, self.pid, cod))
+            conn.commit(); conn.close()
+            QTimer.singleShot(0, self._render_pie)
 
         list_w = _RubDragList()
         list_w.setFrameShape(QFrame.NoFrame)
@@ -4647,11 +4666,13 @@ class ProyectoView(QWidget):
             for i, r in enumerate(self._pl_data):
                 conn.execute(
                     "INSERT INTO pie_rubros"
-                    " (proyecto_id, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)"
-                    " VALUES (?,?,?,?,?,?,?,?)",
+                    " (proyecto_id, codigo, nombre, pct, activo, orden, tipo,"
+                    "  mostrar_pct, destacado)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
                     (self.pid, r['codigo'], r['nombre'],
                      r.get('pct') or 0, 1 if r['activo'] else 0,
-                     i, r['tipo'], r.get('mostrar_pct', 1))
+                     i, r['tipo'], r.get('mostrar_pct', 1),
+                     r.get('destacado') or 0)
                 )
             conn.commit(); conn.close()
             self._render_pie()
@@ -4699,7 +4720,8 @@ class ProyectoView(QWidget):
             list_w.clear()
             for i, rub in enumerate(self._pl_data):
                 tipo  = rub['tipo']
-                badge = TIPO_BADGE.get(tipo, tipo)
+                es_fijo = tipo == 'rubro' and rub['codigo'] in fijos
+                badge = tr("Monto fijo") if es_fijo else TIPO_BADGE.get(tipo, tipo)
                 has_pct = tipo in ('pct_cd', 'pct_sub', 'pct_util')
 
                 # Widget de fila
@@ -4791,6 +4813,36 @@ class ProyectoView(QWidget):
                     lbl_p = QLabel("%")
                     lbl_p.setStyleSheet(f"color:{SLATE_100}; font-size:10px; border:none;")
                     row_hl.addWidget(lbl_p)
+                elif es_fijo:
+                    inp_f = _StyledLineEdit(
+                        f"{fijos[rub['codigo']]:,.{get_decimales_ppto()}f}")
+                    inp_f.setFixedWidth(88)
+                    inp_f.setAlignment(Qt.AlignRight)
+                    inp_f.setToolTip(tr("Monto fijo de la línea"))
+                    inp_f.setStyleSheet(
+                        f"border:none; border-bottom:1px solid {SILVER_300};"
+                        f" border-radius:0; padding:1px 2px; font-size:11px;"
+                        f" color:{SLATE_500}; background:transparent;"
+                    )
+                    inp_f.editingFinished.connect(
+                        lambda c=rub['codigo'], w=inp_f: _guardar_fijo(c, w.text()))
+                    row_hl.addWidget(inp_f)
+                elif tipo == 'subtotal':
+                    b_dest = QPushButton("★" if rub.get('destacado') else "☆")
+                    b_dest.setFixedSize(58, 20)
+                    b_dest.setCursor(Qt.PointingHandCursor)
+                    b_dest.setToolTip(tr("Destacar como total en la vista y los reportes"))
+                    b_dest.setStyleSheet(
+                        f"QPushButton {{ border:none; background:transparent; padding:0;"
+                        f" min-height:0; font-size:14px;"
+                        f" color:{BLUE_500 if rub.get('destacado') else SLATE_300}; }}")
+
+                    def _destacar(_=False, idx=i):
+                        _save_field(idx, 'destacado',
+                                    0 if self._pl_data[idx].get('destacado') else 1)
+                        QTimer.singleShot(0, self._render_pie)
+                    b_dest.clicked.connect(_destacar)
+                    row_hl.addWidget(b_dest)
                 else:
                     sp = QWidget(); sp.setFixedWidth(58)
                     row_hl.addWidget(sp)
@@ -4840,7 +4892,7 @@ class ProyectoView(QWidget):
         _ITEM_H  = 37
         _LIST_H  = max(_ITEM_H, list_w.count() * _ITEM_H)
         _HDR_H   = 32
-        _FOOT_H  = 68
+        _FOOT_H  = 102
         list_w.setFixedHeight(_LIST_H)
 
         vl.addWidget(list_w)
@@ -4855,6 +4907,37 @@ class ProyectoView(QWidget):
         f_vl = QVBoxLayout(footer)
         f_vl.setContentsMargins(10, 6, 10, 8)
         f_vl.setSpacing(4)
+
+        # Nombre del total final («Costo de inversión»), por proyecto.
+        conn = get_db()
+        _tn = conn.execute("SELECT total_nombre FROM proyectos WHERE id=?",
+                           (self.pid,)).fetchone()
+        conn.close()
+        tot_hl = QHBoxLayout()
+        tot_hl.setContentsMargins(0, 0, 0, 0)
+        lbl_tn = QLabel(tr("Nombre del total final:"))
+        lbl_tn.setStyleSheet(f"color:{SLATE_300}; font-size:10px; border:none;")
+        tot_hl.addWidget(lbl_tn)
+        self.inp_total_nombre = _StyledLineEdit((_tn['total_nombre'] if _tn else '') or '')
+        self.inp_total_nombre.setPlaceholderText(tr("PRESUPUESTO TOTAL"))
+        self.inp_total_nombre.setStyleSheet(
+            f"border:none; border-bottom:1px solid {SILVER_300}; border-radius:0;"
+            f" padding:1px 2px; font-size:11px; color:{SLATE_700}; background:transparent;")
+
+        def _guardar_total_nombre(previo=self.inp_total_nombre.text(),
+                                  w=self.inp_total_nombre):
+            nuevo = w.text().strip()
+            if nuevo == previo.strip():
+                return
+            conn = get_db()
+            conn.execute("UPDATE proyectos SET total_nombre=? WHERE id=?",
+                         (nuevo, self.pid))
+            conn.commit(); conn.close()
+            QTimer.singleShot(0, self._render_pie)
+        self.inp_total_nombre.editingFinished.connect(_guardar_total_nombre)
+        tot_hl.addWidget(self.inp_total_nombre, stretch=1)
+        f_vl.addLayout(tot_hl)
+
         lbl_add = QLabel(tr("Agregar línea:"))
         lbl_add.setStyleSheet(f"color:{SLATE_300}; font-size:10px; border:none;")
         f_vl.addWidget(lbl_add)
@@ -4866,11 +4949,22 @@ class ProyectoView(QWidget):
         def _agregar(tipo):
             # La línea nueva va DEBAJO de la seleccionada, como «insertar
             # partida»; sin selección, al final (David Ramos, 16 sep 2026).
+            fijo = tipo == 'fijo'
+            if fijo:
+                tipo = 'rubro'
             mp = 0 if tipo == 'rubro' else 1
             fila = list_w.currentRow()
             pos = fila + 1 if 0 <= fila < len(self._pl_data) else len(self._pl_data)
+            codigo = self._codigo_linea_pie_nuevo()
+            if fijo:
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO gastos_generales (proyecto_id, rubro, tipo,"
+                    " descripcion, precio, orden) VALUES (?,?,'manual','__manual__',0,0)",
+                    (self.pid, codigo))
+                conn.commit(); conn.close()
             self._pl_data.insert(pos, {
-                'id': 0, 'codigo': self._codigo_linea_pie_nuevo(),
+                'id': 0, 'codigo': codigo,
                 'nombre': 'Nueva línea', 'pct': 0.0, 'activo': 1,
                 'orden': pos, 'tipo': tipo, 'mostrar_pct': mp,
             })
@@ -4879,6 +4973,7 @@ class ProyectoView(QWidget):
 
         for lbl_t, tipo in [
             (tr("Con detalle"), "rubro"),
+            (tr("Monto fijo"),  "fijo"),
             (tr("% CD"),        "pct_cd"),
             (tr("% Sub Tot."),  "pct_sub"),
             (tr("% Utilidad"),  "pct_util"),

@@ -3450,16 +3450,17 @@ def _build_pie_rows(pid: int, cd: float) -> list:
     Devuelve lista de tuplas (label, monto, cls) donde cls es:
       'sub'  → subtotal (CD, Sub Total)
       ''     → rubro normal (GG, Util, IGV, supervisión…)
-      'gran' → PRESUPUESTO TOTAL (último)
+      'gran' → total final (siempre el último) y separadores destacados
     """
-    from core.pie import calcular_pie, etiqueta
+    from core.pie import calcular_pie, etiqueta, nombre_total
     conn = get_db()
     lineas, total = calcular_pie(conn, pid, cd)
     conn.close()
     filas = [('Costo Directo', _rn(cd or 0, get_decimales_ppto()), 'sub')]
     for l in lineas or []:
-        filas.append((etiqueta(l), l['valor'], 'sub' if l['tipo'] == 'subtotal' else ''))
-    filas.append(('PRESUPUESTO TOTAL', total, 'gran'))
+        cls = 'gran' if l['destacado'] else 'sub' if l['tipo'] == 'subtotal' else ''
+        filas.append((etiqueta(l), l['valor'], cls))
+    filas.append((nombre_total(pid), total, 'gran'))
     return filas
 
 
@@ -3480,6 +3481,7 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     pie = _build_pie_rows(pid, cd)
     if not pie:
         return (1.0, [('PRESUPUESTO TOTAL', cd, 'gran')])
+    nom_total = pie[-1][0]
     total = pie[-1][1] or 0
     # Filas de impuesto (IGV/IVA) — se mantienen abajo, separadas del PU.
     # `\b` evita falsos positivos (p.ej. «IVA» dentro de otra palabra).
@@ -3492,9 +3494,9 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     factor = (base / cd) if cd else 1.0
     if tax_rows:
         pie_rows = ([('Sub Total', base, 'sub')] + tax_rows
-                    + [('PRESUPUESTO TOTAL', total, 'gran')])
+                    + [(nom_total, total, 'gran')])
     else:
-        pie_rows = [('PRESUPUESTO TOTAL', total, 'gran')]
+        pie_rows = [(nom_total, total, 'gran')]
     return (factor, pie_rows)
 
 
@@ -3639,7 +3641,8 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
             parts.append(_fila_resumen(rub['nombre'].upper(), rub['valor'], bold=True))
 
     conn.close()
-    parts.append(_fila_resumen('COSTO TOTAL DE OBRA', total_final, bold=True, top=True))
+    from core.pie import nombre_total
+    parts.append(_fila_resumen(nombre_total(proy, 'COSTO TOTAL DE OBRA'), total_final, bold=True, top=True))
     return ''.join(parts)
 
 
@@ -3669,9 +3672,10 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
     parts = []
     parts.append('<h2>Resumen Ejecutivo</h2>')
 
+    from core.pie import nombre_total
     # KPIs en grilla 4 columnas — usando atributos HTML que QTextDocument respeta
     kpis = [
-        ('Presupuesto Total', f'{sym} {_fmt(totales["total"], dec)}', 'Todos los conceptos'),
+        (nombre_total(proy, 'Presupuesto Total'), f'{sym} {_fmt(totales["total"], dec)}', 'Todos los conceptos'),
         ('Costo Directo',     f'{sym} {_fmt(totales["cd"], dec)}',
          f'{(totales["cd"]/totales["total"]*100 if totales["total"] else 0):.1f}% del total'),
         ('Partidas',          f'{n_partidas}',  f'{n_titulos} títulos'),

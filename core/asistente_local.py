@@ -613,7 +613,7 @@ def totales_detalle(proyecto_id: int) -> str:
 
     # El desglose sale de `core.pie.calcular_pie`, el mismo cálculo que la
     # pestaña Pie y los reportes (issue #3).
-    from core.pie import calcular_pie
+    from core.pie import calcular_pie, nombre_total
     from core.config import moneda_cfg
     conn = get_db()
     pie, _ = calcular_pie(conn, proyecto_id, cd)
@@ -646,7 +646,7 @@ def totales_detalle(proyecto_id: int) -> str:
             lineas.append(f"  {'IGV':28s} {S} {tot['igv']:>14,.2f}")
 
     lineas.append(f"  {'═'*30}")
-    lineas.append(f"  {'PRESUPUESTO TOTAL':28s} {S} {total:>14,.2f}")
+    lineas.append(f"  {nombre_total(proyecto_id):28s} {S} {total:>14,.2f}")
     return "\n".join(lineas)
 
 

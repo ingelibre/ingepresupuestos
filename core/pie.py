@@ -96,9 +96,29 @@ def calcular_pie(conn, proyecto_id: int, cd: float):
         lineas.append({
             'tipo': tipo, 'nombre': r['nombre'], 'codigo': codigo, 'pct': pct,
             'valor': val, 'mostrar_pct': mp, 'has_items': has_items,
+            'destacado': bool(tipo == 'subtotal' and r['destacado']),
             'pct_real': round(val / cd * 100, 2) if (cd and tipo != 'subtotal') else 0,
         })
     return lineas, acum
+
+
+def nombre_total(proy, defecto: str = 'PRESUPUESTO TOTAL') -> str:
+    """Nombre del total final: el que escribió el usuario («Costo de
+    inversión», issue #34) o el de siempre. Un nombre propio sigue las
+    mayúsculas del defecto. `proy` es la fila/dict del proyecto o su id."""
+    if isinstance(proy, int):
+        from core.database import get_db
+        conn = get_db()
+        proy = conn.execute("SELECT total_nombre FROM proyectos WHERE id=?",
+                            (proy,)).fetchone()
+        conn.close()
+    try:
+        propio = (proy['total_nombre'] or '').strip()
+    except (IndexError, KeyError, TypeError):
+        propio = ''
+    if not propio:
+        return defecto
+    return propio.upper() if defecto.isupper() else propio
 
 
 def etiqueta(linea: dict, *, mayus: bool = False) -> str:

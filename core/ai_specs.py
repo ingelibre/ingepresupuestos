@@ -873,7 +873,7 @@ def generar_memoria_descriptiva(proyecto_id: int, prompt_extra: str = None,
                                        _moneda_simbolo)
         filas = _build_pie_rows(proyecto_id, tot['cd'])
         sim = _moneda_simbolo(moneda)
-        total_pie = next((m for (l, m, c) in filas if c == 'gran'), tot['total'])
+        total_pie = filas[-1][1] if filas else tot['total']   # el último es el total
         pres_txt = ('\n'.join(f"  {l}: {sim} {m:,.2f}" for (l, m, c) in filas)
                     + f"\n  SON: {_monto_en_letras(total_pie, moneda)}")
     except Exception:

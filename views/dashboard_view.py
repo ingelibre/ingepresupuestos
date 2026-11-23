@@ -265,6 +265,8 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
             pvals.append(f"{prow['nombre']} (copia)")
         elif c == 'estado':
             pvals.append('elaboracion')
+        elif c == 'total_nombre' and 'pie' not in opts:
+            pvals.append('')            # va con el pie, que aquí no se copia
         else:
             pvals.append(prow.get(c))
     cur = conn.execute(
