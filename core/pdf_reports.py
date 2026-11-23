@@ -2954,7 +2954,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             f'<th rowspan="2" style="{head_css}text-align:left">Descripción</th>'
             f'<th rowspan="2" style="{head_css}width:28pt;text-align:center">Und</th>'
             f'<th rowspan="2" style="{head_css}width:52pt;text-align:right">Cantidad</th>'
-            f'<th rowspan="2" style="{head_css}width:58pt;text-align:right">Precio</th>'
+            f'<th rowspan="2" style="{head_css}width:58pt;text-align:right">Monto</th>'
             f'{SEP_MED_H}'
             f'{encabezados}'
             f'<th rowspan="2" style="{head_css}width:70pt;text-align:right">Total</th>'

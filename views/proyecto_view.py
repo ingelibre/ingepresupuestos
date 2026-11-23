@@ -5872,6 +5872,8 @@ class ProyectoView(QWidget):
         conn.close()
         self._acu_loading = False
 
+        self._ajustar_columnas_acu()
+
         # Actualizar subtotales y barras
         for tipo, lbl in self._sub_labels.items():
             lbl.setText(fmt(totales_tipo.get(tipo, 0), self._moneda, dec))
@@ -5889,6 +5891,21 @@ class ProyectoView(QWidget):
         # Tuxia: chequear si la partida tiene problemas (sin metrado/ACU)
         if hasattr(self, '_tuxia') and self._tuxia is not None and not es_sub:
             QTimer.singleShot(150, lambda pid=part_id: self._tuxia_check_partida(pid))
+
+    def _ajustar_columnas_acu(self):
+        """Ensancha Und., Cuadrilla, Cantidad, Precio y Parcial si un texto no
+        cabe: un monto cortado se lee como otro número. Solo crecen."""
+        fuente = QFont(self.tbl_acu.font())
+        fuente.setPixelSize(11)
+        fm = QFontMetrics(fuente)
+        for c, margen in ((2, 12), (3, 22), (4, 22), (5, 22), (6, 16)):
+            textos = [self.tbl_acu.item(f, c).text()
+                      for f in range(self.tbl_acu.rowCount())
+                      if self.tbl_acu.columnSpan(f, 0) == 1
+                      and self.tbl_acu.item(f, c)]
+            ancho = max((fm.horizontalAdvance(t) for t in textos), default=0) + margen
+            if ancho > self.tbl_acu.columnWidth(c):
+                self.tbl_acu.setColumnWidth(c, ancho)
 
     def _partidas_bajo_titulo(self, tree_item) -> list[int]:
         """Recoge recursivamente IDs de partidas (no títulos) bajo un item del árbol."""
@@ -8995,9 +9012,9 @@ class ProyectoView(QWidget):
     def _acero_nueva_fila_vacia(self):
         if self._acero_ultima_vacia():
             return   # ya hay una fila vacía al final
-        self._acero_loading = True
+        cargando, self._acero_loading = self._acero_loading, True
         self._acero_fila_insertar(self.tbl_acero.rowCount(), {})
-        self._acero_loading = False
+        self._acero_loading = cargando
 
     def _acero_tiene_datos(self) -> bool:
         """True si la tabla acero tiene al menos una fila con datos reales."""
@@ -9041,7 +9058,7 @@ class ProyectoView(QWidget):
                     return parse_num_opt(it.text(), self._moneda)
                 return None
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
-            llong = _v(6); kgml = _v(8)
+            llong = _v(6); kgml = self._acero_kg_ml(r)
             if not desc and not diametro and all(v is None for v in (n_est, n_el, n_var, llong)):
                 continue
             dims    = [v for v in (n_est, n_el, n_var, llong) if v is not None]
@@ -9096,7 +9113,7 @@ class ProyectoView(QWidget):
                 'descripcion':   (tbl.item(r, 1).text() if tbl.item(r, 1) else '').strip(),
                 'diametro':      _normalizar_diametro_acero(cmb.currentText()) if cmb else '',
                 'n_estructuras': _v(3), 'n_elementos': _v(4), 'n_veces': _v(5),
-                'longitud':      _v(6), 'kg_ml':       _v(8),
+                'longitud':      _v(6), 'kg_ml':       self._acero_kg_ml(r),
             })
         return result
 
@@ -9258,6 +9275,8 @@ class ProyectoView(QWidget):
         # Col 8: kg/ml
         kg_ml = datos.get('kg_ml')
         it8 = QTableWidgetItem(f"{kg_ml:.3f}" if kg_ml else '')
+        if kg_ml:
+            it8.setData(_VALOR_COMPLETO, float(kg_ml))
         it8.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         tbl.setItem(r, 8, it8)
 
@@ -9376,6 +9395,17 @@ class ProyectoView(QWidget):
         # Auto-guardado sincrónico
         self._acero_guardar_silencioso()
 
+    def _acero_kg_ml(self, r: int):
+        """kg/ml de la fila: el valor completo guardado mientras la celda siga
+        mostrando ese valor (a 3 decimales); si se editó, lo escrito."""
+        it = self.tbl_acero.item(r, 8)
+        if not it or not it.text().strip():
+            return None
+        v = it.data(_VALOR_COMPLETO)
+        if v is not None and it.text() == f"{v:.3f}":
+            return v
+        return parse_num_opt(it.text(), self._moneda)
+
     def _acero_recalc_fila(self, r: int):
         tbl = self.tbl_acero
 
@@ -9386,21 +9416,24 @@ class ProyectoView(QWidget):
             return None
 
         dims  = [v for v in (val(3), val(4), val(5), val(6)) if v is not None]
-        kgml  = val(8)
+        kgml  = self._acero_kg_ml(r)
         parc_m = _rn(
             __import__('functools').reduce(lambda a, b: a * b, dims, 1.0), 4
         ) if dims else 0.0
         parc_kg = _rn(parc_m * kgml, 4) if kgml else 0.0
 
         dec = get_decimales_metrado()
-        self._acero_loading = True
+        # Se llama también en plena carga: al terminar se deja la marca como
+        # estaba. Soltarla aquí hacía que cada celda siguiente guardara en la
+        # base la planilla a medio cargar.
+        cargando, self._acero_loading = self._acero_loading, True
         it7 = tbl.item(r, 7)
         it9 = tbl.item(r, 9)
         if it7:
             it7.setText(fmt_doc(parc_m, dec, moneda=self._moneda) if dims else '')
         if it9:
             it9.setText(fmt_doc(parc_kg, dec, moneda=self._moneda) if (dims and kgml) else '')
-        self._acero_loading = False
+        self._acero_loading = cargando
         self._acero_actualizar_total()
 
     def _acero_actualizar_total(self):
@@ -9439,7 +9472,7 @@ class ProyectoView(QWidget):
                 return None
 
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
-            llong = _v(6); kgml = _v(8)
+            llong = _v(6); kgml = self._acero_kg_ml(r)
             dims  = [v for v in (n_est, n_el, n_var, llong) if v is not None]
             # Saltar filas totalmente vacías (evita blancos intercalados)
             if not desc and not diametro and not dims:

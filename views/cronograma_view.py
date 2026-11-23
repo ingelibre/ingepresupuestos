@@ -8178,6 +8178,12 @@ class ValorizadoWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
         if not path:
             return
         try:
+            from core import pdf_reports as _pr
+            _pr._BUILD_HTML_PAPER['escala'] = (
+                'semana' if self._period_days == 7 else 'mes')
+            _pr._BUILD_HTML_PAPER['periodos_por_pagina'] = int(
+                opts.get('periodos_por_pagina', 0) or 0)
+            _pr._BUILD_HTML_PAPER['show_fechas'] = bool(opts.get('show_fechas', False))
             generar_pdf_archivo(
                 'cronograma_valorizado', self._cv.pid, path,
                 with_cover=opts.get('with_cover', True),
@@ -11177,8 +11183,8 @@ class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
         total_general = sum(sum(r['weekly']) for r in sorted_rec)
 
         # Headers — dos sub-columnas por período: Cantidad y Valorización.
-        # Panel izquierdo: Cantidad y Precio = TOTALES del insumo en el proyecto.
-        left_headers = [N_("Tipo"), N_("Código"), N_("Descripción"), N_("Und"), N_("Cantidad"), N_("Precio")]
+        # Panel izquierdo: Cantidad y Monto = TOTALES del insumo en el proyecto.
+        left_headers = [N_("Tipo"), N_("Código"), N_("Descripción"), N_("Und"), N_("Cantidad"), N_("Monto")]
         # El Excel lee estas cabeceras en español; en pantalla van traducidas.
         self._hdr_l_es = list(left_headers)
         # Texto de header del MODELO (lo lee el Excel); en pantalla el header
