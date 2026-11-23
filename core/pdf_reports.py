@@ -84,6 +84,12 @@ FORMATO_CLAVES = {
     # Leyenda del Gantt (Tarea / Crítica / Hito / Dependencia / Hoy / Fin
     # plazo) bajo el pie del PDF del Gantt. '1' = no imprimirla.
     'rep_gantt_leyenda_oculta': '0',
+    # Reporte de presupuesto (apagadas = como siempre): qué partes del precio
+    # unitario salen en columna propia —códigos de tipo separados por coma,
+    # «MO,MAT,EQ,SC» (issue #54)— y si la especificación técnica se imprime
+    # debajo de cada partida (issue #41).
+    'rep_ppto_desglose': '',
+    'rep_ppto_especificacion': '0',
     # Márgenes del papel en milímetros. Los valores por defecto son los que
     # el PDF tuvo siempre (0.6″ laterales, 0.7″ abajo, 0.6″ arriba sin
     # encabezado): con ellos sale idéntico. El superior mueve juntos el
@@ -867,6 +873,63 @@ def _cabecera_item_desc(w_fijo: int, css_celda: str = '') -> str:
     )
 
 
+DESGLOSE_PU = (('MO', 'M. obra'), ('MAT', 'Material'), ('EQ', 'Equipo'),
+               ('SC', 'Subc.'))
+
+
+def desglose_ppto(formato: dict | None = None) -> list[str]:
+    """Tipos de recurso con columna propia en el reporte de presupuesto."""
+    f = formato if formato is not None else get_formato()
+    pedidos = {t.strip() for t in (f.get('rep_ppto_desglose') or '').split(',')}
+    return [t for t, _r in DESGLOSE_PU if t in pedidos]
+
+
+def especificacion_en_ppto(formato: dict | None = None) -> bool:
+    f = formato if formato is not None else get_formato()
+    return str(f.get('rep_ppto_especificacion') or '0') == '1'
+
+
+def desglose_pu_partidas(items: list) -> dict:
+    """{id de partida: {'MO': …, 'MAT': …, 'EQ': …, 'SC': …}}: cuánto del
+    precio unitario es de cada tipo, del ACU. Una partida sin ACU no figura.
+    El céntimo de redondeo va al tipo mayor, para que las columnas sumen el
+    precio impreso; si el PU no viene del ACU se dejan los montos del ACU."""
+    dec = get_decimales_ppto()
+    out = {}
+    conn = get_db()
+    for e in items:
+        p = e['partida']
+        if p.get('es_titulo'):
+            continue
+        acu, por_tipo = get_acu_items(conn, p['id'])
+        if not acu:
+            continue
+        val = {t: round(v, dec) for t, v in por_tipo.items()}
+        dif = round((p.get('precio_unitario') or 0) - sum(val.values()), dec)
+        if dif and abs(dif) < 0.0205:
+            mayor = max(val, key=val.get)
+            val[mayor] = round(val[mayor] + dif, dec)
+        out[p['id']] = val
+    conn.close()
+    return out
+
+
+def especificacion_en_parrafos(spec: str) -> list[str]:
+    """El texto de una especificación (HTML del editor o texto plano), un
+    elemento por párrafo y sin imágenes."""
+    import re
+    from html import unescape
+    spec = spec or ''
+    if '<' in spec and '>' in spec:
+        spec = re.sub(r'(?is)<(style|script|head)\b.*?</\1>', '', spec)
+        spec = re.sub(r'\s+', ' ', spec)
+        spec = re.sub(r'(?i)<br\s*/?>|</(p|div|li|tr|h[1-6])>', '\n', spec)
+        spec = re.sub(r'(?i)</t[dh]>', '  ', spec)
+        spec = re.sub(r'(?i)<li[^>]*>', '•  ', spec)
+        spec = unescape(re.sub(r'<[^>]+>', '', spec))
+    return [t for t in (linea.strip() for linea in spec.split('\n')) if t]
+
+
 @con_moneda_del_proyecto
 def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                      incluir_meta=True, todo_costo=False,
@@ -883,6 +946,14 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
     if todo_costo:
         factor, pie_override = _todo_costo_factor_pie(
             pid, totales.get('cd', 0) or 0)
+
+    # Columnas del PU por tipo (issue #54) y especificación bajo la partida
+    # (issue #41). El «Presupuesto para Cliente» nunca abre sus costos.
+    _formato = get_formato()
+    cols_pu = [] if todo_costo else desglose_ppto(_formato)
+    pu_tipo = desglose_pu_partidas(items) if cols_pu else {}
+    con_spec = especificacion_en_ppto(_formato)
+    n_col = 5 + len(cols_pu)
 
     parts = []
     if incluir_meta:
@@ -963,7 +1034,7 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             # (texto subrayado). Una banda oscura pesaba demasiado en la
             # página y competía con la jerarquía de los títulos.
             rows.append(
-                '<tr><td colspan="4" style="background:white;color:%s;'
+                f'<tr><td colspan="{n_col - 1}" style="background:white;color:%s;'
                 'font-size:10pt;font-weight:bold;padding:14pt 6pt 5pt;'
                 'text-transform:uppercase;letter-spacing:0.5pt;'
                 'text-decoration:underline;border:none;">%s</td>'
@@ -1003,29 +1074,50 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
             if necesita_spacer:
                 h = _spacer_h.get(nivel, 7)
                 rows.append(
-                    f'<tr class="spacer"><td colspan="5" '
+                    f'<tr class="spacer"><td colspan="{n_col}" '
                     f'style="border:none;background:white;'
                     f'font-size:{h}pt;line-height:{h}pt">&nbsp;</td></tr>'
                 )
             rows.append(
                 f'<tr class="{cls}">'
-                f'<td colspan="4">{_item_desc(p, desc, _depth, subrayar=(nivel == 1))}</td>'
+                f'<td colspan="{n_col - 1}">{_item_desc(p, desc, _depth, subrayar=(nivel == 1))}</td>'
                 f'<td class="r">{_fmt(total * factor, dec)}</td>'
                 f'</tr>'
             )
         else:
             # bg inline en cada td — QTextDocument ignora `tr.alt td { bg }`.
             sty = f' style="{row_bg_inline}"' if row_bg_inline else ''
+            val_pu = pu_tipo.get(p.get('id'))
+            celdas_pu = ''.join(
+                f'<td align="right" style="{row_bg_inline}font-size:8pt;'
+                f'padding-left:2pt;padding-right:5pt">'
+                f'{_fmt(val_pu[t], dec) if val_pu and val_pu[t] else ""}</td>'
+                for t in cols_pu)
             rows.append(
                 f'<tr class="{cls}">'
                 f'<td{sty}>{_item_desc(p, escape(p.get("descripcion") or ""), _depth)}</td>'
                 f'<td class="c"{sty}>{escape(p.get("unidad") or "")}</td>'
                 f'<td class="r"{sty}>{_fmt(p.get("metrado"), get_decimales_metrado())}</td>'
+                f'{celdas_pu}'
                 f'<td class="r"{sty}>{_fmt((p.get("precio_unitario") or 0) * factor, dec)}</td>'
                 f'<td class="r"{sty}>{_fmt(total * factor, dec)}</td>'
                 f'</tr>'
             )
+        if con_spec:
+            # Una fila por párrafo: así una especificación larga se reparte
+            # entre páginas en vez de saltar entera a la siguiente.
+            for parrafo in especificacion_en_parrafos(p.get('especificaciones')):
+                rows.append(
+                    f'<tr><td colspan="{n_col}" style="background:white;'
+                    f'color:{SLATE_700};font-size:8pt;padding:1pt 6pt">'
+                    + _ind(_depth + 1, f'<span style="font-size:8pt">{escape(parrafo)}</span>')
+                    + '</td></tr>')
 
+    rotulo_pu = dict(DESGLOSE_PU)
+    th_pu = ''.join(
+        f'<th style="width:46pt;text-align:right;padding-left:2pt;'
+        f'padding-right:5pt;background:{_os_hp}">{rotulo_pu[t]}</th>'
+        for t in cols_pu)
     parts.append(
         # width="100%" inline OBLIGATORIO — sin esto, QTextDocument calcula el
         # ancho de la tabla en base al contenido y las descripciones largas
@@ -1037,9 +1129,10 @@ def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
         '<thead><tr>'
         f'<th style="background:{_os_hp}">{_cabecera_item_desc(_W_ITEM)}</th>'
         f'<th style="width:40pt;text-align:center;background:{_os_hp}">Und</th>'
-        f'<th style="width:70pt;text-align:right;background:{_os_hp}">Cantidad</th>'
-        f'<th style="width:88pt;text-align:right;background:{_os_hp}">Precio</th>'
-        f'<th style="width:94pt;text-align:right;background:{_os_hp}">Parcial</th>'
+        f'<th style="width:{60 if cols_pu else 70}pt;text-align:right;background:{_os_hp}">Cantidad</th>'
+        f'{th_pu}'
+        f'<th style="width:{68 if cols_pu else 88}pt;text-align:right;background:{_os_hp}">Precio</th>'
+        f'<th style="width:{76 if cols_pu else 94}pt;text-align:right;background:{_os_hp}">Parcial</th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows)}</tbody>'
         '</table>'

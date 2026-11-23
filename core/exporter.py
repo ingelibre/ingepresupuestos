@@ -793,7 +793,19 @@ def exportar_presupuesto(proyecto_id):
     # "Presupuesto" no alinea con el nombre del proyecto. En cada fila de
     # datos B+C se mergean → el usuario sigue viendo 1 columna Descripción).
     # Tripartite resultante: Left=A+B=28 · Center=C+D=39 · Right=E+F+G=42.
-    N = 7  # Ítem · Desc1 · Desc2 · Und · Metrado · Precio Unit. · Parcial
+    # Columnas del PU por tipo (issue #54) y especificación bajo la partida
+    # (issue #41): las mismas opciones del PDF, apagadas por defecto.
+    from core.pdf_reports import (
+        DESGLOSE_PU, desglose_ppto, desglose_pu_partidas,
+        especificacion_en_parrafos, especificacion_en_ppto, get_formato)
+    _formato = get_formato()
+    cols_pu = desglose_ppto(_formato)
+    pu_tipo = desglose_pu_partidas(items) if cols_pu else {}
+    con_spec = especificacion_en_ppto(_formato)
+
+    # Ítem · Desc1 · Desc2 · Und · Metrado · [PU por tipo] · Precio · Parcial
+    N = 7 + len(cols_pu)
+    C_PU, C_PAR = N - 1, N
     # Ítem: se ajusta al código más largo del proyecto, hasta cinco tramos
     # («01.02.02.03.06», 14 caracteres) — con 10 fijo «01.02.02.03» ya se
     # cortaba. Lo que gana A lo pierde B, así la descripción (B+C) no cambia
@@ -807,8 +819,10 @@ def exportar_presupuesto(proyecto_id):
                                            # que el centro del header respire)
     ws.column_dimensions['D'].width = 7    # Und
     ws.column_dimensions['E'].width = 12   # Metrado
-    ws.column_dimensions['F'].width = 14   # Precio Unit.
-    ws.column_dimensions['G'].width = 16   # Parcial
+    for k in range(len(cols_pu)):
+        ws.column_dimensions[get_column_letter(6 + k)].width = 11
+    ws.column_dimensions[get_column_letter(C_PU)].width = 14   # Precio Unit.
+    ws.column_dimensions[get_column_letter(C_PAR)].width = 16  # Parcial
 
     # Helper para mergear Descripción (cols 2+3) en una fila dada.
     def _merge_descripcion(row_idx: int):
@@ -848,8 +862,11 @@ def exportar_presupuesto(proyecto_id):
         (2, 'Descripción',  'left'),    # merge con col 3
         (4, 'Und',          'center'),
         (5, 'Cantidad',     'right'),
-        (6, 'Precio',       'right'),
-        (7, 'Parcial',      'right'),
+    ] + [
+        (6 + k, dict(DESGLOSE_PU)[t], 'right') for k, t in enumerate(cols_pu)
+    ] + [
+        (C_PU, 'Precio',    'right'),
+        (C_PAR, 'Parcial',  'right'),
     ]
     # PRE-aplicar fill a TODAS las cols (incluye col 3 que será MergedCell).
     for col_ in range(1, N + 1):
@@ -935,12 +952,12 @@ def exportar_presupuesto(proyecto_id):
             if idx > 0:
                 ws.row_dimensions[r].height = 10
                 r += 1
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=C_PU)
             c_s = ws.cell(r, 1, _nom_sub)
             c_s.font = _font_sub
             c_s.alignment = Alignment(horizontal='left', vertical='center',
                                       wrap_text=True)
-            c_sv = ws.cell(r, 7, _cd_sub)
+            c_sv = ws.cell(r, C_PAR, _cd_sub)
             c_sv.font = _font_sub
             c_sv.number_format = fmt_money
             c_sv.alignment = Alignment(horizontal='right', vertical='center')
@@ -957,39 +974,39 @@ def exportar_presupuesto(proyecto_id):
             # N1: uppercase + underline + slate-900 bold — SIN bordes.
             # Descripción merge cols 2-6 (B-F: cubre Desc1+Desc2+Und+Met+Precio),
             # monto en col 7 (G).
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(1)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc.upper()); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(22, _alto_fila(desc, 75 - _cpl_menos))
 
         elif es_titulo and nivel == 2:
             # N2 rojo — solo color, SIN bordes (igual que el PDF visible)
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(2)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(20, _alto_fila(desc, 65 - _cpl_menos))
 
         elif es_titulo:
             # N3, N4, N5+ — solo color de texto, SIN bordes
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(nivel)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(18, _alto_fila(desc, 60 - _cpl_menos))
@@ -1023,11 +1040,17 @@ def exportar_presupuesto(proyecto_id):
             c_met.number_format = fmt_met
             c_met.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_met)
-            c_pu = ws.cell(r, 6, p['precio_unitario']); c_pu.font = fh
+            val_pu = pu_tipo.get(p.get('id')) or {}
+            for k, t in enumerate(cols_pu):
+                c_t = ws.cell(r, 6 + k, val_pu.get(t) or None); c_t.font = fh
+                c_t.number_format = fmt_money
+                c_t.alignment = Alignment(horizontal='right', vertical='top')
+                celdas_fila.append(c_t)
+            c_pu = ws.cell(r, C_PU, p['precio_unitario']); c_pu.font = fh
             c_pu.number_format = fmt_money
             c_pu.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_pu)
-            c_to = ws.cell(r, 7, total); c_to.font = fh
+            c_to = ws.cell(r, C_PAR, total); c_to.font = fh
             c_to.number_format = fmt_money
             c_to.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_to)
@@ -1043,6 +1066,17 @@ def exportar_presupuesto(proyecto_id):
             ws.row_dimensions[r].height = max(18, _alto_fila(desc, 42 - _cpl_menos))
 
         r += 1
+        if con_spec:
+            for parrafo in especificacion_en_parrafos(p.get('especificaciones')):
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=N)
+                c_e = ws.cell(r, 2, parrafo)
+                c_e.font = Font(name='Inter', size=9, color=C_SLATE_700)
+                c_e.alignment = Alignment(horizontal='left', vertical='top',
+                                          wrap_text=True, indent=_depth + 1)
+                c_e.data_type = 's'
+                ws.row_dimensions[r].height = _alto_fila(
+                    parrafo, 95 + 11 * len(cols_pu) - 3 * _depth)
+                r += 1
         prev_titulo = es_titulo
         prev_nivel  = nivel
 
@@ -1065,11 +1099,11 @@ def exportar_presupuesto(proyecto_id):
         else:
             bold, size, color = False, 10, C_SLATE_700
         # Label cols 2-6 right (Desc1+Desc2+Und+Met+Precio), valor en col 7.
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=C_PU)
         c_l = ws.cell(r, 2, label)
         c_l.font = Font(name='Inter', bold=bold, size=size, color=color)
         c_l.alignment = Alignment(horizontal='right', vertical='center')
-        c_v = ws.cell(r, 7, val)
+        c_v = ws.cell(r, C_PAR, val)
         c_v.font = Font(name='Inter', bold=bold, size=size, color=color)
         c_v.number_format = fmt_money
         c_v.alignment = Alignment(horizontal='right', vertical='center')

@@ -116,7 +116,7 @@ def test_el_pdf_real_lleva_los_separadores(uruguay, tmp_path):
     import pypdf
     ruta = str(tmp_path / 'p.pdf')
     pr.generar_pdf_archivo('presupuesto', PID, ruta)
-    texto = ''.join(p.extract_text() for p in pypdf.PdfReader(ruta).pages)
+    texto = ''.join(p.extract_text() for p in pypdf.PdfReader(ruta).pages).replace('\t', ' ')
     total = F.fmt_doc(d.calcular_totales(PID)[1]['total'], 2, moneda=UY)
     assert total in texto
     # El documento acabado no deja la moneda puesta para el siguiente.
