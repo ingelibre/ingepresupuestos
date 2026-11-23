@@ -22,7 +22,7 @@ def siguiente_item(conn, pid: int, contexto: str | None,
     """Primer código libre: hijo del título `contexto`, hermano de la partida
     `contexto`, o raíz. Se mira el proyecto entero, no el sub-presupuesto."""
     existing = {r[0] for r in conn.execute(
-        "SELECT item FROM partidas WHERE proyecto_id=?", (pid,))}
+        "SELECT item FROM partidas_ppto WHERE proyecto_id=?", (pid,))}
     if contexto and es_titulo:
         prefijo = contexto + '.'
     elif contexto and '.' in contexto:
@@ -215,7 +215,7 @@ def partidas_en_orden(conn, pid: int) -> list[dict]:
     """Partidas AGRUPADAS por sub-presupuesto, el orden que piden
     `core.cronograma.numerar_filas` y `cpm`."""
     return [dict(r) for r in conn.execute(
-        """SELECT p.* FROM partidas p
+        """SELECT p.* FROM partidas_ppto p
            LEFT JOIN sub_presupuestos s ON s.id = p.sub_presupuesto_id
            WHERE p.proyecto_id=?
            ORDER BY (CASE WHEN p.sub_presupuesto_id IS NULL THEN 0 ELSE 1 END),

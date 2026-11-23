@@ -194,7 +194,7 @@ class Operaciones:
                 "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=?"
                 " ORDER BY orden, id", (project_id,)).fetchall()
             n = conn.execute(
-                "SELECT SUM(es_titulo=1), SUM(es_titulo=0) FROM partidas"
+                "SELECT SUM(es_titulo=1), SUM(es_titulo=0) FROM partidas_ppto"
                 " WHERE proyecto_id=?", (project_id,)).fetchone()
         finally:
             conn.close()
@@ -281,7 +281,8 @@ class Operaciones:
                 "resources": [
                     {"resource_id": i['recurso_id'], "code": i['codigo'],
                      "description": i['descripcion'], "type": i['tipo'],
-                     "unit": i['unidad'], "crew": i['cuadrilla'] or 0,
+                     "unit": i['unidad'], "subitem_id": i['sub_partida_id'],
+                     "crew": i['cuadrilla'] or 0,
                      "quantity": i['cantidad'] or 0, "price": i['precio'] or 0,
                      "partial": i['parcial']} for i in items]}
 
@@ -335,6 +336,7 @@ class Operaciones:
         conn = get_db()
         try:
             extra, par = (" AND tipo=?", (type,)) if type else ("", ())
+            extra += " AND COALESCE(codigo,'') != 'SUBPARTIDA'"
             filas, exacto = self._buscar(
                 conn, "recursos",
                 "id, codigo, descripcion, tipo, unidad, precio, indice_inei",
@@ -548,7 +550,7 @@ class Operaciones:
             solo = self._solo_estructura(
                 proy, library_prices, any('library_id' in i for i in items))
             codigos = {r[0]: bool(r[1]) for r in conn.execute(
-                "SELECT item, es_titulo FROM partidas WHERE proyecto_id=? AND "
+                "SELECT item, es_titulo FROM partidas_ppto WHERE proyecto_id=? AND "
                 "sub_presupuesto_id IS ?", (project_id, sub))}
             hechos = []
             for n, it in enumerate(items):
@@ -633,6 +635,9 @@ class Operaciones:
             p, _ = self._partida(conn, item_id)
             if p['es_titulo']:
                 raise ErrorMCP("un título no lleva metrado")
+            if p['es_subanalisis']:
+                raise ErrorMCP("una sub-partida no lleva metrado: su cantidad "
+                               "va en el ACU que la usa")
             if self._filas_bim(conn, item_id):
                 raise ErrorMCP("el metrado de esta partida viene de un modelo "
                                "BIM; usa bim_apply, o desvincula con "
@@ -703,9 +708,9 @@ class Operaciones:
             if rend is not None:
                 ops.aplicar_rendimiento(conn, item_id, rend)
             for n, r in enumerate(resources or []):
-                rec = conn.execute("SELECT tipo, unidad FROM recursos WHERE id=?",
+                rec = conn.execute("SELECT tipo, unidad, codigo FROM recursos WHERE id=?",
                                    (r['resource_id'],)).fetchone()
-                if rec is None:
+                if rec is None or rec['codigo'] == 'SUBPARTIDA':
                     raise ErrorMCP(f"resources[{n}]: no existe el insumo "
                                    f"{r['resource_id']} (usa search_resources)")
                 if not r.get('crew') and 'quantity' not in r:
@@ -734,10 +739,12 @@ class Operaciones:
     def set_price(self, project_id: int, resource_id: int, price: float):
         def cambio(conn, proy):
             from core.database import unificar_precio_recurso
-            r = conn.execute("SELECT unidad FROM recursos WHERE id=?",
+            r = conn.execute("SELECT unidad, codigo FROM recursos WHERE id=?",
                              (resource_id,)).fetchone()
             if r is None:
                 raise ErrorMCP(f"no existe el insumo {resource_id}")
+            if r['codigo'] == 'SUBPARTIDA':
+                raise ErrorMCP("el precio de una sub-partida sale de su propio ACU")
             if (r['unidad'] or '').strip().startswith('%'):
                 raise ErrorMCP("el precio de un insumo en % lo deriva el ACU")
             hechas = unificar_precio_recurso(conn, project_id, resource_id,

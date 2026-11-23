@@ -1402,7 +1402,7 @@ def partidas_por_revisar(conn, pid: int) -> list[dict]:
     rows = conn.execute(
         """SELECT p.id, p.item, p.descripcion, p.precio_unitario,
                   EXISTS(SELECT 1 FROM acu_items a WHERE a.partida_id=p.id) AS acu
-           FROM partidas p WHERE p.proyecto_id=? AND COALESCE(p.es_titulo,0)=0
+           FROM partidas_ppto p WHERE p.proyecto_id=? AND COALESCE(p.es_titulo,0)=0
            ORDER BY COALESCE(p.sub_presupuesto_id,0), p.item""", (pid,)).fetchall()
     out = []
     for r in rows:

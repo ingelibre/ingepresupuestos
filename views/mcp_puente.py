@@ -451,6 +451,7 @@ def refrescar_proyecto_view(v):
     conn = get_db()
     try:
         vivas = {r[0] for r in conn.execute(
+            # sub-partidas: incluidas
             "SELECT id FROM partidas WHERE proyecto_id=?", (v.pid,))}
     finally:
         conn.close()
