@@ -2307,6 +2307,8 @@ class ProyectoView(QWidget):
         _tbtn(_tr("Pie"), self._ir_pie)
         _tbtn("BIM ▾", None, sep_after=True, menu=self._build_bim_menu())
         _tbtn(f"{_tr('IA')} ▾", None, menu=self._build_ia_menu())
+        _tbtn(f"{_tr('Complementos')} ▾", None,
+              menu=self._build_complementos_menu())
 
         hl.addStretch()
 
@@ -11732,6 +11734,36 @@ class ProyectoView(QWidget):
             self.recargar_partidas()
             if self._partida_actual_id is not None:
                 self.cargar_acu(self._partida_actual_id)
+        dlg.deleteLater()
+
+    def _build_complementos_menu(self):
+        """QMenu del botón "Complementos ▾": se llena al abrirlo, porque los
+        complementos se activan y desactivan con el proyecto abierto."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+
+        def _llenar():
+            from views.complementos_menu import menu_complementos
+            subs = menu.findChildren(QMenu)
+            menu.clear()
+            for s in subs:
+                s.deleteLater()
+            if menu_complementos(self, self.window(), self.pid, menu) is not None:
+                menu.addSeparator()
+            menu.addAction(tr("Administrar complementos…")).triggered.connect(
+                lambda *_: self._abrir_complementos())
+        menu.aboutToShow.connect(_llenar)
+        return menu
+
+    def _abrir_complementos(self):
+        if not getattr(self.usuario, 'es_admin', False):
+            QMessageBox.information(self, tr("Complementos"), tr(
+                "Solo un administrador puede gestionar los complementos."))
+            return
+        from views.complementos_dialog import ComplementosDialog
+        dlg = ComplementosDialog(self)
+        dlg.exec()
         dlg.deleteLater()
 
     def _build_bim_menu(self):

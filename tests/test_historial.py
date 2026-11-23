@@ -295,3 +295,51 @@ def test_reemplazar_aplica_solo_lo_marcado_y_es_un_paso(vista):
                "LIKE '%@%'", PID) == [(n - 1,)]
     vista._historial.deshacer()
     assert limpio() == f
+
+
+def test_menu_complementos_se_llena_al_abrir(vista, monkeypatch):
+    import views.complementos_menu as cm
+    from PySide6.QtWidgets import QMenu
+    m = vista._build_complementos_menu()
+    m.aboutToShow.emit()
+    assert [a.text() for a in m.actions()] == ['Administrar complementos…']
+    hecho = []
+    monkeypatch.setattr(cm, 'ejecutar_accion',
+                        lambda p, v, c, r, pid: hecho.append((c.nombre, pid)))
+
+    class C:
+        registros = [1]
+
+        def __init__(self, nombre):
+            self.nombre = nombre
+
+        def de(self, tipo):
+            from types import SimpleNamespace as N
+            return [N(titulo='Hola', extra={'ayuda': ''})] if tipo == 'accion' else []
+    monkeypatch.setattr(cm.cargador, 'cargados', lambda: [C('Uno'), C('Dos')])
+    for _ in range(3):
+        m.aboutToShow.emit()
+        girar(.05)
+    import gc
+    from PySide6.QtCore import QEvent
+    _app.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    assert [a.text() for a in m.actions() if not a.isSeparator()] == [
+        'Uno', 'Dos', 'Administrar complementos…']
+    subs = m.findChildren(QMenu)
+    assert len(subs) == 2
+    subs[1].actions()[0].trigger()
+    assert hecho == [('Dos', PID)]
+    monkeypatch.setattr(cm.cargador, 'cargados', lambda: [C('Uno')])
+    m.aboutToShow.emit()
+    girar(.05)
+    m.actions()[0].trigger()
+    assert hecho[-1] == ('Uno', PID)
+
+
+def test_tema_del_proyecto_se_deshace(ops):                 # noqa: F811
+    h = Historial(PID)
+    sql("UPDATE proyectos SET tema_reporte='z' WHERE id=?", PID)
+    assert h.revisar()
+    h.deshacer()
+    assert (sql("SELECT tema_reporte FROM proyectos WHERE id=?", PID)[0][0] or '') != 'z'

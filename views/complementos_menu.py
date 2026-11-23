@@ -178,12 +178,13 @@ def ejecutar_validador(padre, cargado, registro, pid) -> bool:
     return _proteger(padre, cargado, registro, hacer)
 
 
-def menu_complementos(padre, ventana, pid: int) -> QMenu | None:
-    """El menú para el proyecto `pid`, o None si no hay nada que mostrar."""
+def menu_complementos(padre, ventana, pid: int, menu=None) -> QMenu | None:
+    """El menú para el proyecto `pid` (o `menu`, ya creado, lleno con él);
+    None si no hay nada que mostrar."""
     cs = [c for c in cargador.cargados() if c.registros]
     if not cs:
         return None
-    menu = QMenu(tr("Complementos"), padre)
+    menu = menu if menu is not None else QMenu(tr("Complementos"), padre)
     menu.setToolTipsVisible(True)
 
     def entrada(m, texto, ayuda, fn):
