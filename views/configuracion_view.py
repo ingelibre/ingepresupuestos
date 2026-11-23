@@ -100,6 +100,7 @@ class ConfiguracionView(QWidget):
         ('exportacion', N_("Carpeta de exportación"),  N_("Sistema")),
         ('barra',       N_("Barra de título"),         N_("Sistema")),
         ('ia',          N_("Inteligencia artificial"), N_("Sistema")),
+        ('complementos', N_("Complementos"),         N_("Sistema")),
         ('mcp',         N_("Conexión con IA (MCP)"),   N_("Sistema")),
         ('tuxia',       N_("Asistente Tuxia"),         N_("Sistema")),
         ('apariencia',  N_("Apariencia"),              N_("Interfaz")),
@@ -180,6 +181,7 @@ class ConfiguracionView(QWidget):
             'exportacion': lambda: self._pagina(self._card_ruta_exportacion()),
             'barra':       lambda: self._pagina(self._card_barra_titulo()),
             'ia':          self._make_tab_ia,
+            'complementos': lambda: self._pagina(self._card_complementos()),
             'mcp':         lambda: self._pagina(self._card_mcp()),
             'tuxia':       lambda: self._pagina(self._card_tuxia()),
             'apariencia':  lambda: self._pagina(self._card_apariencia()),
@@ -673,13 +675,13 @@ class ConfiguracionView(QWidget):
         return card
 
     def _guardar_pais(self):
-        from core.paises import PAISES
+        from core.paises import perfil
         iso = self._form_pais.guardar()
         moneda = self._form_pais.cmb_moneda.currentText()
         self._lbl_pais_estado.setText(
             "✓  " + tr("{pais}: {moneda} · {etiqueta} · {impuesto} {pct:g} %. "
                        "Se aplica a proyectos nuevos.").format(
-                pais=PAISES[iso]['nombre'], moneda=moneda,
+                pais=perfil(iso)['nombre'], moneda=moneda,
                 etiqueta=self._form_pais.inp_etiqueta.text(),
                 impuesto=self._form_pais.inp_imp_nombre.text(),
                 pct=self._form_pais.spn_imp_pct.value()))
@@ -1243,6 +1245,38 @@ class ConfiguracionView(QWidget):
         )
 
     # ── Card asistente Tuxia ──────────────────────────────────────────────
+
+    def _card_complementos(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("cfgCard")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(_CARD_SS)
+        vl = QVBoxLayout(card)
+        vl.setContentsMargins(24, 20, 24, 24)
+        vl.setSpacing(12)
+        lbl = QLabel(tr("Complementos"))
+        lbl.setStyleSheet(_SEC_SS)
+        vl.addWidget(lbl)
+        nota = QLabel(tr(
+            "Añaden un país, vocabulario, formatos de Excel, reportes o "
+            "funciones propias. Se instalan desde un archivo .zip o una carpeta "
+            "y quedan apagados hasta que los actives."))
+        nota.setWordWrap(True)
+        nota.setStyleSheet(_NOTE_SS)
+        vl.addWidget(nota)
+        hl = QHBoxLayout()
+        hl.addStretch()
+        btn = QPushButton(tr("Gestionar complementos…"))
+        btn.setFixedHeight(34)
+        btn.setStyleSheet(_BTN_SAVE)
+        btn.clicked.connect(self._abrir_complementos)
+        hl.addWidget(btn)
+        vl.addLayout(hl)
+        return card
+
+    def _abrir_complementos(self):
+        from views.complementos_dialog import ComplementosDialog
+        ComplementosDialog(self).exec()
 
     def _card_mcp(self) -> QFrame:
         from views.mcp_dialog import PanelMCP
