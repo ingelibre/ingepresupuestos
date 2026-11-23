@@ -28,6 +28,8 @@ from utils.formatting import fmt, parse_num, moneda_defecto
 from widgets.num_item import NumItem
 from utils.icons import icon
 from utils.theme import C
+from utils.i18n import tr
+from views.unidades_dialog import poner_lista
 
 
 # ── Paleta — aliases de los tokens centralizados (utils/theme.py) ───────────
@@ -205,6 +207,7 @@ class RecursoFormDialog(UnidadSuperindiceMixin, QDialog):
         # Unidad
         self.inp_unidad = QLineEdit()
         self.inp_unidad.setPlaceholderText("hh · m³ · kg · glb …")
+        poner_lista(self.inp_unidad)
         self.inp_unidad.textEdited.connect(self._auto_superindice_unidad)
         form.addRow("Unidad:", self.inp_unidad)
 
@@ -401,6 +404,11 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         self.btn_export.setMenu(menu_exp)
         top.addWidget(self.btn_export)
 
+        self.btn_unidades = self._mk_btn(tr("Unidades…"), on_dark=True)
+        self.btn_unidades.setToolTip(tr("Unir las formas de escribir una misma unidad (M2, m2, m²)"))
+        self.btn_unidades.clicked.connect(self._gestor_unidades)
+        top.addWidget(self.btn_unidades)
+
         # ── Tarjetas KPI ──
         self.kpi_total = self._mk_kpi("Insumos", "0", SLATE_500)
         self.kpi_mo = self._mk_kpi("Mano de Obra", "0", TIPO_TEXTO['MO'])
@@ -505,6 +513,11 @@ class RecursosView(CatalogoTablaMixin, QWidget):
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.inp_q.setFocus())
 
     # -- carga / consulta ------------------------------------------------------
+    def _gestor_unidades(self):
+        from views.unidades_dialog import GestorUnidadesDialog
+        if GestorUnidadesDialog(self).exec():
+            self.cargar()
+
     def cargar(self):
         self._moneda = moneda_defecto()   # catálogo global → moneda de Configuración (#1)
         from utils.formatting import norm_busqueda
@@ -853,7 +866,6 @@ class RecursosView(CatalogoTablaMixin, QWidget):
     def _importar_excel(self):
         # Excel con cualquier formato: el diálogo detecta la cabecera y deja
         # asignar columnas (Lista del MTOP, Menfis, SINAPI, el formato propio).
-        from utils.i18n import tr
         from core.importar_excel_insumos import leer_libro
         from views.importar_excel_dialog import ImportarExcelDialog
         ruta, _ = QFileDialog.getOpenFileName(

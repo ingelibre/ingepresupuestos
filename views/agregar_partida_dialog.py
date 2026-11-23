@@ -366,18 +366,6 @@ class AgregarPartidaDialog(QDialog):
 
     # ── Tab 2: Ingreso Manual ─────────────────────────────────────────────────
 
-    # Unidades más frecuentes en presupuestos de obra pública
-    UNIDADES = [
-        "m²", "m³", "m", "ml", "km",
-        "und", "pza", "pzas", "jgo", "glb", "gbl",
-        "kg", "tn", "ton",
-        "pto", "cjt", "est",
-        "día", "h", "hr", "mes",
-        "l", "gal", "lt",
-        "ha", "pie²", "pie³",
-        "vj", "rll",
-    ]
-
     def _tab_manual(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background:white;")
@@ -423,10 +411,11 @@ class AgregarPartidaDialog(QDialog):
         self.cmb_m_unidad.setMinimumHeight(38)
         self.cmb_m_unidad.setMinimumWidth(120)
         self.cmb_m_unidad.setStyleSheet(CMB_STYLE)
-        for u in self.UNIDADES:
-            self.cmb_m_unidad.addItem(u)
+        from core.unidades import lista
+        _unidades = lista()
+        self.cmb_m_unidad.addItems(_unidades)
         # Completador que filtra mientras se escribe (MatchContains)
-        comp_u = QCompleter(self.UNIDADES)
+        comp_u = QCompleter(_unidades)
         comp_u.setCaseSensitivity(Qt.CaseInsensitive)
         comp_u.setFilterMode(Qt.MatchContains)
         comp_u.setCompletionMode(QCompleter.PopupCompletion)

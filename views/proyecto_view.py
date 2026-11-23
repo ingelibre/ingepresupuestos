@@ -471,15 +471,6 @@ _BTN_PRIMARY_SS_FALLBACK = (
 class _EditarRecursoDialog(QDialog):
     """Diálogo para editar Descripción, Unidad y Tipo de un recurso del catálogo."""
 
-    _UNIDADES = sorted({
-        "m","m²","m³","ml","km","cm","mm",
-        "kg","tn","ton","lb",
-        "und","glb","pza","pzas","jgo","cjt","vj","est",
-        "hh","hm","h","hr","día","mes","sem",
-        "lt","l","gal","bls","bol",
-        "pie²","pie³","p2","p3","ha","pto","rll",
-    })
-
     def __init__(self, recurso: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Editar insumo"))
@@ -502,18 +493,8 @@ class _EditarRecursoDialog(QDialog):
         # Unidad con autocompletado
         self._inp_und = QLineEdit(recurso.get('unidad', ''))
         self._inp_und.setMinimumHeight(32)
-        from PySide6.QtWidgets import QCompleter
-        comp = QCompleter(self._UNIDADES, self._inp_und)
-        comp.setCaseSensitivity(Qt.CaseInsensitive)
-        comp.setFilterMode(Qt.MatchContains)
-        comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        comp.popup().setStyleSheet(
-            "QListView { background:white; border:1px solid #D4D4D4;"
-            " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
-            "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
-        )
-        self._inp_und.setCompleter(comp)
+        from views.unidades_dialog import poner_lista
+        poner_lista(self._inp_und)
         form.addRow(tr("Unidad:"), self._inp_und)
 
         # Tipo
