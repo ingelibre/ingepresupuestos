@@ -28,7 +28,7 @@ from core.config import BASE_DIR
 # (código, nombre y descripción escritos EN ese idioma: no pasan por tr())
 IDIOMAS: tuple[tuple[str, str, str], ...] = (
     ('es', "Español (Perú)", "Idioma principal de la aplicación"),
-    ('en', "English", "Interface in English (partial — expanding)"),
+    ('en', "English", "Interface in English"),
     ('pt_BR', "Português (Brasil)", "Interface em português do Brasil"),
 )
 

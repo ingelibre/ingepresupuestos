@@ -1340,7 +1340,6 @@
  "La sub-partida se usa en {n} análisis:\n\n{lista}\n\nSi la elimina, esas líneas se quitan y cambian los precios unitarios. ¿Eliminarla?": "A subcomposição é usada em {n} análises:\n\n{lista}\n\nSe for excluída, essas linhas são retiradas e os preços unitários mudam. Excluir?",
  "La sub-partida se usa en {n} análisis: {items}": "A subcomposição é usada em {n} análises: {items}",
  "La suma de coeficientes debe ser 1.000 (actual: {suma:.3f}).": "A soma dos coeficientes deve ser 1.000 (atual: {suma:.3f}).",
- "La traducción al inglés se está expandiendo gradualmente.\nTextos sin traducción se muestran en español.": "A tradução está sendo ampliada aos poucos.\nTextos sem tradução aparecem em espanhol.",
  "La unidad de una sub-partida no puede ser un porcentaje.": "A unidade de uma subcomposição não pode ser uma porcentagem.",
  "La unidad trae la cantidad («100 Kg» → unidad Kg, precio ÷ 100)": "A unidade traz a quantidade («100 Kg» → unidade Kg, preço ÷ 100)",
  "La valorización está cerrada. Reábrela para cambiar su período.": "A medição está fechada. Reabra-a para mudar o período.",

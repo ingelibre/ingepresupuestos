@@ -6,7 +6,7 @@
 
 `tr()` lee `resources/i18n/<código>.json` con el texto en español como clave.
 Estos tests vigilan que toda cadena que pasa por `tr()` tenga su traducción
-pt_BR, que las traducciones conserven los marcadores `{n}` de `.format`, y
+pt_BR y en (issue #39), que las traducciones conserven los marcadores `{n}` de `.format`, y
 que nadie llame a `tr()` al importar un módulo (todavía no se sabe el idioma).
 
 Corre con:  QT_QPA_PLATFORM=offscreen venv/bin/python3 -m pytest tests/test_i18n.py -q
@@ -14,8 +14,11 @@ Corre con:  QT_QPA_PLATFORM=offscreen venv/bin/python3 -m pytest tests/test_i18n
 import ast
 import json
 import os
+import re
 import string
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -33,11 +36,35 @@ def _marcadores(texto: str) -> set[str]:
         return {'<llaves desbalanceadas>'}
 
 
-def test_toda_cadena_de_tr_tiene_traduccion_pt_br():
-    faltan = F.faltantes('pt_BR')
+@pytest.mark.parametrize('cod', ['pt_BR', 'en'])
+def test_toda_cadena_de_tr_tiene_traduccion(cod):
+    faltan = F.faltantes(cod)
     assert not faltan, (
-        f"{len(faltan)} cadenas de tr() sin traducción en resources/i18n/pt_BR.json "
-        f"(python3 scripts/i18n_faltantes.py pt_BR): {faltan[:15]}")
+        f"{len(faltan)} cadenas de tr() sin traducción en resources/i18n/{cod}.json "
+        f"(python3 scripts/i18n_faltantes.py {cod}): {faltan[:15]}")
+
+
+def test_ingles_conserva_etiquetas_html_espacios_y_saltos():
+    """Issue #39: el inglés lleva las mismas etiquetas, saltos y espacios de
+    los extremos que el español (hay frases que se concatenan)."""
+    def forma(t):
+        return (sorted(re.findall(r'</?\w[^>]*>', t)), t.count('\n'), t.count('\t'),
+                t[:len(t) - len(t.lstrip())], t[len(t.rstrip()):], t.count('&'))
+    malos = [(k, v) for k, v in F.catalogo('en').items() if forma(k) != forma(v)]
+    assert not malos, malos[:10]
+
+
+def test_ingles_no_se_rotula_como_parcial():
+    from utils.i18n import IDIOMAS
+    desc = {c: d for c, _n, d in IDIOMAS}
+    assert 'partial' not in desc['en'].lower()
+
+
+def test_ingles_la_columna_inicio_del_gantt_no_dice_home():
+    fuente = (RAIZ / 'views' / 'cronograma_view.py').read_text(encoding='utf-8')
+    assert 'tr("Inicio")' not in fuente
+    en = F.catalogo('en')
+    assert (en['Inicio'], en['Inicio:']) == ('Home', 'Start:')
 
 
 def test_los_json_son_diccionarios_de_texto_sin_vacios():
@@ -134,5 +161,4 @@ def test_portugues_se_ofrece_en_configuracion_y_viaja_en_el_empaquetado():
 
 
 if __name__ == '__main__':
-    import pytest
     sys.exit(pytest.main([__file__, '-q']))

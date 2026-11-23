@@ -334,14 +334,6 @@ class ConfiguracionView(QWidget):
         hl.addStretch()
         vl.addLayout(hl)
 
-        nota2 = QLabel(
-            tr("La traducción al inglés se está expandiendo gradualmente.\n"
-               "Textos sin traducción se muestran en español.")
-        )
-        nota2.setWordWrap(True)
-        nota2.setStyleSheet(_NOTE_SS)
-        vl.addWidget(nota2)
-
         self._lbl_idioma_estado = QLabel("")
         self._lbl_idioma_estado.setStyleSheet(
             f"color:{GREEN}; font-size:11px; background:transparent; border:none;"
