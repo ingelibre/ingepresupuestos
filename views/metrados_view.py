@@ -152,6 +152,15 @@ class MetradosView(QWidget):
             " font-size:11px; padding:3px 12px; min-height:0; }"
             "QPushButton:hover { background:rgba(255,255,255,0.30); }"
         )
+        hist = getattr(self.parent(), '_historial', None)
+        if hist is not None and self._editable:
+            for b in hist.botones(
+                    "QPushButton { background:rgba(255,255,255,0.18); color:white;"
+                    " border:1px solid rgba(255,255,255,0.35); border-radius:4px;"
+                    " font-size:14px; padding:1px 9px; min-height:0; }"
+                    "QPushButton:hover { background:rgba(255,255,255,0.30); }"
+                    "QPushButton:disabled { color:rgba(255,255,255,0.35); }"):
+                hl.addWidget(b)
         self.btn_imprimir = QPushButton(tr("Imprimir…"))
         self.btn_imprimir.setIcon(icon("imprimir"))
         self.btn_imprimir.setIconSize(QSize(14, 14))

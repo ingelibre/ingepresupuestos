@@ -3242,6 +3242,13 @@ class ProyectoView(QWidget):
         )
         btn_met_add.clicked.connect(self._metrado_fila_btn)
         hl.addWidget(btn_met_add)
+        for b in self._historial.botones(
+                f"QPushButton {{ background:{SILVER_100}; color:{SLATE_500};"
+                f" border:1px solid {SILVER_300}; border-radius:4px;"
+                f" font-size:13px; padding:0 7px; }}"
+                f"QPushButton:disabled {{ color:{SILVER_300}; }}"):
+            b.setFixedHeight(24)
+            hl.addWidget(b)
         hl.addWidget(_boton_guardar(tr("Guardar metrados"), self._metrado_guardar))
         _fijar_alto_cabecera(hdr)
         vl.addWidget(hdr)

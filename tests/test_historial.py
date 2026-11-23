@@ -343,3 +343,97 @@ def test_tema_del_proyecto_se_deshace(ops):                 # noqa: F811
     assert h.revisar()
     h.deshacer()
     assert (sql("SELECT tema_reporte FROM proyectos WHERE id=?", PID)[0][0] or '') != 'z'
+
+
+# ── Metrados ────────────────────────────────────────────────────────────────
+
+def _con_planilla():
+    return sql("SELECT md.partida_id FROM metrados_detalle md JOIN partidas q ON "
+               "q.id=md.partida_id WHERE q.proyecto_id=? AND q.sub_presupuesto_id "
+               "IS NULL GROUP BY 1 ORDER BY COUNT(*) DESC", PID)[0][0]
+
+
+def _z(w, tecla=Qt.Key_Z):
+    from PySide6.QtTest import QTest
+    QTest.keyClick(w, tecla, Qt.ControlModifier)
+    girar()
+
+
+def _planilla(v, cual):
+    p = _con_planilla()
+    if cual == 'hoja':
+        v._ir_metrados()
+        girar()
+        t = v._metrados_view.tbl
+        fila, col = v._metrados_view._dim_rows_of(p)[20], 4
+    else:
+        v.tree.setCurrentItem(v._id_to_item[p])
+        v._cargar_metrados_auto(p)
+        v.tabs.setCurrentWidget(v.tbl_met.parentWidget().parentWidget()) \
+            if hasattr(v, 'tabs') else None
+        girar()
+        t, fila, col = v.tbl_met, 20, 2
+    v.window().show()
+    v.window().activateWindow()
+    t.setFocus()
+    girar()
+    return t, fila, col
+
+
+@pytest.mark.parametrize('cual', ['hoja', 'panel'])
+def test_metrados_ctrl_z_con_la_celda_siguiente_abierta(vista, cual):
+    from PySide6.QtTest import QTest
+    v = vista
+    t, fila, col = _planilla(v, cual)
+    f = limpio()
+    t.setCurrentCell(fila, col)
+    t.item(fila, col).setText('7.77')
+    girar()
+    assert pasos(v) == ['metrado']
+    cambiado = limpio()
+    t.scrollToBottom()
+    t.setCurrentCell(fila + 1, col)
+    t.editItem(t.item(fila + 1, col))
+    girar()
+    ed = _app.focusWidget()
+    assert ed is not t                              # celda abierta
+    QTest.keyClicks(ed, '5')
+    _z(ed)                                          # lo escrito en la celda
+    assert limpio() == cambiado and ed.text() != '5'
+    vs = t.verticalScrollBar().value()
+    _z(ed)                                          # ya no hay: el proyecto
+    assert limpio() == f and pasos(v) == []
+    assert t.currentRow() == fila + 1 and t.verticalScrollBar().value() == vs
+    _z(t, Qt.Key_Y)
+    assert limpio() == cambiado and t.item(fila, col).text() == '7.77'
+
+
+@pytest.mark.parametrize('cual', ['hoja', 'panel'])
+def test_metrados_borrar_filas_y_botones(vista, cual):
+    from PySide6.QtWidgets import QPushButton
+    v = vista
+    t, fila, col = _planilla(v, cual)
+    f = limpio()
+    dueno = v._metrados_view if cual == 'hoja' else v
+    des, reh = [next(b for b in dueno.findChildren(QPushButton) if b.text() == x
+                     and b.isVisibleTo(dueno) is not None) for x in '↶↷']
+    assert not des.isEnabled() and not reh.isEnabled()
+    if cual == 'hoja':
+        v._metrados_view._eliminar_filas([fila, fila + 1])
+    else:
+        t.clearSelection()
+        t.selectRow(fila)
+        v._met_eliminar_seleccionadas()
+    girar()
+    assert limpio() != f and len(pasos(v)) == 1
+    n = t.rowCount()
+    assert des.isEnabled()
+    des.click()
+    girar()
+    assert limpio() == f and t.rowCount() > n and reh.isEnabled()
+    reh.click()
+    girar()
+    assert limpio() != f and t.rowCount() == n
+    des.click()
+    girar()
+    assert limpio() == f
