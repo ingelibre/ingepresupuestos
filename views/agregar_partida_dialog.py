@@ -22,7 +22,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel, QSortFilterProx
 from PySide6.QtGui import QFont, QColor, QCursor
 
 from core.database import get_db, _recalcular_pu, copiar_items_acu
-from utils.formatting import fmt, moneda_defecto
+from utils.formatting import fmt, moneda_defecto, siguiente_codigo
 from utils.i18n import N_, tr
 
 # Los CU vienen de la Biblioteca (catálogo global, sin moneda propia): se
@@ -967,31 +967,14 @@ class AgregarPartidaDialog(QDialog):
         if ctx and es_titulo:
             # Insertar DENTRO del título → como hijo
             prefijo = ctx
-            for n in range(1, 1000):
-                candidate = f"{prefijo}.{n:02d}"
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
-        elif ctx and not es_titulo:
+        elif ctx:
             # Insertar DESPUÉS de la partida → hermano al mismo nivel
-            partes = ctx.split('.')
-            for n in range(1, 1000):
-                partes[-1] = f"{n:02d}"
-                candidate  = '.'.join(partes)
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
+            prefijo = ctx.rpartition('.')[0]
         else:
-            # No hay títulos → siguiente en raíz
-            for n in range(1, 1000):
-                candidate = f"{n:02d}"
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
-        return "99"
+            prefijo = ''      # sin títulos → siguiente en la raíz
+        candidate = siguiente_codigo(prefijo, existing)
+        existing.add(candidate)
+        return candidate
 
     def _ultimo_titulo(self, conn) -> str | None:
         """Código del último título del subpresupuesto activo (orden natural).

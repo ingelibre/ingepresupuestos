@@ -119,17 +119,18 @@ def _franja_blanca(img, x0, x1, y0, y1) -> bool:
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 def test_texto_escala_solo_admite_los_pasos_fijos():
-    assert pr.ESCALAS_TEXTO == (100, 90, 80)
+    assert pr.ESCALAS_TEXTO == (100, 90, 80, 75)
     for valor, esperado in (('100', 1.0), ('90', 0.9), ('80', 0.8),
                             ('', 1.0), (None, 1.0), ('abc', 1.0),
                             ('120', 1.0),      # no hay pasos por encima de 100
-                            ('50', 0.8),       # ni por debajo de 80
-                            ('88', 0.9), ('92', 0.9), ('97', 1.0)):
+                            ('50', 0.75),      # ni por debajo de 75
+                            ('75', 0.75), ('88', 0.9), ('92', 0.9), ('97', 1.0)):
         assert pr.texto_escala({'rep_escala_texto': valor}) == esperado, valor
 
 
 def test_reducir_da_menos_paginas_con_el_mismo_texto():
     for tipo in ('presupuesto', 'insumos', 'metrados'):
+        assert _pdf(tipo, 75).pageCount() <= _pdf(tipo, 80).pageCount(), tipo
         p100 = _pdf(tipo, 100)
         p80 = _pdf(tipo, 80)
         assert p80.pageCount() <= p100.pageCount(), tipo

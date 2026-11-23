@@ -32,7 +32,7 @@ from PySide6.QtCore import QBuffer, QIODevice, QMarginsF, QRectF, QSizeF, Qt
 from PySide6.QtGui import (
     QFont, QFontMetricsF,
     QBrush, QColor, QFont, QFontMetrics, QPageLayout, QPageSize, QPainter,
-    QPdfWriter, QPen, QTextDocument,
+    QPdfWriter, QPen, QTextCharFormat, QTextCursor, QTextDocument,
 )
 
 from core.database import (
@@ -42,7 +42,7 @@ from core.database import (
 )
 from core.paises import etiqueta_tributaria
 from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money, ITEM_TRAMOS_POR_LINEA,
-                             texto_rendimiento)
+                             moneda_plural, monto_en_letras, texto_rendimiento)
 
 # ── Configuración de formato (editable por el usuario) ───────────────────────
 # Las claves se leen desde la tabla `configuracion`; los defaults aquí abajo se
@@ -303,7 +303,7 @@ def logo_escala(formato: dict | None = None) -> float:
 # margen derecho, por eso no hay pasos por encima de 100 —si algún día se
 # agregan, verificar Presupuesto, Insumos y Metrados en A4 retrato—. Pedido
 # de David Ramos (2 sep 2026): «que quepa en menos páginas».
-ESCALAS_TEXTO = (100, 90, 80)
+ESCALAS_TEXTO = (100, 90, 80, 75)
 
 
 def texto_escala(formato: dict | None = None) -> float:
@@ -469,88 +469,9 @@ def _moneda_simbolo(moneda: str) -> str:
     return moneda_cfg(moneda)['simbolo']
 
 
-# ── Número a letras (español, formato peruano de obras) ──────────────────────
-
-_UNIDADES = [
-    '', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho',
-    'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince',
-    'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve'
-]
-_DECENAS = ['', '', 'veinte', 'treinta', 'cuarenta', 'cincuenta',
-            'sesenta', 'setenta', 'ochenta', 'noventa']
-_CENTENAS = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos',
-             'quinientos', 'seiscientos', 'setecientos', 'ochocientos',
-             'novecientos']
-
-
-def _hasta_999(n: int) -> str:
-    if n == 0:    return ''
-    if n == 100:  return 'cien'
-    s = []
-    c, r = divmod(n, 100)
-    if c:
-        s.append(_CENTENAS[c])
-    if r < 20:
-        if r:
-            s.append(_UNIDADES[r])
-    else:
-        d, u = divmod(r, 10)
-        if u == 0:
-            s.append(_DECENAS[d])
-        else:
-            s.append(f'{_DECENAS[d]} y {_UNIDADES[u]}')
-    return ' '.join(s).strip()
-
-
-def _entero_a_letras(n: int) -> str:
-    if n == 0:
-        return 'cero'
-    if n < 0:
-        return 'menos ' + _entero_a_letras(-n)
-    millones, resto = divmod(n, 1_000_000)
-    miles, unidades = divmod(resto, 1_000)
-    out = []
-    if millones:
-        if millones == 1:
-            out.append('un millón')
-        else:
-            out.append(f'{_hasta_999(millones)} millones')
-    if miles:
-        if miles == 1:
-            out.append('mil')
-        else:
-            grp = _hasta_999(miles)
-            # "veintiuno mil" → "veintiún mil" (apocope)
-            grp = grp.replace('veintiuno', 'veintiún').replace(' uno', ' un')
-            out.append(f'{grp} mil')
-    if unidades:
-        grp = _hasta_999(unidades)
-        out.append(grp)
-    return ' '.join(out).strip()
-
-
-def _monto_en_letras(monto: float, moneda: str = 'Soles') -> str:
-    """Convierte un monto a letras con formato peruano:
-    'CIENTO OCHENTA Y UN MIL TRESCIENTOS CON 28/100 SOLES'
-    """
-    try:
-        m = float(monto or 0)
-    except (TypeError, ValueError):
-        m = 0.0
-    entero = int(m)
-    centavos = int(round((m - entero) * 100))
-    if centavos >= 100:
-        entero += 1
-        centavos -= 100
-    letras = _entero_a_letras(entero).upper()
-    return f"{letras} CON {centavos:02d}/100 {_moneda_plural(moneda)}"
-
-
-def _moneda_plural(moneda: str) -> str:
-    """Nombre de la moneda para la línea «Son: … CON 00/100 <MONEDA>»."""
-    return {
-        'Dólares': 'DÓLARES AMERICANOS',
-    }.get(moneda or 'Soles', str(moneda or 'Soles').upper())
+# Nombres históricos: los importan word_reports, odt_reports y ai_specs.
+_monto_en_letras = monto_en_letras
+_moneda_plural = moneda_plural
 
 
 def _hoy_formateado() -> str:
@@ -3890,6 +3811,64 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
 # Renderizador a PDF — encabezado + contenido + pie con paginación
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Un monto solo en su celda: «1,151,768,681.69», «COP$ 924.206.545,00», «12.5%».
+_RE_MONTO_CELDA = re.compile(r"^[^\d\n]{0,10}?-?\d[\d.,' \u00a0\u202f]*%?$")
+
+
+def _ajustar_montos(doc: QTextDocument) -> int:
+    """Estrecha la letra de los montos que no caben en su columna (issue #49).
+
+    QTextDocument parte en dos renglones el número que no entra («44,000,» +
+    «000.00»), que se lee como otro monto. Solo toca los números partidos: un
+    reporte donde todo cabe sale igual que antes. Primero estrecha (hasta 62 %
+    del ancho) y, si aun así no entra, además achica la letra.
+    Devuelve cuántas celdas se ajustaron."""
+    tocadas = 0
+    for _ in range(3):          # al estrechar se reparten de nuevo las columnas
+        doc.documentLayout().documentSize()        # fuerza la composición
+        cambios = []
+        b = doc.begin()
+        while b.isValid():
+            lay = b.layout()
+            if lay.lineCount() > 1 and len(b.text()) < 40:
+                txt = b.text().strip()
+                # A la izquierda solo cuenta con símbolo delante (los KPI del
+                # resumen): «01.02.03» es un código de ítem, no un monto.
+                der = bool(b.blockFormat().alignment() & Qt.AlignRight)
+                if ((der or (txt and not txt[0].isdigit()))
+                        and _RE_MONTO_CELDA.match(txt)):
+                    ancho = min(lay.lineAt(i).width()
+                                for i in range(lay.lineCount()))
+                    cur = QTextCursor(b)
+                    cur.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                    cambios.append((cur, lay, ancho, txt))
+            b = b.next()
+        if not cambios:
+            break
+        tocadas = max(tocadas, len(cambios))
+        c0 = QTextCursor(doc)
+        c0.beginEditBlock()
+        for cur, lay, ancho, txt in cambios:
+            it = cur.block().begin()
+            fuente = it.fragment().charFormat().font()
+            base = it.fragment().charFormat().fontPointSize() or fuente.pointSizeF()
+            actual = fuente.stretch() or 100
+            fuente.setStretch(100)
+            natural = QFontMetricsF(fuente).horizontalAdvance(txt)
+            est = int(100 * (ancho - 4) / natural) if natural else actual
+            est = min(est, actual - 4)
+            cf = QTextCharFormat()
+            cf.setFontStretch(max(_MONTO_ESTRECHO_MIN, est))
+            if est < _MONTO_ESTRECHO_MIN and base > 0:
+                cf.setFontPointSize(max(5.0, base * est / _MONTO_ESTRECHO_MIN))
+            cur.mergeCharFormat(cf)
+        c0.endEditBlock()
+    return tocadas
+
+
+_MONTO_ESTRECHO_MIN = 62
+
+
 class _PdfRenderer:
     """Renderiza HTML a PDF con encabezado y pie de página dibujados con QPainter."""
 
@@ -4462,6 +4441,7 @@ class _PdfRenderer:
             lw, lh = body_w / k, body_h / k
             doc.setPageSize(QSizeF(lw, lh))
             doc.setDocumentMargin(0)
+            _ajustar_montos(doc)
 
             n_body_pages = max(1, doc.pageCount())
             total_pages = n_body_pages + (1 if self.with_cover else 0)
@@ -4529,6 +4509,7 @@ class _PdfRenderer:
         # Setear ancho fijo; alto "infinito" para medir el contenido completo
         doc.setPageSize(QSizeF(body_w, 1_000_000))
         doc.setDocumentMargin(0)
+        _ajustar_montos(doc)
         h = doc.documentLayout().documentSize().height()
         return doc, h
 

@@ -8,10 +8,11 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import WorksheetProperties, PageSetupProperties
 from openpyxl.worksheet.page import PageMargins
 import os
+import re
 import io
 from core.database import (get_db, calcular_totales, get_acu_items, get_decimales_metrado,
                            get_decimales_cant_acu, cuadrilla_reporte, ORDEN_ACU_SQL)
-from utils.formatting import ITEM_TRAMOS_POR_LINEA, fmt as _fmt_moneda
+from utils.formatting import ITEM_TRAMOS_POR_LINEA, fmt as _fmt_moneda, monto_en_letras
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
 # contiene todos los pesos y variantes (italic en su propio archivo).
@@ -144,49 +145,30 @@ def _escribir_pie(ws, r, pie, n_cols=None):
             cell.alignment = Alignment(horizontal='center')
 
 
-# ─── Monto en letras (español) ────────────────────────────────────────────────
+# ─── Guardado común ───────────────────────────────────────────────────────────
 
-_UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
-             'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE',
-             'DIECIOCHO', 'DIECINUEVE']
-_DECENAS  = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA',
-             'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA']
-_CENTENAS = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS',
-             'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS']
-
-
-def _n2l(n):
-    if n == 0:
-        return 'CERO'
-    if n < 0:
-        return 'MENOS ' + _n2l(-n)
-    p = []
-    if n >= 1_000_000:
-        m = n // 1_000_000; n %= 1_000_000
-        p.append('UN MILLÓN' if m == 1 else _n2l(m) + ' MILLONES')
-    if n >= 1_000:
-        k = n // 1_000; n %= 1_000
-        p.append('MIL' if k == 1 else _n2l(k) + ' MIL')
-    if n >= 100:
-        c = n // 100; n %= 100
-        p.append('CIEN' if (c == 1 and n == 0) else _CENTENAS[c])
-    if n >= 20:
-        d, u = n // 10, n % 10
-        p.append(_DECENAS[d] if u == 0 else _DECENAS[d] + ' Y ' + _UNIDADES[u])
-    elif n > 0:
-        p.append(_UNIDADES[n])
-    return ' '.join(p)
-
-
-def _monto_letras(monto, moneda='Soles'):
-    from core.pdf_reports import _moneda_plural
-    try:
-        monto   = round(float(monto), 2)
-        entero  = int(monto)
-        cts     = round((monto - entero) * 100)
-        return f"{_n2l(entero)} CON {cts:02d}/100 {_moneda_plural(moneda)}"
-    except Exception:
-        return ''
+def _guardar_libro(wb, buf):
+    """Guarda el libro ensanchando las columnas donde un número no cabría
+    (Excel lo muestra como «#####»; issue #49, montos en pesos). Una columna
+    donde todo cabe conserva su ancho."""
+    for ws in wb.worksheets:
+        combinadas = {(m.min_row, m.min_col) for m in ws.merged_cells.ranges
+                      if m.max_col > m.min_col}
+        for fila in ws.iter_rows():
+            for c in fila:
+                if (not isinstance(c.value, (int, float))
+                        or '#,##0' not in (c.number_format or '')
+                        or (c.row, c.column) in combinadas):
+                    continue
+                m = re.search(r'#,##0\.(0+)', c.number_format)
+                texto = f"{c.value:,.{len(m.group(1)) if m else 0}f}"
+                # Ancho en caracteres de la fuente normal (11 pt).
+                pide = (len(texto) * (c.font.sz or 11) / 11
+                        * (1.12 if c.font.b else 1.0)) + 1.0
+                dim = ws.column_dimensions[get_column_letter(c.column)]
+                if pide > (dim.width or 8.43):
+                    dim.width = round(pide, 1)
+    wb.save(buf)
 
 
 # ─── Cálculo dinámico de rubros del pie ───────────────────────────────────────
@@ -369,7 +351,7 @@ def exportar_formula_polinomica(proyecto_id):
     ws.column_dimensions['E'].width = 18
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -1087,7 +1069,7 @@ def exportar_presupuesto(proyecto_id):
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
     for c in range(1, N + 1):
         ws.cell(r, c).border = Border()
-    c_son = ws.cell(r, 1, f"Son: {_monto_letras(monto_total, proyecto['moneda'])}.")
+    c_son = ws.cell(r, 1, f"Son: {monto_en_letras(monto_total, proyecto['moneda'])}.")
     c_son.font = Font(name='Inter', italic=True, size=10, color=C_SLATE_700)
     c_son.alignment = Alignment(horizontal='right', vertical='center', wrap_text=True)
     ws.row_dimensions[r].height = 22
@@ -1098,7 +1080,7 @@ def exportar_presupuesto(proyecto_id):
                        proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -1405,7 +1387,7 @@ def exportar_acus(proyecto_id):
     _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 3), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -1705,7 +1687,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
         _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 4), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -2497,7 +2479,7 @@ def exportar_valorizacion(val_id):
     # Inmovilizar las filas del encabezado (quedan fijas al hacer scroll).
     ws.freeze_panes = ws.cell(row=data_start, column=1)
     _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 8), n_cols=N, proyecto=proyecto)
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    buf = io.BytesIO(); _guardar_libro(wb, buf); buf.seek(0)
     return buf
 
 
@@ -2507,7 +2489,7 @@ def exportar_metrados(proyecto_id):
     _hoja_metrados(wb, proyecto_id)
     _hoja_acero_metrados(wb, proyecto_id)  # solo crea hoja si hay datos de acero
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -2517,7 +2499,7 @@ def exportar_gastos_generales(proyecto_id):
     wb.remove(wb.active)
     _hoja_gastos_generales(wb, proyecto_id)
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -2612,7 +2594,7 @@ def exportar_reporte_completo(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     ws_p.merge_cells(start_row=r + 1, start_column=1, end_row=r + 1, end_column=N)
-    ws_p.cell(r + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_p.cell(r + 1, 1, f"Son :   {monto_en_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     _escribir_pie(ws_p, r + 2, pie)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], [10, 42, 6, 7, 10, 12, 12, 12, 14]):
         ws_p.column_dimensions[col].width = w
@@ -2804,7 +2786,7 @@ def exportar_reporte_completo(proyecto_id):
             _fila_i(lb, v)
 
     ws_i.merge_cells(start_row=ri + 1, start_column=1, end_row=ri + 1, end_column=Ni)
-    ws_i.cell(ri + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_i.cell(ri + 1, 1, f"Son :   {monto_en_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], [14, 36, 6, 8, 12, 12, 12, 6]):
         ws_i.column_dimensions[col].width = w
     _setup_impresion(ws_i, n_filas_encabezado=_filas_hdr(ws_i, 8))
@@ -2830,7 +2812,7 @@ def exportar_reporte_completo(proyecto_id):
         pass
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -3077,7 +3059,7 @@ def exportar_pdf(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {monto_en_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 2. ANÁLISIS DE COSTOS UNITARIOS
@@ -3284,7 +3266,7 @@ def exportar_pdf(proyecto_id):
     story.append(t_ti)
 
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {monto_en_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 4. PLANILLA DE SUSTENTO DE METRADOS

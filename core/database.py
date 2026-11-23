@@ -1123,6 +1123,39 @@ def set_config(clave, valor):
     conn.commit()
     conn.close()
 
+def igualar_codigos_hermanos(conn, proyecto_id) -> int:
+    """Pone el mismo ancho a los códigos hermanos de los grupos que pasan de
+    99 («01.99» y «01.100» → «01.099» y «01.100»): todo el programa ordena por
+    el texto del código. Los grupos normales no se tocan. No hace commit.
+    Devuelve cuántas filas cambió."""
+    filas = conn.execute(
+        "SELECT id, item, sub_presupuesto_id AS sub FROM partidas "
+        "WHERE proyecto_id=?", (proyecto_id,)).fetchall()
+    anchos: dict = {}        # (sub, códigos del padre como números) → anchos
+    def _num(t):
+        return int(t) if t.isdecimal() else t
+    for f in filas:
+        tramos = (f['item'] or '').split('.')
+        if tramos[-1].isdecimal():
+            anchos.setdefault((f['sub'], tuple(map(_num, tramos[:-1]))),
+                              set()).add(len(tramos[-1]))
+    largos = {k: max(v) for k, v in anchos.items() if len(v) > 1 and max(v) > 2}
+    if not largos:
+        return 0
+    cambios = 0
+    for f in filas:
+        tramos = (f['item'] or '').split('.')
+        nums = tuple(map(_num, tramos))
+        nuevo = '.'.join(
+            t.zfill(largos[(f['sub'], nums[:i])])
+            if t.isdecimal() and (f['sub'], nums[:i]) in largos else t
+            for i, t in enumerate(tramos))
+        if nuevo != f['item']:
+            conn.execute("UPDATE partidas SET item=? WHERE id=?", (nuevo, f['id']))
+            cambios += 1
+    return cambios
+
+
 def calcular_totales(proyecto_id):
     conn = get_db()
     partidas = conn.execute(

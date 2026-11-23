@@ -221,3 +221,100 @@ def partir_item(item, sep: str = "\n", max_tramos: int = ITEM_TRAMOS_POR_LINEA) 
     lineas = [".".join(tramos[i:i + max_tramos])
               for i in range(0, len(tramos), max_tramos)]
     return (("." + sep).join(lineas[:-1]) + "." + sep + lineas[-1]) if len(lineas) > 1 else txt
+
+
+def siguiente_codigo(prefijo: str, existentes) -> str:
+    """Primer código libre bajo `prefijo` ('' = raíz): «01» → «01.05».
+
+    Los números se comparan como números: si el grupo pasó de 99 hijas y usa
+    tres dígitos («01.001»), «01.01» NO está libre. El ancho sigue al del
+    grupo, dos dígitos como mínimo."""
+    ini = f'{prefijo}.' if prefijo else ''
+    usados, ancho = set(), 2
+    for it in existentes:
+        cola = (it or '')[len(ini):]
+        if (it or '').startswith(ini) and cola.isdecimal():
+            usados.add(int(cola))
+            ancho = max(ancho, len(cola))
+    n = 1
+    while n in usados:
+        n += 1
+    return f'{ini}{n:0{ancho}d}'
+
+
+# ── Montos en letras («Son: … CON 00/100 SOLES») ─────────────────────────────
+
+_UNIDADES = (
+    '', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho',
+    'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince',
+    'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
+    'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco',
+    'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve')
+_DECENAS = ('', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta',
+            'setenta', 'ochenta', 'noventa')
+_CENTENAS = ('', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos',
+             'quinientos', 'seiscientos', 'setecientos', 'ochocientos',
+             'novecientos')
+
+
+def _hasta_999(n: int) -> str:
+    if n == 100:
+        return 'cien'
+    c, r = divmod(n, 100)
+    if r < 30:
+        resto = _UNIDADES[r]
+    else:
+        d, u = divmod(r, 10)
+        resto = _DECENAS[d] + (f' y {_UNIDADES[u]}' if u else '')
+    return f'{_CENTENAS[c]} {resto}'.strip()
+
+
+def _apocope(txt: str) -> str:
+    """Delante de «mil», «millones»…: «veintiuno» → «veintiún», «uno» → «un»."""
+    if txt.endswith('veintiuno'):
+        return txt[:-len('veintiuno')] + 'veintiún'
+    return txt[:-1] if txt.endswith('uno') else txt
+
+
+def entero_a_letras(n: int) -> str:
+    """Entero en letras, sin tope de tamaño. Escala larga, la del español:
+    mil millones = 10⁹, un billón = 10¹²."""
+    if n == 0:
+        return 'cero'
+    if n < 0:
+        return 'menos ' + entero_a_letras(-n)
+    out = []
+    for escala, singular, plural in ((10 ** 12, 'un billón', 'billones'),
+                                     (10 ** 6, 'un millón', 'millones'),
+                                     (1000, 'mil', 'mil')):
+        grupo, n = divmod(n, escala)
+        if grupo == 1:
+            out.append(singular)
+        elif grupo:
+            out.append(f'{_apocope(entero_a_letras(grupo))} {plural}')
+    if n:
+        out.append(_hasta_999(n))
+    return ' '.join(out)
+
+
+def moneda_plural(moneda: str) -> str:
+    """Nombre de la moneda para la línea «Son: … CON 00/100 <MONEDA>»."""
+    return {
+        'Dólares': 'DÓLARES AMERICANOS',
+    }.get(moneda or 'Soles', str(moneda or 'Soles').upper())
+
+
+def monto_en_letras(monto: float, moneda: str = 'Soles') -> str:
+    """'CIENTO OCHENTA Y UN MIL TRESCIENTOS CON 28/100 SOLES'.
+
+    Única para todos los reportes. Parte del texto a dos decimales, el mismo
+    que se imprime en cifras: letras y números no pueden discrepar."""
+    try:
+        texto = f'{float(monto or 0):.2f}'
+    except (TypeError, ValueError):
+        texto = '0.00'
+    neg = texto.startswith('-') and float(texto) != 0
+    entero, centavos = texto.lstrip('-').split('.')
+    letras = entero_a_letras(int(entero)).upper()
+    return (f"{'MENOS ' if neg else ''}{letras} CON {centavos}/100 "
+            f"{moneda_plural(moneda)}")

@@ -547,6 +547,57 @@ def _add_footer(doc: Document, proy: dict):
 
 # ── Resumen Ejecutivo ─────────────────────────────────────────────────────
 
+def _guardar_doc(doc, archivo: str) -> None:
+    """Guarda el documento estrechando los montos que no caben en su celda
+    (issue #49): Word los partía en dos renglones. Usa el «ajuste de escala»
+    del carácter; los que caben no se tocan."""
+    from PySide6.QtGui import (QFont, QFontDatabase, QFontMetricsF,
+                               QGuiApplication)
+    from core.exporter import _FONT_B, _FONT_R
+    from core.pdf_reports import _RE_MONTO_CELDA
+    if QGuiApplication.instance() is not None:
+        # Se mide con la fuente del documento, no con la que la sustituya.
+        if 'Inter' not in QFontDatabase.families():
+            for ruta in (_FONT_R, _FONT_B):
+                QFontDatabase.addApplicationFont(ruta)
+        for tabla in doc.tables:
+            for fila in tabla.rows:
+                for celda in fila.cells:
+                    if celda.width is None:
+                        continue
+                    # 0,19 cm de margen de celda por lado (el de Word).
+                    libre = celda.width.pt - 2 * 5.4
+                    for par in celda.paragraphs:
+                        if not _RE_MONTO_CELDA.match(par.text.strip()):
+                            continue
+                        ancho = 0.0
+                        for run in par.runs:
+                            f = QFont('Inter')
+                            # A 10 veces el tamaño: se mide sin redondeo a px.
+                            f.setPixelSize(int((run.font.size.pt if run.font.size
+                                                else 10) * 10))
+                            f.setBold(bool(run.bold))
+                            ancho += QFontMetricsF(f).horizontalAdvance(run.text) / 10
+                        # Con holgura: quien abre puede tener otra fuente.
+                        if libre <= 0 or ancho <= libre * 0.95:
+                            continue
+                        esc = max(50, int(90 * libre / ancho))
+                        for run in par.runs:
+                            w = OxmlElement('w:w')
+                            w.set(qn('w:val'), str(esc))
+                            rpr = run._element.get_or_add_rPr()
+                            # El esquema exige w:w antes de w:kern/w:position/w:sz
+                            sig = next((rpr.find(qn(t)) for t in (
+                                'w:kern', 'w:position', 'w:sz', 'w:szCs',
+                                'w:highlight', 'w:u', 'w:effect', 'w:lang')
+                                if rpr.find(qn(t)) is not None), None)
+                            if sig is not None:
+                                sig.addprevious(w)
+                            else:
+                                rpr.append(w)
+    doc.save(archivo)
+
+
 def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
     """Genera el Resumen Ejecutivo en formato Word (.docx).
 
@@ -853,7 +904,7 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
             for c in row.cells:
                 _cell_border(c, 'bottom', sz=2, color='CBD5E1')
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1121,7 +1172,7 @@ def generar_word_especificaciones(pid: int, archivo: str) -> str:
             r_p.italic = True
             r_p.font.color.rgb = _SLATE_500
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1200,7 +1251,7 @@ def generar_word_memoria_descriptiva(pid: int, archivo: str) -> str:
             p_body.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p_body.paragraph_format.line_spacing = 1.5
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1326,7 +1377,7 @@ def generar_word_almacen(pid: int, archivo: str) -> str:
                            color=RGBColor(0x55, 0x55, 0x55))
         _set_table_fixed_layout(ft, [5.6, 5.6, 5.6])
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1441,7 +1492,7 @@ def generar_word_curva_s(pid: int, archivo: str, *, base: str = 'mes_cal',
     if show_desv:
         wdesc += [2.0]
     _set_table_fixed_layout(tbl, wdesc)
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1523,7 +1574,7 @@ def generar_word_cuaderno(pid: int, parte_ids: list, archivo: str) -> str:
                 p = doc.add_paragraph(); p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.left_indent = Cm(0.5)
                 rr = p.add_run(ln); rr.font.size = Pt(SZ); rr.font.color.rgb = _SLATE_900
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1700,7 +1751,7 @@ def generar_word_tdr(req_id: int, archivo: str) -> str:
             p = _para(None, space_after=4)
             r = p.add_run(blk[1]); r.font.size = Pt(10); r.font.color.rgb = _SLATE_900
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 

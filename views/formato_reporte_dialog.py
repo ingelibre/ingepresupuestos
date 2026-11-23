@@ -602,7 +602,8 @@ class FormatoReporteDialog(QDialog):
         self.cmb_escala_texto = QComboBox()
         self.cmb_escala_texto.setCursor(Qt.PointingHandCursor)
         self.cmb_escala_texto.setFixedWidth(220)
-        _rotulos = {100: tr("Normal"), 90: tr("Compacto"), 80: tr("Muy compacto")}
+        _rotulos = {100: tr("Normal"), 90: tr("Compacto"), 80: tr("Muy compacto"),
+                    75: tr("Compacto máximo")}
         for pct in pdf_reports.ESCALAS_TEXTO:
             self.cmb_escala_texto.addItem(
                 f"{_rotulos.get(pct) or tr('Escala')} ({pct} %)", pct)

@@ -37,7 +37,7 @@ from core.config import DB_PATH
 from widgets.num_item import NumItem
 from core.database import (
     get_db, _r2, _rn, _recalcular_pu, calcular_totales,
-    get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
+    get_acu_items, igualar_codigos_hermanos, get_insumos_proyecto, get_insumos_para_partidas,
     _siguiente_codigo_inei,
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
@@ -1204,6 +1204,9 @@ class _PresupuestoTree(QTreeWidget):
 
     def _procesar_nivel(self, parent_item, prefijo: str, nivel: int, conn,
                         offset: int = 0):
+        # Más de 99 hermanas → tres dígitos para todas: los reportes ordenan
+        # por el texto del código y «01.100» caía entre «01.10» y «01.11».
+        ancho = max(2, len(str(parent_item.childCount() + offset)))
         for i in range(parent_item.childCount()):
             child = parent_item.child(i)
             pid   = child.data(0, Qt.UserRole)
@@ -1211,7 +1214,7 @@ class _PresupuestoTree(QTreeWidget):
                 continue
 
             seq = (i + 1 + offset) if not prefijo else (i + 1)
-            num_str = f"{seq:02d}"
+            num_str = f"{seq:0{ancho}d}"
             nuevo_item = f"{prefijo}.{num_str}" if prefijo else num_str
 
             # Actualizar BD
@@ -7314,6 +7317,7 @@ class ProyectoView(QWidget):
             nuevos = _pclip.pegar(conn, self.pid, self._sub_ppto_id,
                                   contexto_item=ctx_item,
                                   contexto_es_titulo=ctx_es_titulo)
+            igualar_codigos_hermanos(conn, self.pid)
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -7563,7 +7567,17 @@ class ProyectoView(QWidget):
             destino.setExpanded(True)
         return True
 
+    def _igualar_codigos(self):
+        """Grupos que acaban de pasar de 99 hermanas (antes de recargar)."""
+        conn = get_db()
+        try:
+            if igualar_codigos_hermanos(conn, self.pid):
+                conn.commit()
+        finally:
+            conn.close()
+
     def _on_partidas_agregadas(self):
+        self._igualar_codigos()
         self.recargar_partidas()
         ancla = self._ancla_insercion
         if ancla:
@@ -10067,6 +10081,7 @@ class ProyectoView(QWidget):
                                         self._sub_ppto_id,
                                         contexto_item=ctx_item,
                                         contexto_es_titulo=ctx_es_titulo)
+            igualar_codigos_hermanos(conn, self.pid)
             conn.commit()
         except Exception as e:  # noqa: BLE001
             conn.rollback(); conn.close()
