@@ -17,7 +17,7 @@ import os
 from dataclasses import replace
 from html import escape
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
@@ -150,6 +150,7 @@ class _TablaDatos(QWidget):
             if x.ayuda:
                 self.t.horizontalHeaderItem(i).setToolTip(escape(str(x.ayuda)[:500]))
         self.t.setSelectionBehavior(QTableWidget.SelectRows)
+        self.t.setTabKeyNavigation(False)      # Tab pasa al campo siguiente
         self.t.setMinimumSize(880, 130)
         vl.addWidget(self.t)
         hl = QHBoxLayout()
@@ -186,14 +187,21 @@ class _TablaDatos(QWidget):
             w.installEventFilter(self)
             self.t.setCellWidget(r, i, w)
         self.t.resizeRowToContents(r)
-        self.t.selectRow(r)
+        self._marcar(r)
+
+    def _marcar(self, r):
+        # No `selectRow`: hace actual la columna 0 y se lleva allí el foco, y
+        # solo se podía escribir en la primera columna.
+        self.t.selectionModel().select(
+            self.t.model().index(r, 0),
+            QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
 
     def eventFilter(self, w, e):
-        # La fila «actual» es la del campo donde se está escribiendo.
+        # La fila marcada es la del campo donde se está escribiendo.
         if e.type() == QEvent.FocusIn:
             for r in range(self.t.rowCount()):
                 if any(self.t.cellWidget(r, i) is w for i in range(len(self._cols))):
-                    self.t.selectRow(r)
+                    self._marcar(r)
                     break
         return super().eventFilter(w, e)
 
