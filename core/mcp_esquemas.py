@@ -31,6 +31,17 @@ _MODELO = dict(_ID, description="Id del modelo BIM (bim_models).")
 _GLOBALES = {"type": "array", "minItems": 1, "maxItems": 5000,
              "items": {"type": "string", "minLength": 1, "maxLength": 64},
              "description": "GlobalId IFC."}
+_REF_ACU = {"resource_id": _ID, "subitem_id": _ID}
+_SITIO = {
+    "parent_item_id": {"type": "integer", "minimum": 0,
+                       "description": "Título destino (queda al final); 0 = raíz."},
+    "after_item_id": dict(_ID, description="Queda justo después de esta."),
+}
+_KIND = {"type": "string",
+         "enum": ["rubro", "pct_cd", "pct_sub", "pct_util", "subtotal"],
+         "description": "rubro = monto, detalle o % del costo directo; pct_cd = % "
+                        "del costo directo; pct_sub = % del último subtotal; "
+                        "pct_util = % de la utilidad; subtotal = separador."}
 _FUENTE = {
     "source": {"type": "string", "enum": ["ingetrazo", "ifc"],
                "description": "De dónde sale el modelo nuevo: el IngeTrazo "
@@ -94,6 +105,10 @@ HERRAMIENTAS: list[dict] = [
      "description": "Planilla de metrados de una partida (normal o de acero) "
                     "y qué filas vienen de un modelo BIM.",
      "inputSchema": _obj({"item_id": _PART}, ("item_id",))},
+    {"name": "get_footer", "lee": True,
+     "description": "Líneas del pie del presupuesto (gastos generales, utilidad, "
+                    "impuesto…), activas o no, con su código.",
+     "inputSchema": _obj({"project_id": _PID}, ("project_id",))},
     {"name": "validate", "lee": True,
      "description": "Revisa un proyecto sin cambiarlo: partidas sin metrado, "
                     "sin ACU o sin precio, ítems repetidos, PU que no cuadra "
@@ -168,6 +183,68 @@ HERRAMIENTAS: list[dict] = [
                            "resource_id": _ID, "crew": _POS,
                            "quantity": _POS}, ("resource_id",))},
      }, ("item_id",))},
+    {"name": "edit_items", "lee": False,
+     "description": "Cambia la descripción o la unidad de títulos y partidas.",
+     "inputSchema": _obj({
+         "project_id": _PID,
+         "changes": {"type": "array", "minItems": 1, "maxItems": 500,
+                     "items": _obj({"item_id": _PART,
+                                    "description": dict(_TXT, minLength=1),
+                                    "unit": {"type": "string", "maxLength": 20}},
+                                   ("item_id",))}},
+         ("project_id", "changes"))},
+    {"name": "move_item", "lee": False,
+     "description": "Mueve un título (con lo que cuelga) o una partida dentro de "
+                    "su sub-presupuesto. Da parent_item_id o after_item_id. "
+                    "Renumera los ítems.",
+     "inputSchema": _obj(dict(_SITIO, project_id=_PID, item_id=_PART),
+                         ("project_id", "item_id"))},
+    {"name": "copy_item", "lee": False,
+     "description": "Duplica un título (con lo que cuelga) o una partida, con su "
+                    "ACU y metrados, en el mismo sub-presupuesto. Da "
+                    "parent_item_id o after_item_id. Renumera los ítems.",
+     "inputSchema": _obj(dict(_SITIO, project_id=_PID, item_id=_PART),
+                         ("project_id", "item_id"))},
+    {"name": "delete_items", "lee": False, "destruye": True,
+     "description": "Borra títulos o partidas y renumera. Pregunta antes al "
+                    "usuario. Un título con contenido exige with_children. Se "
+                    "niega si ya hay avance de obra registrado.",
+     "inputSchema": _obj({
+         "project_id": _PID, "with_children": _BOOL,
+         "item_ids": {"type": "array", "minItems": 1, "maxItems": 500,
+                      "items": _ID}}, ("project_id", "item_ids"))},
+    {"name": "edit_acu", "lee": False,
+     "description": "Cambia la cuadrilla o la cantidad de insumos que YA están en "
+                    "el ACU (`changes`), o los quita (`remove`). Para agregar, "
+                    "set_acu.",
+     "inputSchema": _obj({
+         "item_id": _PART,
+         "changes": {"type": "array", "minItems": 1, "maxItems": 200,
+                     "items": _obj(dict(_REF_ACU, crew=_POS, quantity=_POS))},
+         "remove": {"type": "array", "minItems": 1, "maxItems": 200,
+                    "items": _obj(_REF_ACU)}}, ("item_id",))},
+    {"name": "update_project", "lee": False,
+     "description": "Cambia los datos generales del proyecto. No cambia moneda, "
+                    "jornada ni estado.",
+     "inputSchema": _obj({
+         "project_id": _PID, "name": dict(_TXT, minLength=1), "client": _TXT,
+         "location": _TXT, "sub_budget": _TXT,
+         "cost_date": dict(_TXT, description="dd/mm/aaaa"),
+         "term_days": {"type": "integer", "minimum": 1, "maximum": 10000},
+         "total_name": dict(_TXT, description="Nombre impreso del total final.")},
+         ("project_id",))},
+    {"name": "set_footer", "lee": False,
+     "description": "Reemplaza las líneas del pie, en orden. Parte de get_footer y "
+                    "conserva los `code`; una línea nueva va sin code.",
+     "inputSchema": _obj({
+         "project_id": _PID,
+         "lines": {"type": "array", "minItems": 1, "maxItems": 60,
+                   "items": _obj({
+                       "code": {"type": "string", "minLength": 1, "maxLength": 40},
+                       "name": dict(_TXT, minLength=1), "kind": _KIND,
+                       "pct": _POS, "amount": _POS, "active": _BOOL,
+                       "show_pct": _BOOL}, ("name", "kind"))}},
+         ("project_id", "lines"))},
     {"name": "set_price", "lee": False,
      "description": "Fija el precio de un insumo EN EL PROYECTO (en todas sus "
                     "partidas: un insumo, un precio por proyecto). No cambia "
@@ -259,6 +336,18 @@ HERRAMIENTAS: list[dict] = [
                           "document_id": _FUENTE["document_id"]})},
 ]
 
+#: Escrituras que admiten `dry_run` (las demás no corren en una transacción
+#: de esta app, o no tienen qué medir).
+SIMULABLES = ("add_items", "set_metrado", "set_acu", "set_price", "set_schedule",
+              "edit_items", "move_item", "copy_item", "delete_items", "edit_acu",
+              "update_project", "set_footer")
+for _h in HERRAMIENTAS:
+    if _h["name"] in SIMULABLES:
+        _h["inputSchema"]["properties"]["dry_run"] = {
+            "type": "boolean",
+            "description": "true = no guarda nada: devuelve qué pasaría y el "
+                           "total antes y después."}
+
 POR_NOMBRE = {h["name"]: h for h in HERRAMIENTAS}
 
 #: Las que necesitan hablar con IngeTrazo: se piden fuera del hilo de Qt.
@@ -278,6 +367,7 @@ def publicas() -> list[dict]:
         out.append({"name": h["name"], "description": h["description"],
                     "inputSchema": esquema,
                     "annotations": {"readOnlyHint": h["lee"],
+                                    "destructiveHint": bool(h.get("destruye")),
                                     "openWorldHint": False}})
     return out
 

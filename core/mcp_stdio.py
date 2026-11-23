@@ -14,7 +14,7 @@ import json
 import socket
 import sys
 
-from core import mcp_esquemas, mcp_registro
+from core import mcp_esquemas, mcp_prompts, mcp_registro
 
 PROTOCOLOS = ("2025-06-18", "2025-03-26", "2024-11-05")
 ESPERA_CONEXION = 2.0
@@ -24,7 +24,10 @@ INSTRUCCIONES = (
     "IngePresupuestos: presupuestos de obra. Trabajas sobre la app ABIERTA "
     "del usuario, que ve tus cambios. Empieza por list_projects. Flujo: "
     "create_project, search_library, add_items (con su ACU), set_metrado, "
-    "totals, export_report. Las cantidades, parciales y totales los calcula "
+    "set_footer, totals, export_report. Corrige con edit_items, move_item, "
+    "edit_acu y delete_items en vez de rehacer. Antes de un cambio grande, o "
+    "que el usuario no pidió tal cual, usa dry_run: true y enséñale el total "
+    "antes y después. Las cantidades, parciales y totales los calcula "
     "la app: no los calcules tú ni los inventes. Cada escritura es una sola "
     "operación (si falla no queda nada) y undo_last la deshace. Si responde "
     "«ocupado», el usuario está editando: espera y reintenta. Los catálogos "
@@ -157,7 +160,7 @@ def atender(msg) -> dict | None:
     if metodo == "initialize":
         pedido = params.get("protocolVersion")
         res = {"protocolVersion": pedido if pedido in PROTOCOLOS else PROTOCOLOS[0],
-               "capabilities": {"tools": {}},
+               "capabilities": {"tools": {}, "prompts": {}},
                "serverInfo": {"name": "ingepresupuestos", "version": "1.0.0"},
                "instructions": INSTRUCCIONES}
     elif metodo == "tools/list":
@@ -165,6 +168,14 @@ def atender(msg) -> dict | None:
     elif metodo == "tools/call":
         args = params.get("arguments")
         res = llamar(str(params.get("name", "")), {} if args is None else args)
+    elif metodo == "prompts/list":
+        res = {"prompts": mcp_prompts.publicos()}
+    elif metodo == "prompts/get":
+        try:
+            res = mcp_prompts.obtener(params.get("name"), params.get("arguments"))
+        except ValueError as e:
+            return {"jsonrpc": "2.0", "id": mid,
+                    "error": {"code": -32602, "message": str(e)}}
     elif metodo == "ping":
         res = {}
     else:

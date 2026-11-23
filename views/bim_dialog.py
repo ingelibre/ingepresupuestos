@@ -739,6 +739,29 @@ class ModeloBimDialog(_Base):
         self.b_acu.setEnabled(e and self.partida_id is not None)
 
     # ── Vista 3D ─────────────────────────────────────────────────────────────
+    def ver_3d(self):
+        """El botón «Modelo 3D»: enciende la vista o, si el proyecto aún no
+        tiene modelo, ofrece agregarlo."""
+        if self.modelo_id is None:
+            if not self.editable:
+                QMessageBox.information(self, tr("Modelo 3D"), tr(
+                    "Este proyecto no tiene un modelo BIM."))
+                return
+            if QMessageBox.question(self, tr("Modelo 3D"), tr(
+                    "Este proyecto todavía no tiene un modelo BIM. ¿Agregar un "
+                    "archivo IFC ahora?")) != QMessageBox.Yes:
+                return
+            ruta = self._pedir_archivo()
+            if ruta:                # se lee en otro hilo: la vista, al terminar
+                self._leer(ruta, lambda m, r: (self.recibir_modelo(m, r),
+                                               self._encender_3d()))
+            return
+        self._encender_3d()
+
+    def _encender_3d(self):
+        if self.modelo_id is not None and not self.b_3d.isChecked():
+            self.b_3d.click()
+
     def _alternar_3d(self):
         if not self.b_3d.isChecked():
             if self.visor is not None:

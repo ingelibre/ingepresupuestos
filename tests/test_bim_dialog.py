@@ -287,3 +287,32 @@ def test_vista_3d_va_y_vuelve_con_la_partida(base, monkeypatch):
     dlg.done(0)
     assert v.log[-1] == ('cerrar',)
     dlg.deleteLater()
+
+
+def test_boton_modelo_3d_ofrece_agregar_y_enciende_la_vista(base, monkeypatch):
+    import time
+    from PySide6.QtWidgets import QMessageBox
+    from views import bim_visor
+    monkeypatch.setattr(bim_visor, 'BimVisor', _VisorDoble)
+    pid, _part = _proyecto()
+    ruta = os.path.join(FX, 'takeoff-ejemplo.ifc')
+    resp = [QMessageBox.No, QMessageBox.Yes]
+    monkeypatch.setattr(QMessageBox, 'question', staticmethod(lambda *a, **k: resp.pop(0)))
+    dlg = bv.ModeloBimDialog(pid)
+    monkeypatch.setattr(dlg, '_pedir_archivo', lambda: ruta)
+    dlg.ver_3d()
+    assert dlg.modelo_id is None and not dlg.b_3d.isChecked()
+    dlg.ver_3d()
+    fin = time.time() + 30
+    while time.time() < fin and not dlg.b_3d.isChecked():
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert dlg.b_3d.isChecked() and dlg.visor.log == [('abrir', ruta)]
+    dlg.done(0)
+    dlg.deleteLater()
+    # Ya con modelo, entra directo y sin preguntar.
+    otro = bv.ModeloBimDialog(pid)
+    otro.ver_3d()
+    assert otro.b_3d.isChecked()
+    otro.done(0)
+    otro.deleteLater()

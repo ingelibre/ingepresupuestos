@@ -2298,7 +2298,10 @@ class ProyectoView(QWidget):
         _tbtn(f"{_tr('Cronogramas')} ▾", None, menu=self._build_cronograma_menu())
         _tbtn(f"{_tr('Control de Obra')} ▾", None, menu=self._build_control_obra_menu())
         _tbtn(_tr("Fórmula Polinómica"), self._ir_formula)
-        _tbtn(_tr("Pie"), self._ir_pie, sep_after=True)
+        _tbtn(_tr("Pie"), self._ir_pie)
+        _tbtn(_tr("Modelo 3D"), lambda: self._abrir_modelo_bim(ver_3d=True),
+              sep_after=True).setToolTip(
+            _tr("Ver el modelo BIM (IFC) y sus elementos vinculados a partidas"))
         _tbtn(f"{_tr('IA')} ▾", None, menu=self._build_ia_menu())
 
         hl.addStretch()
@@ -10231,7 +10234,7 @@ class ProyectoView(QWidget):
         from views.mcp_puente import puente_de
         deshacer_con_aviso(self, puente_de(ventana))
 
-    def _abrir_modelo_bim(self, partida_id=None, takeoff=None, ruta=''):
+    def _abrir_modelo_bim(self, partida_id=None, takeoff=None, ruta='', ver_3d=False):
         """«Modelo BIM…». `takeoff`: dict de IngeTrazo a incorporar al abrir."""
         from views.bim_dialog import ModeloBimDialog
         dlg = ModeloBimDialog(self.pid, partida_id or getattr(self, '_partida_actual_id', None),
@@ -10239,6 +10242,8 @@ class ProyectoView(QWidget):
                               sub_id=self._sub_ppto_id, parent=self)
         if takeoff is not None and self._ed_presupuesto:
             QTimer.singleShot(0, lambda: dlg.recibir_takeoff(takeoff, ruta))
+        elif ver_3d:
+            QTimer.singleShot(0, dlg.ver_3d)
         dlg.exec()
         if dlg.cambio:
             self._volver_de_metrados()

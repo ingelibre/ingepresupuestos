@@ -1207,13 +1207,15 @@ def igualar_codigos_hermanos(conn, proyecto_id) -> int:
     return cambios
 
 
-def calcular_totales(proyecto_id):
-    conn = get_db()
+def calcular_totales(proyecto_id, conn=None):
+    """`conn`: conexión con cambios sin confirmar (simulaciones)."""
+    propia = conn is None
+    if propia:
+        conn = get_db()
     partidas = conn.execute(
         "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
     ).fetchall()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
-    conn.close()
 
     # Calcular parciales WYSIWYG: metrado se redondea a los decimales del
     # presupuesto ANTES de multiplicar, para que coincida con la multiplicación
@@ -1254,8 +1256,7 @@ def calcular_totales(proyecto_id):
     # inactivas) manda el pie: «todo desactivado» no debe caer al cálculo
     # simple y aplicar en silencio `utilidad_pct` / `igv_pct`.
     from core.pie import calcular_pie, es_impuesto
-    conn2 = get_db()
-    lineas, total_obra = calcular_pie(conn2, proyecto_id, cd)
+    lineas, total_obra = calcular_pie(conn, proyecto_id, cd)
     if lineas is not None:
         gf = sum(l['valor'] for l in lineas if l['codigo'] == 'GG')
         utilidad = sum(l['valor'] for l in lineas if l['codigo'] == 'UTIL')
@@ -1271,7 +1272,8 @@ def calcular_totales(proyecto_id):
         gf, utilidad = val.get('GG', 0.0), val.get('UTIL', 0.0)
         subtotal, igv = val['SUB'], val.get('IGV', 0.0)
 
-    conn2.close()
+    if propia:
+        conn.close()
     return items_con_total, {
         'cd': cd, 'gf': gf, 'utilidad': utilidad,
         'subtotal': subtotal, 'igv': igv, 'total': total_obra

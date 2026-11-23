@@ -318,6 +318,8 @@ class PuenteMCP(QObject):
                 QApplication.setOverrideCursor(Qt.WaitCursor)
                 cursor = True
             try:
+                args = dict(args)
+                ops.simular = bool(args.pop('dry_run', False))
                 res = getattr(ops, nombre)(**args)
             except Exception as e:
                 if type(e).__module__ == 'sqlite3' and 'locked' in str(e):
@@ -330,7 +332,7 @@ class PuenteMCP(QObject):
                 except Exception as e:  # noqa: BLE001 — ya está guardado
                     res = dict(res, view_warning=f"guardado, pero la vista no "
                                                  f"se refrescó: {e}")
-            if not h['lee']:
+            if not h['lee'] and not ops.simular:
                 self.actividad.emit(nombre)
             return res
         finally:

@@ -240,6 +240,11 @@ NOMBRES = {
     'create_project': N_("Crear proyecto"), 'add_items': N_("Agregar partidas"),
     'set_metrado': N_("Metrado"), 'set_acu': N_("Análisis de costo unitario"),
     'set_price': N_("Precio de un insumo"), 'set_schedule': N_("Cronograma"),
+    'edit_items': N_("Editar partidas"), 'move_item': N_("Mover partida"),
+    'copy_item': N_("Copiar partida"), 'delete_items': N_("Eliminar partidas"),
+    'edit_acu': N_("Análisis de costo unitario"),
+    'update_project': N_("Datos del proyecto"),
+    'set_footer': N_("Pie del presupuesto"),
     'bim_apply': N_("Modelo BIM"), 'link_elements': N_("Vínculos BIM"),
 }
 

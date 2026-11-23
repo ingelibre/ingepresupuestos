@@ -18,7 +18,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from core import mcp_deshacer, partidas_ops as ops
+from core import estructura_ops, mcp_deshacer, partidas_ops as ops
 from core.config import ESTADOS_PROYECTO_NOMBRE, puede_editar
 from core.mcp_esquemas import REPORTES_XLSX
 
@@ -39,6 +39,8 @@ class Operaciones:
         self.tocados: list[int] = []
         self.borrados: list[int] = []
         self.creados: list[int] = []
+        #: Simulación: la siguiente escritura se calcula y se revierte.
+        self.simular = False
 
     # ── Permisos ─────────────────────────────────────────────────────────
     def _visible_sql(self) -> tuple[str, tuple]:
@@ -91,8 +93,12 @@ class Operaciones:
             conn.execute("BEGIN IMMEDIATE")
             proy = self._proyecto(conn, pid)
             self._editable(proy, nivel)
+            if self.simular:
+                return self._simulada(conn, pid, proy, cambio)
             antes = mcp_deshacer.volcar(conn, pid)
+            filas = estructura_ops.foto_filas(conn, pid)
             res = cambio(conn, proy)
+            estructura_ops.conservar_predecesoras(conn, pid, filas)
             conn.execute("DELETE FROM dashboard_tot_cache WHERE proyecto_id=?",
                          (pid,))
             despues = mcp_deshacer.huella(mcp_deshacer.volcar(conn, pid))
@@ -111,6 +117,26 @@ class Operaciones:
             self.pila.publicar(tmp)
         self.tocados.append(pid)
         return res
+
+    @staticmethod
+    def _simulada(conn, pid, proy, cambio):
+        """El cambio dentro de la transacción, medido y REVERTIDO."""
+        from core.database import calcular_totales
+        try:
+            t0 = calcular_totales(pid, conn)[1]
+            filas = estructura_ops.foto_filas(conn, pid)
+            res = cambio(conn, proy)
+            quitadas = estructura_ops.conservar_predecesoras(conn, pid, filas)
+            t1 = calcular_totales(pid, conn)[1]
+        finally:
+            conn.rollback()
+        return {"dry_run": True, "saved": False,
+                "currency": proy.get('moneda') or 'Soles',
+                "direct_cost": {"before": t0['cd'], "after": t1['cd']},
+                "total": {"before": t0['total'], "after": t1['total']},
+                "predecessors_removed": quitadas,
+                "note": "no se guardó nada; los ids nuevos no existen",
+                "would_return": res}
 
     def _externa(self, herramienta: str, pid: int, accion):
         """Como `_escribir` para código que abre su propia conexión y hace su
@@ -741,6 +767,332 @@ class Operaciones:
             pu = _recalcular_pu(conn, item_id)
             return {"item_id": item_id, "unit_price": pu}
         return self._escribir('set_acu', pid, 'presupuesto', cambio)
+
+    # ── Editar lo existente ──────────────────────────────────────────────
+    def edit_items(self, project_id: int, changes: list):
+        def cambio(conn, proy):
+            vistas, hechos = set(), []
+            for n, c in enumerate(changes):
+                donde = f"changes[{n}]"
+                if c['item_id'] in vistas:
+                    raise ErrorMCP(f"{donde}: la partida {c['item_id']} se repite")
+                vistas.add(c['item_id'])
+                p = self._partida_de(conn, c['item_id'], project_id, donde)
+                if 'description' not in c and 'unit' not in c:
+                    raise ErrorMCP(f"{donde}: da description o unit")
+                if 'unit' in c and p['es_titulo']:
+                    raise ErrorMCP(f"{donde}: un título no lleva unidad")
+                desc = c.get('description', p['descripcion']).strip()
+                und = c.get('unit', p['unidad'] or '').strip()
+                if not p['es_titulo'] and not und and 'unit' in c:
+                    raise ErrorMCP(f"{donde}: la unidad no puede quedar vacía")
+                conn.execute("UPDATE partidas SET descripcion=?, unidad=? WHERE id=?",
+                             (desc, und, p['id']))
+                hechos.append({"item_id": p['id'], "item": p['item'],
+                               "description": desc, "unit": und})
+            return {"updated": hechos}
+        return self._escribir('edit_items', project_id, 'presupuesto', cambio)
+
+    def _partida_de(self, conn, part_id, pid, donde=''):
+        """La fila, del presupuesto de ESE proyecto (no una sub-partida)."""
+        p, _ = self._partida(conn, part_id)
+        pre = f"{donde}: " if donde else ""
+        if p['proyecto_id'] != pid:
+            raise ErrorMCP(f"{pre}la partida {part_id} no es de este proyecto")
+        if p['es_subanalisis']:
+            raise ErrorMCP(f"{pre}{part_id} es una sub-partida; el usuario la "
+                           "edita en la app")
+        return p
+
+    @staticmethod
+    def _destino(arbol, parent_item_id, after_item_id, quitar=()):
+        """(padre, posición) del sitio pedido en `arbol`."""
+        if (parent_item_id is None) == (after_item_id is None):
+            raise ErrorMCP("da parent_item_id (0 = raíz) o after_item_id "
+                           "(una de las dos)")
+        if parent_item_id is not None:
+            padre = parent_item_id or None
+            if padre is not None and not arbol.titulo.get(padre):
+                raise ErrorMCP("parent_item_id debe ser un título del mismo "
+                               "sub-presupuesto")
+            pos = len(arbol.hijos.get(padre, []))
+        else:
+            if after_item_id not in arbol.padre:
+                raise ErrorMCP("after_item_id no es del mismo sub-presupuesto")
+            padre = arbol.padre[after_item_id]
+            pos = arbol.hijos[padre].index(after_item_id) + 1
+        if padre in quitar or after_item_id in quitar:
+            raise ErrorMCP("no se puede mover algo dentro de sí mismo")
+        return padre, pos
+
+    def move_item(self, project_id: int, item_id: int,
+                  parent_item_id: int | None = None,
+                  after_item_id: int | None = None):
+        def cambio(conn, proy):
+            p = self._partida_de(conn, item_id, project_id)
+            a = estructura_ops.Arbol(conn, project_id, p['sub_presupuesto_id'])
+            suyos = {item_id, *a.descendientes(item_id)}
+            self._destino(a, parent_item_id, after_item_id, suyos)
+            a.quitar(item_id)
+            padre, pos = self._destino(a, parent_item_id, after_item_id)
+            a.poner(item_id, padre, pos)
+            a.renumerar(conn)
+            return self._resumen_items(conn, [item_id])
+        return self._escribir('move_item', project_id, 'presupuesto', cambio)
+
+    def copy_item(self, project_id: int, item_id: int,
+                  parent_item_id: int | None = None,
+                  after_item_id: int | None = None):
+        from utils import partidas_clipboard as pc
+
+        def cambio(conn, proy):
+            p = self._partida_de(conn, item_id, project_id)
+            sub = p['sub_presupuesto_id']
+            a = estructura_ops.Arbol(conn, project_id, sub)
+            self._destino(a, parent_item_id, after_item_id)
+            # Se pega en la raíz (código libre seguro) y luego se coloca.
+            arbol = [pc._serializar_partida(conn, i)
+                     for i in pc._subarbol_ids(conn, item_id)]
+            (nueva,) = pc.pegar_datos(conn, [arbol], project_id, sub)
+            a = estructura_ops.Arbol(conn, project_id, sub)
+            a.quitar(nueva)
+            padre, pos = self._destino(a, parent_item_id, after_item_id)
+            a.poner(nueva, padre, pos)
+            a.renumerar(conn)
+            return self._resumen_items(conn, [nueva, *a.descendientes(nueva)])
+        return self._escribir('copy_item', project_id, 'presupuesto', cambio)
+
+    @staticmethod
+    def _resumen_items(conn, ids):
+        return {"items": [
+            {"item_id": r['id'], "item": r['item'], "description": r['descripcion'],
+             "title": bool(r['es_titulo'])} for i in ids
+            for r in [conn.execute("SELECT id, item, descripcion, es_titulo FROM "
+                                   "partidas WHERE id=?", (i,)).fetchone()]]}
+
+    def delete_items(self, project_id: int, item_ids: list,
+                     with_children: bool = False):
+        def cambio(conn, proy):
+            arboles: dict = {}
+            todos: dict = {}
+            for i in dict.fromkeys(item_ids):
+                p = self._partida_de(conn, i, project_id)
+                sub = p['sub_presupuesto_id']
+                a = arboles.get(sub)
+                if a is None:
+                    a = arboles[sub] = estructura_ops.Arbol(conn, project_id, sub)
+                todos[i] = a
+                for h in a.descendientes(i):
+                    if not with_children and h not in item_ids:
+                        raise ErrorMCP(f"{p['item']} tiene partidas dentro; pasa "
+                                       "with_children: true para borrarlas también")
+                    todos[h] = a
+            obra = estructura_ops.con_obra_registrada(conn, todos)
+            if obra:
+                raise ErrorMCP("hay avance de obra registrado (valorizaciones o "
+                               "partes diarios) en: " + ", ".join(map(str, obra[:20]))
+                               + "; bórralas en la app si de verdad corresponde")
+            borradas = self._resumen_items(conn, list(todos))["items"]
+            for i, a in todos.items():
+                a.quitar(i)
+            # Los archivos adjuntos se quedan en disco: hacen falta al deshacer.
+            for i in todos:
+                conn.execute("DELETE FROM partidas WHERE id=?", (i,))
+            for a in arboles.values():
+                a.renumerar(conn)
+            return {"deleted": borradas}
+        return self._escribir('delete_items', project_id, 'presupuesto', cambio)
+
+    def edit_acu(self, item_id: int, changes: list | None = None,
+                 remove: list | None = None):
+        if not changes and not remove:
+            raise ErrorMCP("da changes o remove")
+        pid = self._pid_de(item_id)
+
+        def cambio(conn, proy):
+            from core.database import (_recalcular_pu, partida_global,
+                                       recurso_por_dia, recurso_por_hora)
+            p, _ = self._partida(conn, item_id)
+            if p['es_titulo']:
+                raise ErrorMCP("un título no tiene ACU")
+            vistas = set()
+
+            def linea(ref, donde):
+                if ('resource_id' in ref) == ('subitem_id' in ref):
+                    raise ErrorMCP(f"{donde}: da resource_id o subitem_id")
+                if 'subitem_id' in ref:
+                    filas = conn.execute(
+                        "SELECT a.*, r.tipo, r.unidad FROM acu_items a JOIN recursos r"
+                        " ON r.id=a.recurso_id WHERE a.partida_id=? AND "
+                        "a.sub_partida_id=?", (item_id, ref['subitem_id'])).fetchall()
+                else:
+                    filas = conn.execute(
+                        "SELECT a.*, r.tipo, r.unidad FROM acu_items a JOIN recursos r"
+                        " ON r.id=a.recurso_id WHERE a.partida_id=? AND a.recurso_id=?"
+                        " AND a.sub_partida_id IS NULL",
+                        (item_id, ref['resource_id'])).fetchall()
+                if not filas:
+                    raise ErrorMCP(f"{donde}: no está en este ACU (usa get_acu)")
+                if len(filas) > 1:
+                    raise ErrorMCP(f"{donde}: está {len(filas)} veces en el ACU; "
+                                   "el usuario debe corregirlo en la app")
+                if filas[0]['id'] in vistas:
+                    raise ErrorMCP(f"{donde}: se repite")
+                vistas.add(filas[0]['id'])
+                return filas[0]
+            for n, c in enumerate(changes or []):
+                donde = f"changes[{n}]"
+                ln = linea(c, donde)
+                if ('crew' in c) == ('quantity' in c):
+                    raise ErrorMCP(f"{donde}: da crew o quantity (una de las dos)")
+                cuad, cant = 0.0, c.get('quantity')
+                if 'crew' in c:
+                    if partida_global(p['unidad']) or not (
+                            recurso_por_dia(ln['tipo'], ln['unidad'])
+                            or recurso_por_hora(ln['tipo'], ln['unidad'])) \
+                            or c['crew'] <= 0 or 'subitem_id' in c:
+                        raise ErrorMCP(f"{donde}: este insumo no lleva cuadrilla "
+                                       "aquí; da quantity")
+                    cuad, cant = ops.cuadrilla_y_cantidad(
+                        ln['tipo'], ln['unidad'], cuad=float(c['crew']), cant=0,
+                        rend=p['rendimiento'], jornada=ops.jornada_de(conn, pid),
+                        es_global=False)
+                conn.execute("UPDATE acu_items SET cuadrilla=?, cantidad=? WHERE id=?",
+                             (cuad, cant, ln['id']))
+            for n, c in enumerate(remove or []):
+                conn.execute("DELETE FROM acu_items WHERE id=?",
+                             (linea(c, f"remove[{n}]")['id'],))
+            return {"item_id": item_id, "unit_price": _recalcular_pu(conn, item_id)}
+        return self._escribir('edit_acu', pid, 'presupuesto', cambio)
+
+    # ── Proyecto y pie ───────────────────────────────────────────────────
+    _CAMPOS_PROYECTO = {'name': 'nombre', 'client': 'cliente',
+                        'location': 'ubicacion', 'sub_budget': 'sub_presupuesto',
+                        'cost_date': 'costo_al', 'term_days': 'plazo',
+                        'total_name': 'total_nombre'}
+
+    def update_project(self, project_id: int, **campos):
+        if not campos:
+            raise ErrorMCP("no indicaste qué cambiar")
+        if 'cost_date' in campos:
+            from datetime import datetime
+            try:
+                datetime.strptime(campos['cost_date'], '%d/%m/%Y')
+            except ValueError:
+                raise ErrorMCP("cost_date va como dd/mm/aaaa") from None
+
+        def cambio(conn, proy):
+            for k, v in campos.items():
+                conn.execute(
+                    f"UPDATE proyectos SET {self._CAMPOS_PROYECTO[k]}=? WHERE id=?",
+                    (v.strip() if isinstance(v, str) else v, project_id))
+            return {"project_id": project_id, "updated": sorted(campos)}
+        return self._escribir('update_project', project_id, 'presupuesto', cambio)
+
+    @staticmethod
+    def _lineas_pie(conn, proy):
+        """(líneas, ¿guardadas?) del pie; si nunca se configuró, las que
+        sembraría la pestaña «Pie» para su país."""
+        pid = proy['id']
+        filas = [dict(r) for r in conn.execute(
+            "SELECT codigo, nombre, pct, activo, orden, tipo, mostrar_pct, destacado"
+            " FROM pie_rubros WHERE proyecto_id=? ORDER BY orden, id", (pid,))]
+        if filas:
+            return filas, True
+        from core.pie import lineas_por_defecto
+        return [dict(zip(('codigo', 'nombre', 'pct', 'activo', 'orden', 'tipo',
+                          'mostrar_pct'), x), destacado=0)
+                for x in lineas_por_defecto(proy)], False
+
+    @staticmethod
+    def _montos_pie(conn, pid):
+        """({código: monto fijo}, {códigos con detalle})."""
+        fijos, detalle = {}, set()
+        for r in conn.execute("SELECT rubro, tipo, precio FROM gastos_generales "
+                              "WHERE proyecto_id=?", (pid,)):
+            if r['tipo'] == 'manual':
+                fijos[r['rubro']] = r['precio'] or 0
+            else:
+                detalle.add(r['rubro'])
+        return fijos, detalle
+
+    def get_footer(self, project_id: int):
+        from core.database import get_db
+        conn = get_db()
+        try:
+            proy = self._proyecto(conn, project_id)
+            lineas, guardadas = self._lineas_pie(conn, proy)
+            fijos, detalle = self._montos_pie(conn, project_id)
+        finally:
+            conn.close()
+        return {"project_id": project_id, "configured": guardadas, "lines": [
+            {"code": x['codigo'], "name": x['nombre'], "kind": x['tipo'],
+             "pct": x['pct'] or 0, "active": bool(x['activo']),
+             "show_pct": bool(x['mostrar_pct']),
+             **({"amount": fijos[x['codigo']]} if x['codigo'] in fijos else {}),
+             "has_detail": x['codigo'] in detalle} for x in lineas]}
+
+    def set_footer(self, project_id: int, lines: list):
+        def cambio(conn, proy):
+            viejas, _ = self._lineas_pie(conn, proy)
+            previas = {x['codigo']: x for x in viejas}
+            fijos, detalle = self._montos_pie(conn, project_id)
+            usados, nuevas = set(), []
+            for n, ln in enumerate(lines):
+                donde = f"lines[{n}]"
+                cod = ln.get('code')
+                if cod is None:
+                    k = 1
+                    while f"L{k}" in previas or f"L{k}" in usados \
+                            or f"L{k}" in fijos or f"L{k}" in detalle:
+                        k += 1
+                    cod = f"L{k}"
+                elif cod not in previas and cod not in ('GG', 'UTIL', 'SUB', 'IGV'):
+                    raise ErrorMCP(f"{donde}: no existe el código {cod} (usa "
+                                   "get_footer; una línea nueva va sin code)")
+                if cod in usados:
+                    raise ErrorMCP(f"{donde}: el código {cod} se repite")
+                usados.add(cod)
+                prev = previas.get(cod, {})
+                tipo = ln['kind']
+                if 'amount' in ln and tipo != 'rubro':
+                    raise ErrorMCP(f"{donde}: amount solo con kind «rubro»")
+                if 'amount' in ln and cod in detalle:
+                    raise ErrorMCP(f"{donde}: {cod} tiene un detalle de gastos "
+                                   "hecho por el usuario; no lo cambio por un monto")
+                if cod in detalle and tipo != 'rubro':
+                    raise ErrorMCP(f"{donde}: {cod} tiene detalle; su kind es rubro")
+                if 'pct' in ln and cod in detalle | set(fijos) and 'amount' not in ln \
+                        and tipo == 'rubro' and ln['pct'] != (prev.get('pct') or 0):
+                    raise ErrorMCP(f"{donde}: {cod} sale de un monto o detalle; "
+                                   "cambiar su pct no tendría efecto")
+                nuevas.append((cod, ln['name'].strip(),
+                               ln.get('pct', prev.get('pct') or 0),
+                               int(ln.get('active', prev.get('activo', 1))), n, tipo,
+                               int(ln.get('show_pct', prev.get('mostrar_pct', 1) or 0)),
+                               prev.get('destacado') or 0))
+                if 'amount' in ln:
+                    conn.execute("DELETE FROM gastos_generales WHERE proyecto_id=? "
+                                 "AND rubro=? AND tipo='manual'", (project_id, cod))
+                    conn.execute(
+                        "INSERT INTO gastos_generales (proyecto_id, rubro, tipo, "
+                        "descripcion, precio, orden) VALUES (?,?,'manual',"
+                        "'__manual__',?,0)", (project_id, cod, ln['amount']))
+            perdidas = (detalle | set(fijos)) & set(previas) - usados
+            if perdidas:
+                raise ErrorMCP("faltan líneas con monto o detalle propio: "
+                               + ", ".join(sorted(perdidas))
+                               + "; inclúyelas (active: false las oculta)")
+            conn.execute("DELETE FROM pie_rubros WHERE proyecto_id=?", (project_id,))
+            conn.executemany(
+                "INSERT INTO pie_rubros (proyecto_id, codigo, nombre, pct, activo, "
+                "orden, tipo, mostrar_pct, destacado) VALUES (?,?,?,?,?,?,?,?,?)",
+                [(project_id, *x) for x in nuevas])
+            from core.database import calcular_totales
+            t = calcular_totales(project_id, conn)[1]
+            return {"direct_cost": t['cd'], "total": t['total'],
+                    "codes": [x[0] for x in nuevas]}
+        return self._escribir('set_footer', project_id, 'pie', cambio)
 
     def set_price(self, project_id: int, resource_id: int, price: float):
         def cambio(conn, proy):
