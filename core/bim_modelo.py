@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -838,9 +839,12 @@ def _editada(r) -> bool:
         if r[k] is not None:
             p, hay = p * r[k], True
     f = r['factor'] if r['factor'] is not None else 1.0
-    esperado = r['valor'] * f
-    tol = 0.0051 * max(1.0, abs(f), abs(r['valor']) if f != 1 else 0) + 1e-9 * abs(esperado)
-    return not hay or abs(p - esperado) > tol
+    v = r['valor']
+    tol = 0.0051 * max(1.0, abs(f)) + 1e-9 * abs(v * f)
+    # El factor pudo quedar a 2 decimales (.155 → .15 o .16): se admiten esos
+    # valores y no una holgura × valor, que tapaba ediciones de verdad.
+    return not hay or all(abs(p - v * x) > tol for x in (
+        f, math.floor(f * 100) / 100, math.ceil(f * 100) / 100))
 
 
 def _descripcion(e: ElementoBim) -> str:

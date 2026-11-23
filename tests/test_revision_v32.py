@@ -189,6 +189,23 @@ def test_mcp_add_items_mas_de_99_hermanas(vista, conn, tmp_path):   # noqa: F811
         == hechos[0]['item'] == '09.001'
 
 
+# ── Planilla BIM editada ────────────────────────────────────────────────────
+
+def _fila(valor, factor, **k):
+    r = dict.fromkeys(('n_estructuras', 'n_elementos', 'area', 'largo', 'ancho', 'alto'))
+    return {**r, 'valor': valor, 'factor': factor, 'parcial': 1.0, **k}
+
+
+def test_edicion_con_factor_se_detecta():
+    assert bim._editada(_fila(1000.0, .2, n_estructuras=.2, largo=1010.0))
+    assert bim._editada(_fila(1000.0, 1.5, n_estructuras=1.5, largo=1003.0))
+    # Lo que redondea la hoja (2 decimales) no es una edición
+    assert not bim._editada(_fila(1000.1234, .155, n_estructuras=.16, largo=1000.12))
+    assert not bim._editada(_fila(1000.1234, .155, n_estructuras=.15, largo=1000.12))
+    assert not bim._editada(_fila(12.3456, 2.0, n_estructuras=2.0, largo=12.35))
+    assert not bim._editada(_fila(7.0, 1.0, largo=7.0))
+
+
 def test_gasto_general_de_siete_cifras_no_pierde_digitos(uy, conn):  # noqa: F811
     """Con «:g» salía «1.23457e+06», que al duplicar la fila se leía 1.2345706."""
     pid = uy.x['pid']
