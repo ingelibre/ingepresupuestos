@@ -6,8 +6,8 @@ name: Build macOS (beta)
 # funciona. Entonces se añade `push: tags: ['v*']` y se sube a la release.
 #
 # Dos paquetes: Apple Silicon (arm64, M1–M4) e Intel (x86_64). Sin firma de
-# Apple: la primera vez se abre con clic derecho ▸ Abrir (o Ajustes del
-# Sistema ▸ Privacidad y seguridad ▸ «Abrir igualmente»).
+# Apple: la primera vez se abre desde Ajustes del Sistema ▸ Privacidad y
+# seguridad ▸ «Abrir igualmente» (hasta macOS 14, también clic derecho ▸ Abrir).
 #
 # Con «publicar = true», los .dmg se suben a una pre-release `mac-beta` con
 # enlace público, para que los probadores los descarguen sin cuenta de
@@ -113,5 +113,5 @@ jobs:
         run: |
           gh release view mac-beta >/dev/null 2>&1 || gh release create mac-beta --prerelease \
             --title "IngePresupuestos para Mac (beta de prueba)" \
-            --notes "Versión de prueba para macOS. Apple Silicon (M1–M4): archivo arm64. Intel: archivo x86_64. Sin firma de Apple: la primera vez, clic derecho sobre la app ▸ Abrir. Cuéntanos si funciona respondiendo al correo con el que te llegó este enlace, o en https://github.com/ingelibre/ingepresupuestos/issues"
+            --notes "Versión de prueba para macOS. Apple Silicon (M1–M4): archivo arm64. Intel: archivo x86_64. Sin firma de Apple: la primera vez macOS la bloquea; entra en Ajustes del Sistema ▸ Privacidad y seguridad y pulsa «Abrir igualmente» (en macOS 14 o anterior también sirve clic derecho ▸ Abrir). Cuéntanos si funciona respondiendo al correo con el que te llegó este enlace, o en https://github.com/ingelibre/ingepresupuestos/issues"
           gh release upload mac-beta dist/*.dmg --clobber

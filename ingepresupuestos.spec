@@ -276,6 +276,7 @@ if sys.platform == 'darwin':
             'CFBundleDisplayName': 'ingePresupuestos',
             'CFBundleShortVersionString': _version,
             'CFBundleVersion': _version,
+            'LSBackgroundOnly': False,
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,
         },
