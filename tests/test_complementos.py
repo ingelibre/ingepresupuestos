@@ -639,6 +639,34 @@ def test_escribir_entra_en_el_deshacer_y_falla_entero(pid, admin, tmp_path):
     assert len(ctx.presupuesto.partidas) == antes
 
 
+def test_lo_que_escribe_entra_en_ctrl_z(pid, admin, tmp_path):
+    from core.historial import Historial
+    h = Historial(pid)
+    ctx = _ctx(pid, admin, tmp_path)
+    antes = len(ctx.presupuesto.partidas)
+    ctx.editar.agregar([api.PartidaNueva('A', 'm2', 1), api.PartidaNueva('B', 'm2')])
+    assert h.revisar() and len(h.hechos) == 1            # una acción, un paso
+    h.deshacer()
+    assert len(ctx.presupuesto.partidas) == antes
+    h.rehacer()
+    assert len(ctx.presupuesto.partidas) == antes + 2
+
+
+def test_los_ejemplos_de_la_guia_son_validos():
+    t = (RAIZ / 'docs' / 'complementos.md').read_text(encoding='utf-8')
+    for b in re.findall(r'```json\n(.*?)```', t, re.S):
+        x = json.loads(b)
+        seccion = ('paises' if 'iso' in x else 'vocabulario' if 'idioma' in x
+                   else 'importadores_excel')
+        esquema.validar(x if 'esquema' in x else man(**{seccion: [x]}))
+    ns = {}
+    exec(re.search(r'```python\n(.*?)```', t, re.S)[1], ns)
+    from ingepresupuestos.pruebas import presupuesto_ejemplo
+    reportes.comprobar(ns['generar'](presupuesto_ejemplo()))
+    faltan = [k for k in esquema._LISTAS if f'`{k}`' not in t]
+    assert faltan == [], faltan
+
+
 def test_escribir_respeta_estado_invitado_y_proyecto(pid, admin, tmp_path):
     from models.usuario import Usuario
     ctx = _ctx(pid, admin, tmp_path)
