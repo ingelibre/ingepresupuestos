@@ -573,6 +573,9 @@ class MainWindow(QMainWindow):
         # event loop, así Qt puede pintar el placeholder primero.
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._ir_a_dashboard)
+        # Conexión con IA (MCP): apagada por defecto.
+        from views.mcp_puente import arrancar_si_corresponde
+        arrancar_si_corresponde(self)
 
     def _limpiar_stack(self):
         while self.stack.count():
@@ -823,7 +826,7 @@ class MainWindow(QMainWindow):
                 return IAView()
             case "configuracion":
                 from views.configuracion_view import ConfiguracionView
-                return ConfiguracionView()
+                return ConfiguracionView(ventana=self)
             case "acerca":
                 from views.acerca_view import AcercaView
                 return AcercaView()
@@ -1406,5 +1409,8 @@ class MainWindow(QMainWindow):
             vista.set_tab(nombre)
 
     def _logout(self):
+        puente = getattr(self, '_puente_mcp', None)
+        if puente is not None:
+            puente.apagar()
         logout()
         self.close()

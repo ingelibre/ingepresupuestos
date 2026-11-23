@@ -80,8 +80,10 @@ def _set_logo_rep(b64: str):
 
 class ConfiguracionView(QWidget):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, ventana=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # La MainWindow: dueña del puente MCP (sección «Conexión con IA»).
+        self._ventana = ventana
         self.setStyleSheet(f"background:{SILVER_100};")
         self._build_ui()
 
@@ -98,6 +100,7 @@ class ConfiguracionView(QWidget):
         ('exportacion', N_("Carpeta de exportación"),  N_("Sistema")),
         ('barra',       N_("Barra de título"),         N_("Sistema")),
         ('ia',          N_("Inteligencia artificial"), N_("Sistema")),
+        ('mcp',         N_("Conexión con IA (MCP)"),   N_("Sistema")),
         ('tuxia',       N_("Asistente Tuxia"),         N_("Sistema")),
         ('apariencia',  N_("Apariencia"),              N_("Interfaz")),
         ('atajos',      N_("Atajos de teclado"),       N_("Interfaz")),
@@ -177,6 +180,7 @@ class ConfiguracionView(QWidget):
             'exportacion': lambda: self._pagina(self._card_ruta_exportacion()),
             'barra':       lambda: self._pagina(self._card_barra_titulo()),
             'ia':          self._make_tab_ia,
+            'mcp':         lambda: self._pagina(self._card_mcp()),
             'tuxia':       lambda: self._pagina(self._card_tuxia()),
             'apariencia':  lambda: self._pagina(self._card_apariencia()),
             'atajos':      lambda: self._pagina(self._card_atajos()),
@@ -1237,6 +1241,22 @@ class ConfiguracionView(QWidget):
         )
 
     # ── Card asistente Tuxia ──────────────────────────────────────────────
+
+    def _card_mcp(self) -> QFrame:
+        from views.mcp_dialog import PanelMCP
+        card = QFrame()
+        card.setObjectName("cfgCard")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(_CARD_SS)
+        vl = QVBoxLayout(card)
+        vl.setContentsMargins(24, 20, 24, 24)
+        vl.setSpacing(12)
+        lbl = QLabel(tr("Conexión con IA (MCP)"))
+        lbl.setStyleSheet(_SEC_SS)
+        vl.addWidget(lbl)
+        self._panel_mcp = PanelMCP(self._ventana, card)
+        vl.addWidget(self._panel_mcp)
+        return card
 
     def _card_tuxia(self) -> QFrame:
         from utils.theme import apply_shadow
