@@ -21,6 +21,12 @@ if len(sys.argv) == 4 and sys.argv[1] == '--bim-geometria':
     from core.bim_geometria import proceso_hijo
     proceso_hijo(sys.argv[2:])       # termina el proceso
 
+# Herramientas para quien escribe complementos (docs/complementos.md): sin Qt y
+# sin base de datos. No instalan ni ejecutan nada.
+if __name__ == "__main__" and any(a.endswith('-complemento') for a in sys.argv[1:2]):
+    from core.complementos.cli import main as _complementos_main
+    raise SystemExit(_complementos_main(sys.argv[1:]))
+
 # Backend Qt: por defecto Qt elige (xcb en Xorg, wayland en Wayland). Si el
 # usuario exporta INGEPPTO_FORCE_XCB=1, se fuerza xcb (compat con la versión
 # anterior — útil si algún WM raro tiene un bug en Wayland nativo).
@@ -150,6 +156,11 @@ def _avisos_de_arranque(ventana):
     """Los diálogos del primer arranque, uno detrás de otro."""
     _preguntar_pais(ventana)
     _ofrecer_appimage(ventana)
+    try:
+        from views.complementos_dialog import avisar_fallos_de_arranque
+        avisar_fallos_de_arranque(ventana)
+    except Exception:
+        pass
 
 
 def main():
@@ -169,6 +180,14 @@ def main():
         pass
 
     init_db()
+
+    # Complementos activos. Uno que falla se apaga; nunca impide arrancar.
+    # `--sin-complementos` (o INGEPPTO_SIN_COMPLEMENTOS=1) no carga ninguno.
+    try:
+        from core.complementos import cargador
+        cargador.cargar_activos()
+    except Exception:
+        pass
 
     # Backup automático "daily" al iniciar (idempotente: si ya existe el de
     # hoy, no duplica). Luego rotación según política.

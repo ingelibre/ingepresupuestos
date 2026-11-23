@@ -33,6 +33,9 @@ datas = [
     # llegan solos al instalador Windows, al .msix y al AppImage, porque los
     # tres empaquetan el output de PyInstaller.
     ('LICENSE',                 '.'),
+    # Complementos incluidos (se instalan desde el gestor; son .json y .py que
+    # se leen como datos, no entran en el PYZ).
+    ('complementos',             'complementos'),
     ('THIRD-PARTY-NOTICES.txt',  '.'),
     ('resources/icons/elementary/24/*.svg',  'resources/icons/elementary/24'),
     ('resources/icons/elementary/24/*.png',  'resources/icons/elementary/24'),
@@ -100,6 +103,15 @@ hiddenimports = [
     # Módulos internos referenciados por import perezoso (dentro de funciones) —
     # PyInstaller normalmente los detecta, pero se listan por seguridad.
     'core.plantillas_estructura',
+    # API pública de complementos: la importa código que PyInstaller no ve.
+    'ingepresupuestos.api', 'ingepresupuestos.pruebas', 'core.complementos.cli',
+    'core.complementos.plantilla', 'core.complementos.reportes',
+    'core.complementos.contexto',
+    'views.complementos_dialog', 'views.complementos_menu',
+    # Módulos de la biblioteca estándar que un complemento puede necesitar.
+    'calendar', 'collections', 'csv', 'datetime', 'decimal', 'difflib', 'enum',
+    'fractions', 'functools', 'html', 'itertools', 'json', 'math', 'statistics',
+    'string', 'textwrap', 'unicodedata', 'xml.etree.ElementTree', 'zipfile',
     # MCP: se importan dentro de funciones.
     'core.mcp_stdio', 'core.mcp_operaciones', 'core.ingetrazo_puente',
     'views.mcp_puente', 'views.mcp_dialog', 'views.ingetrazo_traer',

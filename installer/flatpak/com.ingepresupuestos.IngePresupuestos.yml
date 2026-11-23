@@ -83,7 +83,7 @@ modules:
       #    Software libre GPL-3.0-or-later: NO usar compileall -b ni borrar
       #    los .py.
       - mkdir -p ${FLATPAK_DEST}/ingepresupuestos
-      - cp -a core models utils views widgets worker resources main.py presupuestos_seed.db LICENSE THIRD-PARTY-NOTICES.txt ${FLATPAK_DEST}/ingepresupuestos/
+      - cp -a complementos core ingepresupuestos models utils views widgets worker resources main.py presupuestos_seed.db LICENSE THIRD-PARTY-NOTICES.txt ${FLATPAK_DEST}/ingepresupuestos/
       # __pycache__ que se hubiera colado desde el árbol de origen
       - find ${FLATPAK_DEST}/ingepresupuestos -name '__pycache__' -type d -exec rm -rf {} +
       # 3. Lanzador
