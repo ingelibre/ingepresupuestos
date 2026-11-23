@@ -2159,7 +2159,13 @@ class ProyectoView(QWidget):
         root.addWidget(self._root_stack)
 
         # ── Atajos globales (cualquier widget de la ventana) ─────────────────
+        from views.historial_ui import HistorialVista
+        self._historial = HistorialVista(self)
         QShortcut(QKeySequence("F5"),        self, self.recalcular)
+        QShortcut(QKeySequence("Ctrl+Z"),       self, self._historial.deshacer)
+        QShortcut(QKeySequence("Ctrl+Y"),       self, self._historial.rehacer)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._historial.rehacer)
+        QShortcut(QKeySequence("Ctrl+H"),       self, self._buscar_reemplazar)
         QShortcut(QKeySequence("Delete"),    self, self._supr_partida_seleccionada)
         QShortcut(QKeySequence("Escape"),    self, self._deseleccionar)
         QShortcut(QKeySequence("F1"),        self, self._mostrar_atajos)
@@ -2292,7 +2298,7 @@ class ProyectoView(QWidget):
         from utils.i18n import tr as _tr
         _tbtn(_tr("Inicio"),      lambda: self.ir_a_proyectos.emit(), sep_after=True)
         _tbtn(f"{_tr('Archivo')} ▾", None, sep_after=True, menu=self._build_archivo_menu())
-        _tbtn(_tr("Editar"),      self._editar_proyecto)
+        _tbtn(f"{_tr('Editar')} ▾", None, menu=self._build_editar_menu())
         _tbtn(_tr("Reportes"),    self._abrir_centro_reportes, sep_after=True)
         _tbtn(_tr("Metrados"),    self._ir_metrados)
         _tbtn(f"{_tr('Cronogramas')} ▾", None, menu=self._build_cronograma_menu())
@@ -3664,7 +3670,8 @@ class ProyectoView(QWidget):
         ).fetchall()
         conn.close()
         if not rubros:
-            self._pie_crear_rubros_default(proy)
+            with self._historial.sin_anotar():
+                self._pie_crear_rubros_default(proy)
         self._render_pie()
 
     def _render_pie(self):
@@ -5618,6 +5625,9 @@ class ProyectoView(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         pintados = getattr(self, '_decimales_pintados', None)
+        # Lo cambiado fuera de esta vista (Inicio…) no es un paso suyo.
+        with self._historial.sin_anotar():
+            pass
         if pintados is not None and pintados != self._huella_decimales():
             QTimer.singleShot(0, self._repintar_por_decimales)
 
@@ -7029,6 +7039,8 @@ class ProyectoView(QWidget):
                 (tr('Generales'), [
                     ('F1',                 tr('Mostrar este diálogo')),
                     ('F5',                 tr('Recalcular precios y totales')),
+                    ('Ctrl+Z / Ctrl+Y',    tr('Deshacer / Rehacer')),
+                    ('Ctrl+H',             tr('Buscar y reemplazar')),
                     ('Esc',                tr('Deseleccionar partida')),
                     ('Ctrl+F',             tr('Enfocar buscador del topbar')),
                     ('Ctrl+N',             tr('Nuevo proyecto')),
@@ -8088,7 +8100,7 @@ class ProyectoView(QWidget):
         msg = QMessageBox(self)
         msg.setWindowTitle(tr("Eliminar partidas"))
         msg.setText(
-            tr("¿Eliminar las {n} partidas seleccionadas?\nEsta acción no se puede deshacer.").format(n=n)
+            tr("¿Eliminar las {n} partidas seleccionadas?").format(n=n)
         )
         msg.setIcon(QMessageBox.Icon.Warning)
         b_si = msg.addButton(tr("Eliminar {n} partidas").format(n=n), QMessageBox.ButtonRole.AcceptRole)
@@ -8099,8 +8111,6 @@ class ProyectoView(QWidget):
         conn = get_db()
         for part_id, _ in ids:
             conn.execute("DELETE FROM partidas WHERE id=?", (part_id,))
-            from core.adjuntos import limpiar_carpeta as _lc
-            _lc('especificaciones', part_id)
             if self._partida_actual_id == part_id:
                 self._acu_en_blanco()
         conn.commit()
@@ -8115,7 +8125,7 @@ class ProyectoView(QWidget):
             return
         msg = QMessageBox(self)
         msg.setWindowTitle(tr("Eliminar partida"))
-        msg.setText(tr("¿Eliminar «{desc}»?\nEsta acción no se puede deshacer.").format(desc=desc))
+        msg.setText(tr("¿Eliminar «{desc}»?").format(desc=desc))
         msg.setIcon(QMessageBox.Icon.Warning)
         b_si = msg.addButton(tr("Eliminar"), QMessageBox.ButtonRole.AcceptRole)
         msg.addButton(tr("Cancelar"),        QMessageBox.ButtonRole.RejectRole)
@@ -8126,8 +8136,8 @@ class ProyectoView(QWidget):
         conn.execute("DELETE FROM partidas WHERE id=?", (part_id,))
         conn.commit()
         conn.close()
-        from core.adjuntos import limpiar_carpeta as _lc
-        _lc('especificaciones', part_id)
+        # Sus adjuntos se quedan en disco: Deshacer los necesita
+        # (`core.adjuntos.limpiar_huerfanos` los quita semanas después).
         if self._partida_actual_id == part_id:
             self._acu_en_blanco()
         self.recargar_partidas()
@@ -11521,6 +11531,18 @@ class ProyectoView(QWidget):
         que la apertura no se sienta "frizada"."""
         self.recargar_partidas()
         self.actualizar_total()
+        QTimer.singleShot(0, self, self._historial.empezar)
+
+    def _tras_deshacer(self):
+        """Un sub-presupuesto pudo aparecer o desaparecer al deshacer."""
+        conn = get_db()
+        vivos = {r[0] for r in conn.execute(
+            "SELECT id FROM sub_presupuestos WHERE proyecto_id=?", (self.pid,))}
+        conn.close()
+        if self._sub_ppto_id is not None and self._sub_ppto_id not in vivos:
+            self._sub_ppto_id = None
+        self._proy = self._cargar_proyecto()
+        self._cargar_sub_pptos()
 
     def _ir_metrados(self):
         # Recrear la Hoja si no existe o si cambió la editabilidad (p.ej. el
@@ -11646,6 +11668,71 @@ class ProyectoView(QWidget):
             a.triggered.connect(lambda _c=False, i=idx: self._ir_control_obra(i))
             menu.addAction(a)
         return menu
+
+    def _build_editar_menu(self):
+        """QMenu del botón "Editar ▾". Los atajos del árbol ya existen (con
+        foco en el árbol): aquí solo se enseñan, no se registran otra vez."""
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+        menu = QMenu(self)
+
+        def _a(texto, slot, tecla=''):
+            a = QAction(texto + (f"\t{tecla}" if tecla else ''), self)
+            a.triggered.connect(lambda *_: slot())
+            menu.addAction(a)
+            return a
+        a_des = _a(tr("Deshacer"), lambda: self._historial.deshacer(), "Ctrl+Z")
+        a_reh = _a(tr("Rehacer"), lambda: self._historial.rehacer(), "Ctrl+Y")
+
+        def _al_abrir():
+            h = self._historial
+            h.al_dia()
+            for a, n, t, k in ((a_des, h.nombre(), tr("Deshacer"), "Ctrl+Z"),
+                               (a_reh, h.nombre(True), tr("Rehacer"), "Ctrl+Y")):
+                a.setText((f"{t}: {n}" if n else t) + f"\t{k}")
+                a.setEnabled(n is not None)
+        menu.aboutToShow.connect(_al_abrir)
+        menu.addSection(tr("Partidas"))
+        _a(tr("Cortar"), self._cortar_partidas_seleccionadas, "Ctrl+X")
+        _a(tr("Copiar"), self._copiar_partidas_seleccionadas, "Ctrl+C")
+        _a(tr("Pegar"), self._pegar_partidas_clipboard, "Ctrl+V")
+        _a(tr("Duplicar"), self._duplicar_actual, "Ctrl+D")
+        _a(tr("Eliminar"), self._eliminar_seleccion_arbol, tr("Supr"))
+        _a(tr("Seleccionar todo"), lambda: self.tree.selectAll(), "Ctrl+A")
+        menu.addSeparator()
+        _a(tr("Agregar título") + "…", self._nuevo_titulo, "Ctrl+Ins")
+        _a(tr("Agregar partida") + "…", self._nueva_partida, "Ins")
+        _a(tr("Editar partida") + "…", self._editar_partida_actual, "F2")
+        menu.addSeparator()
+        _a(tr("Subir"), self._mover_arriba, "Alt+↑")
+        _a(tr("Bajar"), self._mover_abajo, "Alt+↓")
+        _a(tr("Subir nivel"), self._subir_nivel, "Alt+←")
+        _a(tr("Bajar nivel"), self._bajar_nivel, "Alt+→")
+        menu.addSeparator()
+        _a(tr("Buscar partida"), self._focus_buscar, "Ctrl+F")
+        _a(tr("Buscar y reemplazar") + "…", self._buscar_reemplazar, "Ctrl+H")
+        menu.addSeparator()
+        _a(tr("Datos del proyecto") + "…", self._editar_proyecto)
+        return menu
+
+    def _eliminar_seleccion_arbol(self):
+        ids = [(it.data(0, Qt.UserRole), it.text(1))
+               for it in self.tree.selectedItems() if it.data(0, Qt.UserRole)]
+        if len(ids) == 1:
+            self._eliminar_partida(*ids[0])
+        elif ids:
+            self._eliminar_partidas_multiple(ids)
+
+    def _buscar_reemplazar(self):
+        if not self._require_editable(N_("editar partidas")):
+            return
+        from views.reemplazar_dialog import ReemplazarDialog
+        dlg = ReemplazarDialog(self.pid, self)
+        if dlg.exec():
+            self.recargar_partidas()
+            if self._partida_actual_id is not None:
+                self.cargar_acu(self._partida_actual_id)
+        dlg.deleteLater()
 
     def _build_bim_menu(self):
         """QMenu del botón "BIM ▾": visor, vínculos y puente con IngeTrazo."""

@@ -11,7 +11,8 @@ import os
 import re
 import io
 from core.database import (get_db, calcular_totales, get_acu_items, get_decimales_metrado,
-                           get_decimales_cant_acu, cuadrilla_reporte, ORDEN_ACU_SQL)
+                           get_decimales_cant_acu, cuadrilla_reporte, ORDEN_ACU_SQL,
+                           es_herramienta_pct)
 from utils.formatting import (
     ITEM_TRAMOS_POR_LINEA, con_moneda_del_proyecto, fmt as _fmt_moneda, fmt_doc,
     fmt_pct, monto_en_letras, separadores)
@@ -186,6 +187,23 @@ def _guardar_libro(wb, buf):
 
 
 # ─── Cálculo dinámico de rubros del pie ───────────────────────────────────────
+
+def _herramientas_solo_monto() -> bool:
+    """Casilla de «Editar formato»: de las herramientas manuales, solo el monto."""
+    from core.pdf_reports import herramientas_solo_monto
+    return herramientas_solo_monto()
+
+
+def _montos_herramientas(conn, partida_id) -> dict:
+    """{id de la línea: monto real} de las herramientas en %MO de una partida,
+    o {} si la casilla está apagada. Los reportes completos calculan el
+    parcial como cantidad × precio, que para un % no es su monto: si es lo
+    único que se imprime, tiene que ser el de verdad."""
+    if not _herramientas_solo_monto():
+        return {}
+    return {it['id']: it['parcial'] for it in get_acu_items(conn, partida_id)[0]
+            if es_herramienta_pct(it['tipo'], it['unidad'])}
+
 
 def _calcular_rubros_pie(conn, proyecto_id, cd):
     # None = el proyecto nunca ha tenido pie configurado → usar fallback de porcentajes
@@ -1230,6 +1248,7 @@ def exportar_acus(proyecto_id):
 
     # Los análisis de las sub-partidas usadas van al final (issue #23).
     from core.subpartidas import usadas_en
+    solo_monto = _herramientas_solo_monto()
     en_subs = False
     for partida in [*partidas, *usadas_en(conn, [p['id'] for p in partidas])]:
         if partida['es_subanalisis'] and not en_subs:
@@ -1377,20 +1396,21 @@ def exportar_acus(proyecto_id):
                 ws.cell(r, 3).font = Font(name='Inter', size=10, color=C_SLATE_900)
                 # Col 4-7: Und, Cuadrilla, Cantidad, Precio
                 num_font = Font(name='Inter', size=10, color=C_SLATE_900)
-                c_u = ws.cell(r, 4, it['unidad'] or ''); c_u.font = num_font
+                oculta = solo_monto and es_herramienta_pct(tipo, it['unidad'])
+                c_u = ws.cell(r, 4, '' if oculta else it['unidad'] or ''); c_u.font = num_font
                 c_u.alignment = Alignment(horizontal='center', vertical='top')
                 # Cuadrilla en blanco cuando no aplica (MAT/SC, %MO) — antes
                 # salía «0.0000» (reporte de David Ramos, 9 sep 2026).
                 _cuad = cuadrilla_reporte(tipo, it['unidad'], it['cuadrilla'])
-                c_cu = ws.cell(r, 5, _cuad if _cuad is not None else None)
+                c_cu = ws.cell(r, 5, None if oculta else _cuad)
                 c_cu.font = num_font
                 c_cu.number_format = fmt_4
                 c_cu.alignment = Alignment(horizontal='right', vertical='top')
-                c_ca = ws.cell(r, 6, cant); c_ca.font = num_font
+                c_ca = ws.cell(r, 6, None if oculta else cant); c_ca.font = num_font
                 _dc = get_decimales_cant_acu(tipo)
                 c_ca.number_format = '#,##0' + ('.' + '0' * _dc if _dc else '')
                 c_ca.alignment = Alignment(horizontal='right', vertical='top')
-                c_p = ws.cell(r, 7, precio); c_p.font = num_font
+                c_p = ws.cell(r, 7, None if oculta else precio); c_p.font = num_font
                 c_p.number_format = fmt_money
                 c_p.alignment = Alignment(horizontal='right', vertical='top')
                 # Col 8: Parcial
@@ -1477,6 +1497,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
     # Usar `get_insumos_proyecto` (la misma fuente del PDF y la pestaña):
     # incluye overhead `%MO`/`%MAT` y aplica distribución proporcional al
     # parcial de cada partida → sum(insumos) ≈ CD exactamente.
+    solo_monto = _herramientas_solo_monto()
     insumos = _get_ins(conn, proyecto_id)
     conn.close()
     _orden_tipo = {'MO': 0, 'MAT': 1, 'EQ': 2, 'SC': 3}
@@ -1651,12 +1672,13 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
                                              wrap_text=True)
                 # PRE-estilar col 3 antes del merge (post-merge sería MergedCell)
                 ws.cell(r, 3).font = num_font
-                c_un = ws.cell(r, 4, ins['unidad'] or ''); c_un.font = num_font
+                oculta = solo_monto and es_herramienta_pct(tipo, ins['unidad'])
+                c_un = ws.cell(r, 4, '' if oculta else ins['unidad'] or ''); c_un.font = num_font
                 c_un.alignment = Alignment(horizontal='center', vertical='top')
-                c_ct = ws.cell(r, 5, ins['cantidad_total'] or 0); c_ct.font = num_font
+                c_ct = ws.cell(r, 5, None if oculta else ins['cantidad_total'] or 0); c_ct.font = num_font
                 c_ct.number_format = fmt_4
                 c_ct.alignment = Alignment(horizontal='right', vertical='top')
-                c_pr = ws.cell(r, 6, ins['precio'] or 0); c_pr.font = num_font
+                c_pr = ws.cell(r, 6, None if oculta else ins['precio'] or 0); c_pr.font = num_font
                 c_pr.number_format = fmt_money
                 c_pr.alignment = Alignment(horizontal='right', vertical='top')
                 parcial = ins.get('parcial_total') or 0
@@ -2701,6 +2723,7 @@ def exportar_reporte_completo(proyecto_id):
         if not items_acu:
             continue
 
+        montos_h = _montos_herramientas(conn, partida['id'])
         ws_a.cell(ra, 1, f"Partida   {partida['item']}").font = Font(name='Inter', bold=True, size=11)
         ws_a.merge_cells(start_row=ra, start_column=2, end_row=ra, end_column=7)
         ws_a.cell(ra, 2, partida['descripcion']).font = Font(name='Inter', bold=True, size=11)
@@ -2739,15 +2762,17 @@ def exportar_reporte_completo(proyecto_id):
             subtotal = 0
             for it in tipo_items:
                 precio = it['precio'] or 0; cant = it['cantidad'] or 0
-                parcial = precio * cant; subtotal += parcial
+                oculta = it['id'] in montos_h
+                parcial = montos_h[it['id']] if oculta else precio * cant
+                subtotal += parcial
                 ws_a.cell(ra, 1, it['codigo']).font = Font(name='Inter', size=11)
                 ws_a.merge_cells(start_row=ra, start_column=2, end_row=ra, end_column=3)
                 ws_a.cell(ra, 2, it['rdesc']).font = Font(name='Inter', size=11)
-                ws_a.cell(ra, 4, it['unidad']).font = Font(name='Inter', size=11)
+                ws_a.cell(ra, 4, None if oculta else it['unidad']).font = Font(name='Inter', size=11)
                 _cuad = cuadrilla_reporte(tipo, it['unidad'], it['cuadrilla'])
-                ws_a.cell(ra, 5, _cuad).number_format = '[$-0409]#,##0.0000'
-                ws_a.cell(ra, 6, cant).number_format = '[$-0409]#,##0.0000'
-                ws_a.cell(ra, 7, precio).number_format = '[$-0409]#,##0.00'
+                ws_a.cell(ra, 5, None if oculta else _cuad).number_format = '[$-0409]#,##0.0000'
+                ws_a.cell(ra, 6, None if oculta else cant).number_format = '[$-0409]#,##0.0000'
+                ws_a.cell(ra, 7, None if oculta else precio).number_format = '[$-0409]#,##0.00'
                 ws_a.merge_cells(start_row=ra, start_column=8, end_row=ra, end_column=10)
                 ws_a.cell(ra, 8, parcial).number_format = '[$-0409]#,##0.00'
                 ws_a.cell(ra, 8).alignment = Alignment(horizontal='right')
@@ -3173,6 +3198,7 @@ def exportar_pdf(proyecto_id):
         if not items_acu:
             continue
 
+        montos_h = _montos_herramientas(conn, partida['id'])
         acu_data = []
         from utils.formatting import texto_rendimiento
         _rt = texto_rendimiento(partida['rendimiento'], partida['unidad'],
@@ -3198,12 +3224,14 @@ def exportar_pdf(proyecto_id):
             for it in tipo_items:
                 precio  = it['precio']   or 0
                 cant    = it['cantidad'] or 0
-                parcial = precio * cant
+                oculta = it['id'] in montos_h
+                parcial = montos_h[it['id']] if oculta else precio * cant
                 subtipo += parcial
                 acu_data.append([
-                    it['codigo'], it['rdesc'], it['unidad'] or '',
-                    _fmt_cuadrilla(tipo, it['unidad'], it['cuadrilla']), _fmt(cant, 4),
-                    _fmt(precio), _fmt(parcial)
+                    it['codigo'], it['rdesc'], '' if oculta else it['unidad'] or '',
+                    '' if oculta else _fmt_cuadrilla(tipo, it['unidad'], it['cuadrilla']),
+                    '' if oculta else _fmt(cant, 4),
+                    '' if oculta else _fmt(precio), _fmt(parcial)
                 ])
             row_subtot.append(len(acu_data))
             acu_data.append(['', '', '', '', '', '', _fmt(subtipo)])

@@ -255,8 +255,33 @@ def _orden_mo(desc) -> int:
 
 from core.config import DB_PATH  # path resuelto cross-platform por config
 
+#: La interfaz lo pone para enterarse de cada guardado (Deshacer). Se llama
+#: desde el hilo que guardó; solo si hubo cambios.
+al_guardar = None
+
+
+class _Conexion(sqlite3.Connection):
+    _vistos = 0
+
+    def _avisar(self):
+        if self.total_changes != self._vistos:
+            self._vistos = self.total_changes
+            if al_guardar is not None:
+                al_guardar()
+
+    def commit(self):
+        super().commit()
+        self._avisar()
+
+    def __exit__(self, *a):
+        r = super().__exit__(*a)
+        if a[0] is None:
+            self._avisar()
+        return r
+
+
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), factory=_Conexion)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # Función escalar para ordenar mano de obra por jerarquía en SQL.
@@ -679,6 +704,8 @@ def init_db():
     ''')
     from core.bim_modelo import TABLAS_SQL as _bim_sql
     conn.executescript(_bim_sql)
+    from core.titulos import TABLA_SQL as _titulos_sql
+    conn.executescript(_titulos_sql)
     conn.commit()
     # Migración: agregar columnas nuevas si no existen (SQLite no soporta IF NOT EXISTS en ALTER)
     for col, ddl in [
@@ -1319,6 +1346,14 @@ def base_overhead(unidad) -> str:
         if marca in u:
             return base
     return 'MO'
+
+
+def es_herramienta_pct(tipo, unidad) -> bool:
+    """¿Es la línea de herramientas manuales, un % de la mano de obra?
+    (issue #42). La unidad manda; un % clasificado como mano de obra (leyes
+    sociales) no es herramienta."""
+    u = (unidad or '').strip()
+    return u.startswith('%') and tipo != 'MO' and base_overhead(u) == 'MO'
 
 
 def _pu_desde_items(items) -> float:

@@ -5,17 +5,18 @@
 """Diálogo para agregar un título / sección al presupuesto.
 
 2 tabs:
-  1. Buscar — títulos existentes en todos los proyectos
+  1. Buscar — la lista de títulos (core/titulos.py), editable con su gestor
   2. Nuevo  — ingreso manual de descripción
 """
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QFrame, QListWidget, QListWidgetItem, QWidget,
+    QLineEdit, QFrame, QListWidget, QWidget,
     QStackedWidget, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 
+from core import titulos
 from core.database import get_db
 from utils.formatting import siguiente_codigo
 from utils.i18n import tr
@@ -167,6 +168,17 @@ class AgregarTituloDialog(QDialog):
 
         # Botón agregar
         hl = QHBoxLayout()
+        btn_lista = QPushButton(tr("Editar lista…"))
+        btn_lista.setFixedHeight(36)
+        btn_lista.setToolTip(tr("Agregar, corregir, borrar y ordenar los títulos de esta lista"))
+        btn_lista.setAutoDefault(False)
+        btn_lista.setStyleSheet(
+            f"QPushButton {{ background:white; color:{SLATE_500}; border:1px solid {SILVER_300};"
+            f" border-radius:8px; font-size:13px; padding:0 16px; }}"
+            f"QPushButton:hover {{ border-color:{BLUE_500}; color:{BLUE_700}; }}"
+        )
+        btn_lista.clicked.connect(self._editar_lista)
+        hl.addWidget(btn_lista)
         hl.addStretch()
         self.btn_agregar_bib = QPushButton("  " + tr("Agregar"))
         self.btn_agregar_bib.setFixedHeight(36)
@@ -201,37 +213,29 @@ class AgregarTituloDialog(QDialog):
         self.lst_titulos.clear()
         try:
             conn = get_db()
-            conn.create_function("_norm", 1, norm_busqueda)
-            if texto:
-                rows = conn.execute(
-                    """SELECT DISTINCT descripcion FROM partidas
-                       WHERE es_titulo=1 AND _norm(descripcion) LIKE ?
-                       ORDER BY descripcion LIMIT 200""",
-                    (f"%{norm_busqueda(texto)}%",)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT DISTINCT descripcion FROM partidas
-                       WHERE es_titulo=1
-                       ORDER BY descripcion LIMIT 200"""
-                ).fetchall()
-            conn.close()
+            try:
+                todos = titulos.lista(conn)
+            finally:
+                conn.close()
         except Exception:
-            rows = []
-
-        textos = [r[0] for r in rows]
+            todos = []
         # Los títulos que proponen los complementos, después de los propios.
         try:
             from core.complementos import registro
-            norma = norm_busqueda(texto)
-            textos += [t for t in registro.titulos()
-                       if t not in textos and norma in norm_busqueda(t)]
+            todos += [t for t in registro.titulos() if t not in todos]
         except Exception:
             pass
-        for t in textos:
-            self.lst_titulos.addItem(QListWidgetItem(t))
+        if texto:
+            clave = norm_busqueda(texto)
+            todos = [t for t in todos if clave in norm_busqueda(t)]
+        self.lst_titulos.addItems(todos[:200])
 
         self.btn_agregar_bib.setEnabled(False)
+
+    def _editar_lista(self):
+        from views.titulos_dialog import GestorTitulosDialog
+        if GestorTitulosDialog(self).exec():
+            self._buscar_titulos()
 
     def _on_seleccion_cambio(self):
         self.btn_agregar_bib.setEnabled(

@@ -82,7 +82,8 @@ def foto_filas(conn, pid: int) -> tuple[dict, dict]:
             {p['item']: p['id'] for p in partidas})
 
 
-def conservar_predecesoras(conn, pid: int, antes: tuple[dict, dict]) -> int:
+def conservar_predecesoras(conn, pid: int, antes: tuple[dict, dict],
+                           solo: set | None = None) -> int:
     """Las predecesoras se guardan como número de fila («5FC+2»): al insertar,
     mover o borrar partidas apuntarían a otra. Las reescribe para que sigan en
     la misma; la de una partida borrada se quita. Devuelve cuántas se quitaron."""
@@ -98,6 +99,8 @@ def conservar_predecesoras(conn, pid: int, antes: tuple[dict, dict]) -> int:
                JOIN partidas p ON p.id=c.partida_id
                WHERE p.proyecto_id=? AND COALESCE(c.predecesoras,'')<>''""",
             (pid,)).fetchall():
+        if solo is not None and r['partida_id'] not in solo:
+            continue
         nuevas = []
         for ref in re.split(r'[,;]+', r['predecesoras']):
             ref = ref.strip()

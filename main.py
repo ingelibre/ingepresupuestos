@@ -180,6 +180,11 @@ def main():
         pass
 
     init_db()
+    try:
+        from core.adjuntos import limpiar_huerfanos
+        limpiar_huerfanos()
+    except Exception:
+        pass
 
     # Complementos activos. Uno que falla se apaga; nunca impide arrancar.
     # `--sin-complementos` (o INGEPPTO_SIN_COMPLEMENTOS=1) no carga ninguno.

@@ -1603,18 +1603,7 @@ class GanttWidget(QWidget):
         super().__init__(parent)
         self._cv = parent
         self._fit_pendiente = True   # auto-fit al primer render
-        # Historial de dependencias (predecesoras) para deshacer/rehacer con
-        # Ctrl+Z / Ctrl+Y. Cada entrada = {pid: predecesoras} de TODAS las
-        # partidas antes de una mutación (_set_dep / _remove_dep).
-        self._dep_undo: list[dict] = []
-        self._dep_redo: list[dict] = []
         self._build_ui()
-        from PySide6.QtGui import QShortcut, QKeySequence
-        for seq, slot in ((QKeySequence.Undo, self._dep_deshacer),
-                          (QKeySequence.Redo, self._dep_rehacer)):
-            sc = QShortcut(seq, self)
-            sc.setContext(Qt.WidgetWithChildrenShortcut)
-            sc.activated.connect(slot)
 
     def _build_ui(self):
         vl = QVBoxLayout(self)
@@ -2731,7 +2720,6 @@ class GanttWidget(QWidget):
                 if fin >= ini:
                     cmap[pid]['duracion'] = fin - ini + 1
         elif col == 7:
-            self._push_undo_dep()   # predecesoras editadas a mano → deshacible
             cmap[pid]['predecesoras'] = val
             self._avisar_preds_invalidas(pid, val)
         # Recalcular CPM y refrescar Gantt + tabla
@@ -2872,7 +2860,6 @@ class GanttWidget(QWidget):
         nueva = dlg.cadena()
         if nueva == antes:
             return
-        self._push_undo_dep()
         if pid not in cmap:
             cmap[pid] = {'partida_id': pid, 'duracion': 1, 'inicio_dia': 1,
                           'predecesoras': '', 'es_hito': 0, 'segmentos': '',
@@ -5104,7 +5091,6 @@ class GanttWidget(QWidget):
         dlg = SincronizarProjectDialog(plan, path, self)
         if dlg.exec() != QDialog.Accepted:
             return
-        self._push_undo_dep()          # las predecesoras se pueden deshacer con Ctrl+Z
         n = aplicar(self._cv._cron_map, plan,
                     duraciones=dlg.aplicar_duraciones,
                     predecesoras=dlg.aplicar_predecesoras)
@@ -5802,42 +5788,6 @@ class GanttWidget(QWidget):
                     stack.append(pid_pred)
         return False
 
-    # ── Deshacer / rehacer dependencias (Ctrl+Z / Ctrl+Y) ──────────────────
-    def _snapshot_preds(self) -> dict:
-        """Copia {pid: predecesoras} de todas las partidas del cron_map."""
-        return {pid: (d.get('predecesoras', '') or '')
-                for pid, d in self._cv._cron_map.items()}
-
-    def _push_undo_dep(self):
-        """Guarda el estado actual de predecesoras antes de una mutación.
-        Una acción nueva invalida la pila de rehacer."""
-        self._dep_undo.append(self._snapshot_preds())
-        if len(self._dep_undo) > 100:
-            self._dep_undo.pop(0)
-        self._dep_redo.clear()
-
-    def _restaurar_preds(self, snap: dict):
-        """Aplica un snapshot: cada partida del cron_map toma su predecesoras
-        del snapshot (las creadas después del snapshot quedan sin pred.)."""
-        for pid, d in self._cv._cron_map.items():
-            d['predecesoras'] = snap.get(pid, '')
-        self._cv._calcular_cpm()
-        self._cv._guardar_a_db()
-        self._llenar_tabla()
-        self._render_gantt()
-
-    def _dep_deshacer(self):
-        if not self._dep_undo:
-            return
-        self._dep_redo.append(self._snapshot_preds())
-        self._restaurar_preds(self._dep_undo.pop())
-
-    def _dep_rehacer(self):
-        if not self._dep_redo:
-            return
-        self._dep_undo.append(self._snapshot_preds())
-        self._restaurar_preds(self._dep_redo.pop())
-
     def _set_dep(self, source_pid, target_pid, tipo='FS', lag=0, pct=0,
                   tgt_pct=0):
         if source_pid == target_pid:
@@ -5850,7 +5800,6 @@ class GanttWidget(QWidget):
         token = self._build_pred_token(source_pid, tipo, lag, pct, tgt_pct)
         if token is None:
             return
-        self._push_undo_dep()
         self._replace_pred(target_pid, source_pid, token)
         self._cv._calcular_cpm()
         self._cv._guardar_a_db()
@@ -5858,7 +5807,6 @@ class GanttWidget(QWidget):
         self._render_gantt()
 
     def _remove_dep(self, source_pid, target_pid):
-        self._push_undo_dep()
         self._replace_pred(target_pid, source_pid, None)
         self._cv._calcular_cpm()
         self._cv._guardar_a_db()
@@ -5990,7 +5938,6 @@ class GanttWidget(QWidget):
                   and it._source_pid and it._target_pid]
         if not pairs:
             return False
-        self._push_undo_dep()   # un solo paso de deshacer para todo el batch
         for source_pid, target_pid in pairs:
             self._replace_pred(target_pid, source_pid, None)
         self._cv._calcular_cpm()
@@ -11364,6 +11311,9 @@ class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
                 it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 self.tbl_r.setItem(rr, c, it)
 
+        from core.database import es_herramienta_pct
+        from core.pdf_reports import herramientas_solo_monto
+        solo_monto = herramientas_solo_monto()
         for r_idx, rec in enumerate(sorted_rec):
             # Si cambia el tipo, insertar fila de subtítulo del grupo
             if rec['tipo'] != last_tipo:
@@ -11377,11 +11327,14 @@ class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
             cost_total = sum(rec['weekly'])
             qty_total  = sum(rec.get('weekly_qty', []))
             cant_txt = fmt_doc(qty_total, 2, moneda=moneda) if qty_total > 0 else ''
+            # El Excel se arma leyendo esta tabla (issue #42).
+            und_txt = ('' if solo_monto and es_herramienta_pct(rec['tipo'], rec['unidad'])
+                       else rec['unidad'])
             cells_left = [
                 (rec['tipo'],                  Qt.AlignCenter),
                 (rec['codigo'],                Qt.AlignLeft  | Qt.AlignVCenter),
                 (rec['desc'],                  Qt.AlignLeft  | Qt.AlignVCenter),
-                (rec['unidad'],                Qt.AlignCenter),
+                (und_txt,                      Qt.AlignCenter),
                 (cant_txt,                     Qt.AlignRight | Qt.AlignVCenter),
                 (fmt(cost_total, moneda),      Qt.AlignRight | Qt.AlignVCenter),
             ]

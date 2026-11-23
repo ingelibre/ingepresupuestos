@@ -1338,7 +1338,7 @@ class MainWindow(QMainWindow):
     # ── Popover de Catálogos ────────────────────────────────────────────────
     def _mostrar_menu_catalogos(self):
         """Muestra un menú popover al lado del botón Catálogos del sidebar
-        con las 3 opciones: Insumos, Biblioteca CU, Índices INEI."""
+        con sus opciones: Insumos, Biblioteca CU, Títulos, Índices INEI."""
         from PySide6.QtWidgets import QMenu
         from PySide6.QtCore import QPoint
         from PySide6.QtGui import QAction
@@ -1355,6 +1355,10 @@ class MainWindow(QMainWindow):
         a_bib.triggered.connect(self._ir_a_biblioteca)
         menu.addAction(a_bib)
 
+        a_tit = QAction(icon("folder"), tr("Lista de títulos"), self)
+        a_tit.triggered.connect(self._abrir_lista_titulos)
+        menu.addAction(a_tit)
+
         menu.addSeparator()
         a_inei = QAction(icon("rep-resumen"), tr("Índices Unificados INEI"), self)
         a_inei.setStatusTip(tr("Histórico mensual de los 72 índices oficiales"))
@@ -1368,6 +1372,10 @@ class MainWindow(QMainWindow):
         else:
             pos = self.cursor().pos()
         menu.exec(pos)
+
+    def _abrir_lista_titulos(self):
+        from views.titulos_dialog import GestorTitulosDialog
+        GestorTitulosDialog(self).exec()
 
     def _ir_a_importar(self):
         self._ir_a_vista_global("importar", nav=3)
