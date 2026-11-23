@@ -50,12 +50,17 @@ Si algo va mal, arranca con `--sin-complementos` (o con la variable
 
 | Complemento | Clase | Qué trae |
 |---|---|---|
-| `pais-brasil` | datos | CNPJ/CPF, BDI, pie en portugués y el formato de la planilla de insumos de SINAPI. **No** trae datos de SINAPI |
-| `pais-argentina` | datos | pesos, CUIT, IVA, «rubro» por «título» y el sitio para importar tu índice CAC. **No** trae valores del CAC |
-| `apu-chile` | código | APU en bloques A–D, sin cuadrilla ni rendimiento, en pesos enteros |
+| `pais-brasil` | código | CNPJ/CPF, pie en portugués, formato de insumos de SINAPI (sin datos), vocabulario, sitio para el INCC, cálculo del BDI (TCU Ac. 2622/2013), «Composição do BDI» y «Planilha orçamentária» con dos formas de redondear. El BDI se copia a mano al pie |
+| `pais-argentina` | código | pesos, CUIT, IVA, «rubro» por «título», el sitio para tu índice CAC (sin valores) y el reporte de materiales / mano de obra: los equipos van en mano de obra y los subcontratos solo se reparten con el % que escribas |
+| `pais-espana` | código | «Presupuesto y mediciones» con IVA editable y «Condiciones generales» |
+| `pais-honduras` | código | análisis sin cuadrilla, mano de obra en horas o jornales |
+| `pais-dominicana` | código | ITBIS sobre materiales (18 % al empezar) |
+| `pais-italia` | código | EUR, Analisi dei Prezzi, Computo Metrico Estimativo, Elenco Prezzi Unitari, Quadro Economico y sitio para el índice ISTAT |
+| `pu-con-indirectos` | código | presupuesto con el pie repartido en los precios: mismo total, residuo a la vista, impuesto aparte o incluido |
+| `apu-chile` | código | APU en bloques A–D, sin cuadrilla ni rendimiento, en pesos enteros; redondeo por línea o solo del precio unitario |
 | `reporte-ejemplo` | código | el reporte propio más pequeño posible |
-| `apu-mexico` | código | matriz de precio unitario con indirectos, financiamiento, utilidad y cargos en cascada; porcentajes por proyecto, en 0 al empezar |
-| `ajustar-total` | código | acción: escala precios del proyecto para llegar a un total, con vista previa |
+| `apu-mexico` | código | matriz de precio unitario con indirectos, financiamiento, utilidad y cargos en cascada; porcentajes por proyecto, en 0 al empezar; y los auxiliares o básicos |
+| `ajustar-total` | código | acción: escala precios del proyecto para llegar a un total, con vista previa; todas las partidas o un capítulo |
 | `impuesto-materiales` | código | reporte del impuesto sobre materiales por partida y total |
 | `presupuesto-con-datos` | código | presupuesto con los datos del proyecto en la primera página |
 | `zapatas` | código | acción: metrado de zapatas por dimensiones y armado, sin precios |
@@ -294,7 +299,13 @@ costo_directo total`, y `hojas()` (sin títulos).
   `decimales_metrado`, `modalidad`, `nombre_total` e `importe(partida, precio)`
   (metrado × precio con el redondeo del programa); `Partida.acu_abierto` (el ACU
   con las sub-partidas abiertas en sus insumos; mismo total); `LineaPie.etiqueta`
-  («IVA (19%)»); `api.idioma()` (`es`, `en` o `pt_BR`)
+  («IVA (19%)»); `api.idioma()` (`es`, `en` o `pt_BR`);
+  `Partida.especificacion` (texto) y `Partida.mediciones`
+  (`LineaMetrado`: `descripcion unidades largo ancho alto parcial area kg_m`);
+  `Presupuesto.auxiliares` (las sub-partidas) e `Insumo.auxiliar_id`
+- **`from ingepresupuestos import piezas`** (API 2): `numero` y `texto` para leer
+  ajustes, `pct`, `cuadrar`, `sumar_titulos`, `capitulos`, `recorrer`,
+  `bloques_de`, `mediciones` (tabla de mediciones) e `impuesto_materiales`
 
 **`Documento(titulo, bloques, horizontal=False)`** — bloques: `Titulo(texto,
 nivel)`, `Parrafo(texto, negrita, alinear)`, `Campos([(etiqueta, valor)])`,
@@ -323,7 +334,8 @@ confirmación.
 **Pedir datos y recordarlos (API 2).** `ctx.pedir_datos(titulo, [Dato…], texto="")`
 muestra un formulario y devuelve `{clave: valor}`, o `None` si se cancela.
 `Dato(clave, titulo, tipo, valor, minimo, maximo, decimales, opciones, sufijo,
-ayuda)`; `tipo` es `numero`, `entero`, `texto`, `opcion` o `si_no`.
+ayuda)`; `tipo` es `numero`, `entero`,
+`texto`, `parrafo` (varias líneas), `opcion` o `si_no`.
 `ctx.guardar_ajustes({…})` guarda textos, números y sí/no (hasta 10 KB) **en el
 proyecto**: viajan con el `.db`, se deshacen y solo los ve tu complemento, en
 `ctx.ajustes` y `p.ajustes`. Compruébalos al leerlos: el `.db` pudo hacerlo otro.

@@ -98,7 +98,7 @@ def mediciones(p, precios: dict, importes: dict, rotulos) -> api.Tabla:
     """Capítulos con su total y, en cada partida, su texto y sus mediciones.
     `rotulos`: los diez de las columnas."""
     d, dm = p.decimales, p.decimales_metrado
-    anchos = (8, 31, 6, 7, 7, 7, 8, 8, 8, 10)
+    anchos = (8, 26, 6, 7, 8, 7, 8, 10, 9, 11)
     decs = (2, 2, dm, dm, dm, dm, dm, dm, d, d)
     titulos = sumar_titulos(p, importes)
     filas = []

@@ -411,11 +411,8 @@ def test_incluidos_con_categoria_traducciones_e_imagen(d_):
     m = p.manifiesto
     assert m['categorias'] and set(m['traducciones']) == {'en', 'pt_BR'}
     assert all(set(t) == {'nombre', 'descripcion'} for t in m['traducciones'].values())
-    if d_.name.startswith('pais-'):
-        assert not m['imagen']
-    else:
-        assert len(p.archivos[m['imagen']]) < 150_000
-        assert not cd.imagen_de(p).isNull()
+    assert len(p.archivos[m['imagen']]) < 150_000
+    assert not cd.imagen_de(p).isNull()
 
 
 def test_solo_se_decodifica_lo_que_se_pinta(fuente, monkeypatch):
