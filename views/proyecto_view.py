@@ -2299,9 +2299,7 @@ class ProyectoView(QWidget):
         _tbtn(f"{_tr('Control de Obra')} ▾", None, menu=self._build_control_obra_menu())
         _tbtn(_tr("Fórmula Polinómica"), self._ir_formula)
         _tbtn(_tr("Pie"), self._ir_pie)
-        _tbtn(_tr("Modelo 3D"), lambda: self._abrir_modelo_bim(ver_3d=True),
-              sep_after=True).setToolTip(
-            _tr("Ver el modelo BIM (IFC) y sus elementos vinculados a partidas"))
+        _tbtn("BIM ▾", None, sep_after=True, menu=self._build_bim_menu())
         _tbtn(f"{_tr('IA')} ▾", None, menu=self._build_ia_menu())
 
         hl.addStretch()
@@ -10167,9 +10165,6 @@ class ProyectoView(QWidget):
         a_db.triggered.connect(self._archivo_exportar_db)
         menu.addAction(a_db)
 
-        a_bim = QAction(tr("Modelo BIM") + "…", self)
-        a_bim.triggered.connect(lambda: self._abrir_modelo_bim())
-        menu.addAction(a_bim)
 
         a_imp = QAction(tr("Importar") + "…", self)
         a_imp.triggered.connect(self.ir_a_importar.emit)
@@ -10188,12 +10183,6 @@ class ProyectoView(QWidget):
         a_pl_imp.triggered.connect(self._importar_plantilla_db)
         plant_menu.addAction(a_pl_imp)
         menu.addMenu(plant_menu)
-
-        menu.addSeparator()
-
-        a_itz = QAction(tr("Traer de IngeTrazo abierto…"), self)
-        a_itz.triggered.connect(self._traer_de_ingetrazo)
-        menu.addAction(a_itz)
 
         menu.addSeparator()
 
@@ -11656,6 +11645,23 @@ class ProyectoView(QWidget):
             a = QAction(label, self)
             a.triggered.connect(lambda _c=False, i=idx: self._ir_control_obra(i))
             menu.addAction(a)
+        return menu
+
+    def _build_bim_menu(self):
+        """QMenu del botón "BIM ▾": visor, vínculos y puente con IngeTrazo."""
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+        menu = QMenu(self)
+        a_3d = QAction(tr("Modelo 3D"), self)
+        a_3d.triggered.connect(lambda: self._abrir_modelo_bim(ver_3d=True))
+        menu.addAction(a_3d)
+        a_bim = QAction(tr("Modelo BIM y vínculos") + "…", self)
+        a_bim.triggered.connect(lambda: self._abrir_modelo_bim())
+        menu.addAction(a_bim)
+        menu.addSeparator()
+        a_itz = QAction(tr("Traer de IngeTrazo abierto…"), self)
+        a_itz.triggered.connect(self._traer_de_ingetrazo)
+        menu.addAction(a_itz)
         return menu
 
     def _build_ia_menu(self):

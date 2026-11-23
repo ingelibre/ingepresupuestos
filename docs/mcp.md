@@ -40,6 +40,8 @@ Al cerrar sesión se apaga.
 
 | Escribir | |
 |---|---|
+| `edit_items`, `move_item`, `copy_item`, `delete_items`, `edit_acu` | Corregir lo que ya existe; mover y borrar renumeran |
+| `update_project`, `set_footer` (y `get_footer` para leer) | Datos generales y pie |
 | `create_project`, `add_items` | Proyecto nuevo; títulos y partidas (desde biblioteca, con su ACU) |
 | `set_metrado` | Planilla o cantidad. Si ya hay planilla exige `replace: true` |
 | `set_acu`, `set_price`, `set_schedule` | Análisis, precio del insumo **en ese proyecto**, cronograma |
@@ -52,6 +54,17 @@ se niega en ellas. El catálogo y la biblioteca son de solo lectura.
 
 Los cronogramas que exporta `export_report` son los del reporte general, no el
 Gantt con las opciones de la pestaña Cronograma.
+
+## Simular
+
+Casi todas las escrituras aceptan `dry_run: true`: no se guarda nada y responden
+qué pasaría y el total antes y después. No lo admiten `create_project`,
+`undo_last`, `bim_apply` ni `link_elements` (para el modelo está `bim_diff`).
+
+## Pedidos listos
+
+El cliente los ofrece en su menú: presupuestar el modelo BIM, revisar el
+presupuesto, qué cambió en el modelo y presupuesto desde una descripción.
 
 ## Deshacer
 
@@ -84,7 +97,7 @@ que ya corra con tu propia cuenta: ese puede leer tus archivos igualmente.
 
 ## Con IngeTrazo, sin IA
 
-**Archivo → Traer de IngeTrazo abierto…** lee los metrados del modelo abierto en
+**BIM → Traer de IngeTrazo abierto…** lee los metrados del modelo abierto en
 IngeTrazo (con su puente de IA encendido) y abre la ventana BIM. No interviene
 ninguna IA. Necesita un IngeTrazo con la herramienta `get_takeoff`.
 
