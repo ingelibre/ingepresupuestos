@@ -5334,6 +5334,18 @@ class GanttWidget(QWidget):
             sub_nombres = getattr(self._cv, '_sub_nombres', {None: 'Principal'})
             _prev_sub = object()
 
+            # Los UID se asignan ANTES de escribir las tareas (#43): una
+            # predecesora puede estar más abajo en la lista y, si su UID se
+            # asignara al emitirla, el enlace hacia ella se perdería. Mismo
+            # orden que el bucle de abajo: cada cabecera de sub consume uno.
+            _uid, _g_prev = uid, object()
+            for p in partidas:
+                if p.get('sub_presupuesto_id') != _g_prev:
+                    _g_prev = p.get('sub_presupuesto_id')
+                    _uid += 1
+                uid_map[p['id']] = _uid
+                _uid += 1
+
             for p in partidas:
                 g = p.get('sub_presupuesto_id')
                 if g != _prev_sub:
@@ -5487,7 +5499,6 @@ class GanttWidget(QWidget):
                     ET.SubElement(ev, f"{{{ns}}}FieldID").text = MSPDI_TEXT30
                     ET.SubElement(ev, f"{{{ns}}}Value").text = color_custom
 
-                uid_map[p['id']] = uid
                 uid += 1
 
             # Hito «Termino de Obra» — cuelga SOLO de la(s) tarea(s) que

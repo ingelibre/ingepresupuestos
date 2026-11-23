@@ -345,6 +345,7 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
         )
 
     # ── 6. TABLAS DEPENDIENTES DE PARTIDA ─────────────────────────────
+    map_metrado: dict[int, int] = {}     # para rehacer los vínculos BIM
     for tabla in ('metrados_detalle', 'acero_detalle', 'cronograma_partidas',
                    'spec_imagenes'):
         if not _tabla_existe(conn, 'src', tabla):
@@ -368,13 +369,18 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
             vals = [d.get(c) for c in cols_t] + [new_part_id]
             ph = ",".join("?" * len(cols_insert))
             try:
-                conn.execute(
+                cur = conn.execute(
                     f"INSERT INTO {tabla} ({','.join(cols_insert)}) "
                     f"VALUES ({ph})", vals
                 )
+                if tabla == 'metrados_detalle':
+                    map_metrado[d['id']] = cur.lastrowid
             except sqlite3.IntegrityError:
                 # cronograma_partidas tiene UNIQUE(partida_id) — saltar duplicado
                 pass
+
+    from core.bim_modelo import copiar_proyecto
+    copiar_proyecto(conn, pid_origen, pid_dst, map_partida, map_metrado, 'src')
 
     # ── 7. TABLAS DEPENDIENTES DE PROYECTO ────────────────────────────
     for tabla in ('pie_rubros', 'gastos_generales', 'formula_monomios',

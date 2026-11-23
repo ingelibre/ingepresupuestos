@@ -191,7 +191,7 @@ FORMATOS = [
             ("presupuesto", "Presupuesto.xlsx", True,
              "Estructura con partidas y precios."),
             ("acus",        "ACUs.xlsx",        False,
-             "Análisis de costos."),
+             "Reporte «Análisis de precios unitarios» de S10."),
             ("insumos",     "Insumos.xlsx",     False,
              "Catálogo de recursos."),
         ],
@@ -243,9 +243,12 @@ FORMATOS = [
              "Archivo IFC exportado desde Revit, ArchiCAD, Tekla u otro BIM."),
         ],
         "instrucciones": [
-            "Exporta tu modelo desde Revit / ArchiCAD / Tekla en formato IFC.",
-            "El importador genera la estructura sin precios.",
-            "Tras importar deberás asignar precios a las partidas creadas.",
+            "Exporta tu modelo desde Revit / ArchiCAD / Tekla en formato IFC, "
+            "incluyendo las cantidades base (Base Quantities).",
+            "Verás los elementos antes de importar, con los que no traen "
+            "cantidad marcados; eliges crear un proyecto o añadir a uno.",
+            "Se genera la estructura sin precios, con cada elemento vinculado "
+            "a su partida: luego podrás actualizarla desde «Modelo BIM…».",
         ],
     },
     {
@@ -457,6 +460,16 @@ class _ImportWorker(QThread):
                         if "acus" in f else {})
                 recursos = (importer.import_s10_insumos(f["insumos"])
                             if "insumos" in f else None)
+                if partidas:
+                    # Empareja los ACU con sus partidas y SIEMPRE dice qué
+                    # pasó con ellos (#51: se perdían sin avisar).
+                    from core.s10_acus import guardar_presupuesto_s10
+                    self.progreso.emit("Guardando en base de datos…")
+                    pid, resumen = guardar_presupuesto_s10(
+                        info, partidas, list(acus.values()), recursos,
+                        eligio_acus="acus" in f)
+                    self.finished_ok.emit(pid, resumen)
+                    return
 
             elif self.formato == "pdf_powercost":
                 self.progreso.emit("Extrayendo texto del PDF…")
@@ -945,6 +958,10 @@ class ImportarView(QWidget):
         if self._worker is not None:
             return
 
+        if self._formato_id == "ifc":
+            self._leer_bim(self._archivos["ifc"])
+            return
+
         # Formato S10 nativo: el listado de presupuestos requiere levantar
         # SQL Server (lento), así que va en un worker propio. Cuando termina,
         # _on_s10_listado() muestra el diálogo y dispara el ImportWorker.
@@ -1035,6 +1052,34 @@ class ImportarView(QWidget):
         self._worker.finished_multi.connect(self._on_ok_multi)
         self._worker.failed.connect(self._on_fail)
         self._worker.start()
+
+    def _leer_bim(self, ruta):
+        """Lee el modelo y muestra la vista previa; ella crea las partidas."""
+        from utils.i18n import tr
+        from views.bim_dialog import LectorBim
+        self.btn_importar.setEnabled(False)
+        self.bar.setVisible(True)
+        self.lbl_estado.setText(tr("Leyendo el modelo…"))
+
+        self._worker = LectorBim(ruta, self)
+        self._worker.listo.connect(self._on_bim_leido)
+        self._worker.fallo.connect(self._on_fail)
+        self._worker.start()
+
+    def _on_bim_leido(self, modelo):
+        from utils.i18n import tr
+        from views.bim_dialog import ImportarBimDialog
+        self._worker.wait()
+        self._worker.deleteLater()
+        self._worker = None
+        self.bar.setVisible(False)
+        self.lbl_estado.setText("")
+        self.btn_importar.setEnabled(True)
+        dlg = ImportarBimDialog(modelo, self._archivos["ifc"], parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            self._on_ok(dlg.proyecto_id, tr("{n} partida(s) creadas desde el modelo.").format(
+                n=dlg.creadas))
+        dlg.deleteLater()
 
     def _elegir_destino_bc3(self):
         """'proyecto', 'biblioteca' o ``None`` si se cancela.
@@ -1239,10 +1284,23 @@ class ImportarView(QWidget):
         self.bar.setVisible(False)
         self.lbl_estado.setText("")
         self._worker = None
-        QMessageBox.information(
-            self, "Importación completa",
-            f"Proyecto importado correctamente.\n\n{resumen}"
-        )
+        if resumen.count("\n") > 12:
+            # Con muchos avisos el cuadro no cabría en la pantalla: van en el
+            # detalle desplegable, completos y copiables.
+            from utils.i18n import tr
+            cabeza, _sep, detalle = resumen.partition("\n\n")
+            box = QMessageBox(QMessageBox.Warning, "Importación completa",
+                              f"Proyecto importado correctamente.\n\n{cabeza}",
+                              QMessageBox.Ok, self)
+            box.setInformativeText(
+                tr("Hay avisos sobre lo importado. Revísalos en los detalles."))
+            box.setDetailedText(detalle)
+            box.exec()
+        else:
+            QMessageBox.information(
+                self, "Importación completa",
+                f"Proyecto importado correctamente.\n\n{resumen}"
+            )
         self.proyecto_importado.emit(pid)
         self._aplicar_formato(self._formato_id)
 

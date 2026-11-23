@@ -73,6 +73,7 @@ def _sin_metrados(subarboles: list) -> list:
         for p in sub:
             p['metrado'] = 0
             p['metrados_detalle'] = []
+            p['bim_vinculos'] = []
             p['acero_detalle'] = []
     return subarboles
 

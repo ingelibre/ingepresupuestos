@@ -677,6 +677,8 @@ def init_db():
             UNIQUE(proyecto_id, period_days, periodo_idx)
         );
     ''')
+    from core.bim_modelo import TABLAS_SQL as _bim_sql
+    conn.executescript(_bim_sql)
     conn.commit()
     # Migración: agregar columnas nuevas si no existen (SQLite no soporta IF NOT EXISTS en ALTER)
     for col, ddl in [
@@ -1422,6 +1424,32 @@ def _siguiente_codigo_inei(conn, indice: str) -> str:
     ).fetchone()
     seq = (row['mx'] or 0) + 1
     return f"{indice}{seq:05d}"
+
+
+def guardar_filas_metrado(conn, partida_id: int, filas: list) -> list[int]:
+    """Deja la planilla de la partida exactamente con `filas`:
+    ``(id | None, orden, descripcion, n_estructuras, n_elementos, area, largo,
+    ancho, alto, parcial)``. Las que traen su id se ACTUALIZAN en el sitio en
+    vez de borrarse y reinsertarse: un vínculo BIM apunta a la fila por su id.
+    Devuelve los ids, en orden."""
+    vivos = {r[0] for r in conn.execute(
+        "SELECT id FROM metrados_detalle WHERE partida_id=?", (partida_id,))}
+    ids = []
+    for fid, *v in filas:
+        if fid in vivos:
+            vivos.discard(fid)
+            conn.execute(
+                "UPDATE metrados_detalle SET orden=?, descripcion=?, n_estructuras=?, "
+                "n_elementos=?, area=?, largo=?, ancho=?, alto=?, parcial=? WHERE id=?",
+                (*v, fid))
+            ids.append(fid)
+        else:
+            ids.append(conn.execute(
+                "INSERT INTO metrados_detalle (partida_id, orden, descripcion, n_estructuras,"
+                " n_elementos, area, largo, ancho, alto, parcial) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (partida_id, *v)).lastrowid)
+    conn.executemany("DELETE FROM metrados_detalle WHERE id=?", [(i,) for i in vivos])
+    return ids
 
 
 def get_acu_items(conn, part_id: int) -> list[dict]:

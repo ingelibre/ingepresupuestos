@@ -1,0 +1,437 @@
+{
+  "schema": "inge-takeoff",
+  "version": 1,
+  "source": {
+    "app": "IngeTrazo",
+    "document": "takeoff-ejemplo.igz",
+    "namespace": "ec1be0b6860b4d69ac9ced12d5ff79c4"
+  },
+  "elements": [
+    {
+      "global_id": "1M7ZCA6_rTMAgf_qGNFlkn",
+      "ifc_class": "IfcSlab",
+      "name": "Losa",
+      "type": "",
+      "storey": "",
+      "layer": "Layer 0",
+      "material": "",
+      "quantities": {
+        "Perimeter": {
+          "value": 22.0,
+          "unit": "m"
+        },
+        "Width": {
+          "value": 0.2,
+          "unit": "m"
+        },
+        "GrossArea": {
+          "value": 30.0,
+          "unit": "m2"
+        },
+        "NetArea": {
+          "value": 30.0,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 6.0,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 30.0,
+        "unit": "m2"
+      }
+    },
+    {
+      "global_id": "2EZb2KeIXMLwWW8jScS4zC",
+      "ifc_class": "IfcFooting",
+      "name": "Zapata Z-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Height": {
+          "value": 0.6,
+          "unit": "m"
+        },
+        "GrossSurfaceArea": {
+          "value": 4.4,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.6,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.6,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "3mDjCe6i9MyO25uDV9c06o",
+      "ifc_class": "IfcFooting",
+      "name": "Zapata Z-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Height": {
+          "value": 0.6,
+          "unit": "m"
+        },
+        "GrossSurfaceArea": {
+          "value": 4.4,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.6,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.6,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "1jFzYYGHHG8AVC38xehvLC",
+      "ifc_class": "IfcFooting",
+      "name": "Zapata Z-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Height": {
+          "value": 0.6,
+          "unit": "m"
+        },
+        "GrossSurfaceArea": {
+          "value": 4.4,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.6,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.6,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "3iTAvMoQvLFA1tjRWGjpHA",
+      "ifc_class": "IfcFooting",
+      "name": "Zapata Z-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Height": {
+          "value": 0.6,
+          "unit": "m"
+        },
+        "GrossSurfaceArea": {
+          "value": 4.4,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.6,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.6,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "13aQpukD9MbRscXFzk_3Mg",
+      "ifc_class": "IfcColumn",
+      "name": "Columna C-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Length": {
+          "value": 3.1,
+          "unit": "m"
+        },
+        "CrossSectionArea": {
+          "value": 0.09,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.279,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.279,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "2zX_wDChHOUPxkO_O$SE3R",
+      "ifc_class": "IfcColumn",
+      "name": "Columna C-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Length": {
+          "value": 3.1,
+          "unit": "m"
+        },
+        "CrossSectionArea": {
+          "value": 0.09,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.279,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.279,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "2Jp8ndAwvHP8wXNWYceQ16",
+      "ifc_class": "IfcColumn",
+      "name": "Columna C-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Length": {
+          "value": 3.1,
+          "unit": "m"
+        },
+        "CrossSectionArea": {
+          "value": 0.09,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.279,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.279,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "3Gzritt2XN$fECk_a$UUgf",
+      "ifc_class": "IfcColumn",
+      "name": "Columna C-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Length": {
+          "value": 3.1,
+          "unit": "m"
+        },
+        "CrossSectionArea": {
+          "value": 0.09,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.279,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.279,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "03Y1FvRBbKNQYeWLca4MLG",
+      "ifc_class": "IfcBeam",
+      "name": "Viga V-1",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "Concreto f'c=210",
+      "quantities": {
+        "Length": {
+          "value": 5.3,
+          "unit": "m"
+        },
+        "CrossSectionArea": {
+          "value": 0.075,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 0.3975,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 0.3975,
+        "unit": "m3"
+      }
+    },
+    {
+      "global_id": "1zrN7iXkLPrf0agvfmQtFO",
+      "ifc_class": "IfcWall",
+      "name": "Muro de ladrillo",
+      "type": "",
+      "storey": "",
+      "layer": "Muros",
+      "material": "Ladrillo",
+      "quantities": {
+        "Height": {
+          "value": 2.7,
+          "unit": "m"
+        },
+        "Length": {
+          "value": 4.7,
+          "unit": "m"
+        },
+        "Width": {
+          "value": 0.15,
+          "unit": "m"
+        },
+        "GrossSideArea": {
+          "value": 12.69,
+          "unit": "m2"
+        },
+        "NetSideArea": {
+          "value": 12.69,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 1.9035,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 12.69,
+        "unit": "m2"
+      }
+    },
+    {
+      "global_id": "1$yFsOwEzHS8vrvf1KYqvz",
+      "ifc_class": "IfcWall",
+      "name": "Muro de ladrillo",
+      "type": "",
+      "storey": "",
+      "layer": "Muros",
+      "material": "Ladrillo",
+      "quantities": {
+        "Height": {
+          "value": 2.7,
+          "unit": "m"
+        },
+        "Length": {
+          "value": 4.7,
+          "unit": "m"
+        },
+        "Width": {
+          "value": 0.15,
+          "unit": "m"
+        },
+        "GrossSideArea": {
+          "value": 12.69,
+          "unit": "m2"
+        },
+        "NetSideArea": {
+          "value": 12.69,
+          "unit": "m2"
+        },
+        "GrossVolume": {
+          "value": 1.903501,
+          "unit": "m3"
+        }
+      },
+      "metrado": {
+        "value": 12.69,
+        "unit": "m2"
+      }
+    },
+    {
+      "global_id": "2TY20FkXLRLey1jj$oELsf",
+      "ifc_class": "IfcReinforcingBar",
+      "name": "Acero 1/2",
+      "type": "",
+      "storey": "",
+      "layer": "Estructura",
+      "material": "",
+      "quantities": {
+        "Length": {
+          "value": 3.0,
+          "unit": "m"
+        },
+        "NominalDiameter": {
+          "value": 0.01433,
+          "unit": "m"
+        },
+        "Weight": {
+          "value": 3.798357,
+          "unit": "kg"
+        }
+      },
+      "metrado": {
+        "value": 3.798357,
+        "unit": "kg"
+      }
+    },
+    {
+      "global_id": "1kh2ozWJjJ$RYrmyazACya",
+      "ifc_class": "IfcColumn",
+      "name": "Columna abierta (sin volumen)",
+      "type": "",
+      "storey": "",
+      "layer": "Layer 0",
+      "material": "",
+      "quantities": {
+        "Length": {
+          "value": 3.0,
+          "unit": "m"
+        }
+      },
+      "metrado": null
+    },
+    {
+      "global_id": "37v$mPHkTOUAcUETqKQI_a",
+      "ifc_class": "IfcDoor",
+      "name": "Puerta P-1",
+      "type": "",
+      "storey": "",
+      "layer": "Layer 0",
+      "material": "",
+      "quantities": {
+        "Width": {
+          "value": 0.9,
+          "unit": "m"
+        },
+        "Height": {
+          "value": 2.1,
+          "unit": "m"
+        },
+        "Area": {
+          "value": 1.889999,
+          "unit": "m2"
+        }
+      },
+      "metrado": {
+        "value": 1.0,
+        "unit": "und"
+      }
+    }
+  ]
+}

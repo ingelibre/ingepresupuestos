@@ -168,10 +168,66 @@ def test_archivo_real_de_project_si_esta_en_descargas():
     assert ('126', 'FS', 0) in t127['preds'], t127['preds']
 
 
+def test_export_conserva_predecesoras_que_van_despues_de_la_tarea(tmp_path, monkeypatch):
+    """#43: si la predecesora está MÁS ABAJO en la lista, el enlace se perdía
+    (el UID se asignaba en el mismo bucle que escribía los enlaces). Incluye
+    el caso de una predecesora de OTRO sub-presupuesto, cuya cabecera también
+    consume un UID."""
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
+    app = QApplication.instance() or QApplication([])
+    import core.database as bd
+    monkeypatch.setattr(bd, 'DB_PATH', str(tmp_path / 't43.db'))
+    bd.init_db()
+    get_db = bd.get_db
+    conn = get_db()
+    pid = conn.execute("INSERT INTO proyectos (nombre, plazo) VALUES ('T43', 30)").lastrowid
+    sub = conn.execute("INSERT INTO sub_presupuestos (proyecto_id, nombre, orden) "
+                       "VALUES (?, 'Sanitarias', 1)", (pid,)).lastrowid
+    ids = {}
+    for item, sid, tit in [('01', None, 1), ('01.01', None, 0), ('01.02', None, 0),
+                           ('01', sub, 1), ('01.01', sub, 0)]:
+        ids[(item, sid)] = conn.execute(
+            "INSERT INTO partidas (proyecto_id, sub_presupuesto_id, item, descripcion, "
+            "unidad, metrado, nivel, es_titulo) VALUES (?,?,?,?,'m2',1,?,?)",
+            (pid, sid, item, f'P {item}', item.count('.') + 1, tit)).lastrowid
+    a, b, c = ids[('01.01', None)], ids[('01.02', None)], ids[('01.01', sub)]
+    # Filas: #1 proyecto #2 inicio #3 sub #4 título #5 a #6 b #7 sub2 #8 título #9 c
+    for part, pred in [(a, '6FC+2,9CC'), (b, ''), (c, '6')]:
+        conn.execute("INSERT INTO cronograma_partidas (partida_id, duracion, inicio_dia, "
+                     "predecesoras) VALUES (?,3,1,?)", (part, pred))
+    conn.commit()
+    proy = dict(conn.execute("SELECT * FROM proyectos WHERE id=?", (pid,)).fetchone())
+    conn.close()
+    destino = str(tmp_path / 'crono.xml')
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (destino, ''))
+    monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+    from views.cronograma_view import CronogramaView
+    cv = CronogramaView(pid, proy, lambda: None)
+    cv.show()
+    cv.cargar()
+    try:
+        GW = [w for w in cv.findChildren(QWidget) if type(w).__name__ == 'GanttWidget'][0]
+        GW._exportar_mpp()
+        d = ms.leer_project_xml(destino)
+        por_inge = {t['inge_id']: t for t in d['tareas'].values() if t['inge_id']}
+        uid = {k: t['uid'] for k, t in por_inge.items()}
+        assert sorted(por_inge[str(a)]['preds']) == sorted(
+            [(uid[str(b)], 'FS', 2), (uid[str(c)], 'SS', 0)]), por_inge[str(a)]['preds']
+        assert por_inge[str(c)]['preds'] == [(uid[str(b)], 'FS', 0)]
+        # Y de vuelta a la app no aparece ninguna diferencia
+        plan = ms.planificar(d, cv._partidas, cv._cron_map)
+        assert plan['predecesoras'] == [], plan['predecesoras']
+        assert len(set(t['uid'] for t in d['tareas'].values())) == len(d['tareas'])
+    finally:
+        cv.deleteLater()
+        app.processEvents()
+
+
 if __name__ == "__main__":
     fallos = 0
     for name, fn in list(globals().items()):
-        if name.startswith("test_"):
+        if name.startswith("test_") and not name.startswith("test_export_"):
             try:
                 fn()
                 print(f"  OK  {name}")

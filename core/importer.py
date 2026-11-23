@@ -647,11 +647,11 @@ def import_powercost_insumos(filepath):
 
 def import_s10_presupuesto(filepath):
     """Importa Presupuesto desde Excel .xls exportado por S10."""
+    import xlrd
     try:
-        import xlrd
         return _import_s10_presupuesto_xlrd(filepath)
-    except ImportError:
-        pass
+    except xlrd.XLRDError:
+        pass      # xlrd 2 ya no abre .xlsx
     # Fallback: intentar con openpyxl (si es xlsx)
     return _import_s10_presupuesto_openpyxl(filepath)
 
@@ -814,18 +814,18 @@ def _import_s10_presupuesto_openpyxl(filepath):
 
 
 def import_s10_acus(filepath):
-    """Importa ACUs desde Excel exportado por S10."""
-    # S10 generalmente no exporta ACUs en formato separado, retornar vacío
-    # Si en el futuro hay soporte, se implementa aquí
-    try:
-        import xlrd
-        wb = xlrd.open_workbook(filepath)
-    except:
-        try:
-            wb = openpyxl.load_workbook(filepath, data_only=True)
-        except:
-            return {}
-    return {}
+    """ACUs del Excel «Análisis de precios unitarios» de S10, por ítem. Si un
+    ítem se repite (varios sub-presupuestos) los siguientes van como
+    «01.01#2». La lectura, el emparejado y los avisos: `core/s10_acus.py`."""
+    from core.s10_acus import leer_s10_acus
+    acus = {}
+    for a in leer_s10_acus(filepath):
+        clave, n = a['item'], 1
+        while clave in acus:
+            n += 1
+            clave = f"{a['item']}#{n}"
+        acus[clave] = a
+    return acus
 
 
 def import_s10_insumos(filepath):
@@ -837,9 +837,39 @@ def import_s10_insumos(filepath):
         return []
 
 
+class _LibroXlsx:
+    """Un .xlsx con la parte de la interfaz de xlrd que usa S10 (xlrd 2 ya
+    no abre .xlsx)."""
+
+    class _Hoja:
+        def __init__(self, ws):
+            self._f = [list(r) for r in ws.iter_rows(values_only=True)]
+            self.nrows = len(self._f)
+            self.ncols = max((len(r) for r in self._f), default=0)
+
+        def cell_value(self, r, c):
+            v = self._f[r][c]
+            return '' if v is None else v
+
+    def __init__(self, filepath):
+        self._wb = openpyxl.load_workbook(filepath, data_only=True)
+
+    def sheet_names(self):
+        return self._wb.sheetnames
+
+    def sheet_by_name(self, n):
+        return self._Hoja(self._wb[n])
+
+    def sheet_by_index(self, i):
+        return self._Hoja(self._wb.worksheets[i])
+
+
 def _import_s10_insumos_xlrd(filepath):
     import xlrd
-    wb = xlrd.open_workbook(filepath)
+    try:
+        wb = xlrd.open_workbook(filepath)
+    except xlrd.XLRDError:
+        wb = _LibroXlsx(filepath)
 
     # Buscar hoja con datos (Hoja1 es la más completa)
     ws = None
@@ -1256,6 +1286,7 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
                 conn, it['codigo'], it['descripcion'], it['tipo'],
                 it['unidad'], it['precio'], scope_map=scope_recursos
             )
+            it['recurso_id'] = rec_id
             conn.execute(
                 "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, "
                 "cantidad, precio) VALUES (?,?,?,?,?)",
@@ -1357,11 +1388,12 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
             cu_id = cur.lastrowid
         # Insertar items del ACU
         for it in items_acu:
-            cod = _pad_codigo(it.get('codigo') or '')
-            if not cod:
-                continue
+            # El recurso resuelto arriba, no el del código: si el código ya
+            # era de otro insumo (o se recortó a 7 dígitos), el código lleva
+            # a un recurso distinto.
             rec = conn.execute(
-                "SELECT id, precio FROM recursos WHERE codigo=?", (cod,)
+                "SELECT id, precio FROM recursos WHERE id=?",
+                (it.get('recurso_id'),)
             ).fetchone()
             if not rec:
                 continue

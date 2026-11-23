@@ -3684,7 +3684,8 @@ def exportar_proyecto_db(proyecto_id: int, dest_path: str) -> str:
 
                 # Tablas opcionales (saltar silenciosamente si no existen)
                 for tabla in ("metrados_detalle", "acero_detalle",
-                              "cronograma_partidas", "spec_imagenes"):
+                              "cronograma_partidas", "spec_imagenes",
+                              "bim_vinculos"):
                     try:
                         for row in conn_src.execute(
                             f"SELECT * FROM {tabla} WHERE partida_id IN ({marcs})",
@@ -3699,7 +3700,7 @@ def exportar_proyecto_db(proyecto_id: int, dest_path: str) -> str:
 
             for tabla in ("gastos_generales", "pie_rubros", "sub_presupuestos",
                           "formula_monomios", "formula_periodos",
-                          "pie_presupuesto"):
+                          "pie_presupuesto", "bim_modelos"):
                 try:
                     for row in conn_src.execute(
                         f"SELECT * FROM {tabla} WHERE proyecto_id=?",
@@ -3709,6 +3710,12 @@ def exportar_proyecto_db(proyecto_id: int, dest_path: str) -> str:
                         conn_dst.execute(f"INSERT INTO {tabla} VALUES ({ph})", tup)
                 except sqlite3.OperationalError:
                     pass
+            conn_dst.executemany(
+                "INSERT INTO bim_elementos VALUES (?,?,?)",
+                conn_src.execute(
+                    "SELECT e.modelo_id, e.global_id, e.datos FROM bim_elementos e "
+                    "JOIN bim_modelos m ON m.id=e.modelo_id WHERE m.proyecto_id=? "
+                    "ORDER BY e.rowid", (proyecto_id,)).fetchall())
 
             conn_dst.commit()
         finally:
