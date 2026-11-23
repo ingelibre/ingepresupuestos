@@ -13,7 +13,6 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 
 import pytest
 
@@ -25,18 +24,14 @@ from core import subpartidas as SP                                  # noqa: E402
 
 RAIZ = os.path.join(os.path.dirname(__file__), '..')
 SEED = os.path.join(RAIZ, 'presupuestos_seed.db')
-_fd, _tmpdb = tempfile.mkstemp(suffix='_subpartidas_test.db')
-os.close(_fd)
-shutil.copy(SEED, _tmpdb)
-d.DB_PATH = _tmpdb
-d.init_db()
 
 
 @pytest.fixture
-def conn():
+def conn(tmp_path, monkeypatch):
     """Cada prueba con su copia limpia: nada se cuela de una a otra."""
-    shutil.copy(SEED, _tmpdb)
-    d.DB_PATH = _tmpdb
+    db = str(tmp_path / 'p.db')
+    shutil.copy(SEED, db)
+    monkeypatch.setattr(d, 'DB_PATH', db)
     d.init_db()
     c = d.get_db()
     yield c

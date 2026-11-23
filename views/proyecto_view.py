@@ -760,6 +760,8 @@ class _InputCellDelegate(QStyledItemDelegate):
                 return False
         tipo = self._tipo(index)
         col  = index.column()
+        if row in getattr(view, '_acu_subs', {}):
+            return col == 4     # sub-partida: el precio sale de su análisis
         if getattr(view, '_acu_partida_global', False):
             # Partida global (glb/est/serv): sin cuadrilla; cantidad y
             # precio directos en todos los tipos.
@@ -1906,6 +1908,13 @@ class ProyectoView(QWidget):
         self._recalcular_estado_flags()
         self._sub_ppto_id: int | None = None
         self._partida_actual_id: int | None = None
+        # Sub-partidas en el panel ACU: de dónde se abrió la que se está
+        # viendo, {fila: id} de las líneas, {fila: id} de su desglose y
+        # cuáles están desplegadas.
+        self._acu_volver_a: int | None = None
+        self._acu_subs: dict[int, int] = {}
+        self._acu_hojas_sub: dict[int, int] = {}
+        self._acu_subs_abiertas: set[int] = set()
         # Partida cuyas filas están cargadas en el panel Metrados/Acero. Puede
         # diferir de _partida_actual_id: el panel solo se recarga con el tab
         # Metrados visible, así que los guardados deben escribir a esta partida.
@@ -2808,6 +2817,18 @@ class ProyectoView(QWidget):
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(10, 0, 8, 0)
         hl.setSpacing(8)
+
+        self._btn_volver_sub = QPushButton("‹")
+        self._btn_volver_sub.setToolTip(tr("Volver a la partida"))
+        self._btn_volver_sub.setCursor(QCursor(Qt.PointingHandCursor))
+        self._btn_volver_sub.setFixedSize(24, 24)
+        self._btn_volver_sub.setStyleSheet(
+            f"QPushButton {{ color:{SLATE_700}; background:white; font-size:14px;"
+            f" border:1px solid {SILVER_300}; border-radius:4px; padding:0;"
+            f" min-height:22px; max-height:22px; }}")
+        self._btn_volver_sub.clicked.connect(self._volver_de_subpartida)
+        self._btn_volver_sub.hide()
+        hl.addWidget(self._btn_volver_sub, 0, Qt.AlignVCenter)
 
         self.lbl_acu_titulo = _LabelElidido(tr("Seleccione una partida"))
         self.lbl_acu_titulo.setStyleSheet(
@@ -5604,6 +5625,9 @@ class ProyectoView(QWidget):
     def _acu_en_blanco(self):
         """Panel ACU como al abrir el presupuesto: sin partida."""
         self._partida_actual_id = None
+        self._acu_volver_a = None
+        self._btn_volver_sub.hide()
+        self._acu_subs, self._acu_hojas_sub = {}, {}
         self.tbl_acu.setRowCount(0)
         self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
         self.inp_rend.setText("")
@@ -5617,7 +5641,17 @@ class ProyectoView(QWidget):
         if not partida:
             return
 
+        # Sub-partida (issue #23): se edita en este panel, pero no tiene
+        # metrado ni planilla; «‹» vuelve a la partida desde la que se abrió.
+        es_sub = bool(partida['es_subanalisis'])
+        if not es_sub:
+            self._acu_volver_a = None
+        self._btn_volver_sub.setVisible(es_sub and bool(self._acu_volver_a))
+        self._acu_subs, self._acu_hojas_sub = {}, {}
+
         titulo = f"{partida['item']}  {partida['descripcion']}"
+        if es_sub:
+            titulo = tr("Sub-partida {titulo}").format(titulo=titulo)
         self.lbl_acu_titulo.setText(titulo)
         self.lbl_spec_titulo.setText(titulo)
         self.lbl_met_titulo.setText(titulo)
@@ -5654,7 +5688,6 @@ class ProyectoView(QWidget):
 
         conn = get_db()
         items, totales_tipo = get_acu_items(conn, part_id)
-        conn.close()
 
         self._acu_loading = True
         self.tbl_acu.setRowCount(0)
@@ -5736,7 +5769,21 @@ class ProyectoView(QWidget):
             inei = _celda_inei(it)
             inei.setBackground(_NEUTRAL_BG)
             self.tbl_acu.setItem(r, _COL_INEI_ACU, inei)
+            if it['sub_partida_id']:
+                sid = it['sub_partida_id']
+                self._acu_subs[r] = sid
+                celda = self.tbl_acu.item(r, 1)
+                celda.setData(Qt.UserRole, it['descripcion'] or '')
+                celda.setToolTip(tr("Sub-partida: clic para ver su desglose, "
+                                    "doble clic para abrir su análisis."))
+                self._pintar_flecha_sub(r, sid in self._acu_subs_abiertas)
+                for c in (3, 5):
+                    celda = self.tbl_acu.item(r, c)
+                    celda.setFlags(celda.flags() & ~Qt.ItemIsEditable)
+                    celda.setToolTip(tr("El precio sale del análisis de la sub-partida."))
+                self._filas_desglose_sub(conn, sid)
 
+        conn.close()
         self._acu_loading = False
 
         # Actualizar subtotales y barras
@@ -5746,7 +5793,7 @@ class ProyectoView(QWidget):
         self.lbl_pu.setText(fmt(pu, self._moneda, dec))
 
         # Cargar metrados si el tab es visible
-        if self.tabs.currentIndex() == 2:
+        if self.tabs.currentIndex() == 2 and not es_sub:
             self.cargar_metrados(part_id)
 
         # Reaplicar bloqueo de flags si el estado lo requiere
@@ -5754,7 +5801,7 @@ class ProyectoView(QWidget):
             self._strip_table_editable_flags(self.tbl_acu)
 
         # Tuxia: chequear si la partida tiene problemas (sin metrado/ACU)
-        if hasattr(self, '_tuxia') and self._tuxia is not None:
+        if hasattr(self, '_tuxia') and self._tuxia is not None and not es_sub:
             QTimer.singleShot(150, lambda pid=part_id: self._tuxia_check_partida(pid))
 
     def _partidas_bajo_titulo(self, tree_item) -> list[int]:
@@ -7067,6 +7114,8 @@ class ProyectoView(QWidget):
             else:
                 self.cargar_insumos(None)
         elif idx == 2 and self._partida_actual_id:  # Metrados
+            if self._acu_volver_a:      # una sub-partida no lleva planilla
+                self._volver_de_subpartida()
             self._cargar_metrados_auto(self._partida_actual_id)
         elif idx == 4:  # Resumen
             self.cargar_resumen()
@@ -8060,6 +8109,9 @@ class ProyectoView(QWidget):
 
     def _on_acu_cell_clicked(self, row, col):
         """Un clic en una celda editable abre el editor inline (no con Ctrl/Shift)."""
+        if col in (0, 1) and row in self._acu_subs:
+            self._alternar_subpartida(row)
+            return
         # Bloqueo defensivo por estado: no abrir editor si el presupuesto
         # no es editable en este estado.
         if not self._ed_presupuesto:
@@ -8074,6 +8126,11 @@ class ProyectoView(QWidget):
             return
         if self._acu_row_ids[row] == -1:
             return
+        if row in self._acu_subs:
+            if col == 4:
+                idx = self.tbl_acu.model().index(row, col)
+                QTimer.singleShot(0, lambda: self.tbl_acu.edit(idx))
+            return
         if getattr(self, '_acu_partida_global', False):
             # Partida global: cantidad directa en todos los tipos, sin cuadrilla
             tipos_editables = {4: {'MO', 'MAT', 'EQ', 'SC'},
@@ -8087,8 +8144,79 @@ class ProyectoView(QWidget):
         idx = self.tbl_acu.model().index(row, col)
         QTimer.singleShot(0, lambda: self.tbl_acu.edit(idx))
 
+    # ── Sub-partidas en el panel (issue #23) ──────────────────────────────
+
+    def _alternar_subpartida(self, row: int):
+        """Abre o cierra el desglose de la línea."""
+        sid = self._acu_subs[row]
+        abrir = sid not in self._acu_subs_abiertas
+        (self._acu_subs_abiertas.add if abrir else self._acu_subs_abiertas.discard)(sid)
+        # La misma sub-partida puede estar en dos líneas del mismo ACU.
+        for r, s in self._acu_subs.items():
+            if s == sid:
+                self._pintar_flecha_sub(r, abrir)
+        for r, s in self._acu_hojas_sub.items():
+            if s == sid:
+                self.tbl_acu.setRowHidden(r, not abrir)
+
+    def _pintar_flecha_sub(self, row: int, abierta: bool):
+        it = self.tbl_acu.item(row, 1)
+        it.setText(("▾  " if abierta else "▸  ") + (it.data(Qt.UserRole) or ''))
+
+    def _filas_desglose_sub(self, conn, sub_id: int):
+        """Las hojas de la sub-partida, solo lectura, debajo de su línea: sus
+        cantidades son POR UNIDAD de la sub-partida."""
+        dec = get_decimales_ppto()
+        for h in get_acu_items(conn, sub_id)[0]:
+            r = self.tbl_acu.rowCount()
+            self.tbl_acu.insertRow(r)
+            self.tbl_acu.setRowHeight(r, 22)
+            self._acu_row_ids.append(-1)
+            self._acu_hojas_sub[r] = sub_id
+            tipo = h['tipo'] or 'MAT'
+            for c, v in enumerate((
+                    '', f"        {tipo} · {h['descripcion'] or ''}", h['unidad'] or '',
+                    self._texto_cuadrilla(tipo, h['unidad'], h['cuadrilla'] or 0),
+                    f"{h['cantidad'] or 0:.{get_decimales_cant_acu(tipo)}f}",
+                    f"{h['precio'] or 0:.{dec}f}",
+                    fmt(h['parcial'] or 0, self._moneda, dec),
+                    (h['indice_inei'] or ''))):
+                cell = QTableWidgetItem(v)
+                cell.setFlags(Qt.ItemIsEnabled)
+                cell.setForeground(QColor(SLATE_500))
+                if c >= 3:
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                cell.setToolTip(tr("Insumo de la sub-partida, por unidad de ella. "
+                                   "Ábrala para editarlo."))
+                self.tbl_acu.setItem(r, c, cell)
+            self.tbl_acu.setRowHidden(r, sub_id not in self._acu_subs_abiertas)
+
+    def _abrir_subpartida(self, sub_id: int):
+        """Carga el análisis de la sub-partida en el panel; «‹» vuelve."""
+        if self._spec_modificada and self._partida_actual_id:
+            self._guardar_spec()
+        if self._partida_actual_id != sub_id:
+            self._acu_volver_a = self._partida_actual_id
+        self.cargar_acu(sub_id)
+
+    def _volver_de_subpartida(self):
+        if self._spec_modificada and self._partida_actual_id:
+            self._guardar_spec()
+        if self._acu_volver_a:
+            self.cargar_acu(self._acu_volver_a)
+
+    def _editar_ficha_subpartida(self, sub_id: int):
+        if not self._require_editable(N_("editar insumos")):
+            return
+        from views.subpartidas_tab import FichaSubpartidaDialog
+        if FichaSubpartidaDialog(self.pid, sub_id, self).exec() == QDialog.Accepted:
+            self.cargar_acu(self._partida_actual_id)
+
     def _editar_celda_acu(self, index):
         col = index.column()
+        if index.row() in self._acu_subs and col != 4:
+            self._abrir_subpartida(self._acu_subs[index.row()])
+            return
         if col not in (3, 4, 5):
             return
         row = index.row()
@@ -8113,6 +8241,9 @@ class ProyectoView(QWidget):
         if not row_data:
             conn.close()
             return
+        if row_data['sub_partida_id'] and col != 4:
+            conn.close()
+            return      # el precio de una sub-partida sale de su análisis
         part_id = row_data['partida_id']
         rend    = row_data['rendimiento'] or 1
         proy    = conn.execute("SELECT jornada_laboral FROM proyectos WHERE id=?",
@@ -8174,7 +8305,13 @@ class ProyectoView(QWidget):
                       self._acu_row_ids[row] != -1)
         if tiene_item:
             acu_id = self._acu_row_ids[row]
-            menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
+            sid = self._acu_subs.get(row)
+            if sid:
+                menu.addAction(tr("Abrir sub-partida"), lambda: self._abrir_subpartida(sid))
+                menu.addAction(tr("Editar sub-partida…"),
+                               lambda: self._editar_ficha_subpartida(sid))
+            else:
+                menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
             menu.addSeparator()
             self.tbl_acu.selectRow(row)
             menu.addAction(tr("Subir") + "  Alt+↑", lambda: self._mover_insumo_acu(-1))
@@ -8250,10 +8387,14 @@ class ProyectoView(QWidget):
             return
         conn = get_db()
         row = conn.execute(
-            "SELECT recurso_id, partida_id FROM acu_items WHERE id=?", (acu_id,)
+            "SELECT recurso_id, partida_id, sub_partida_id FROM acu_items WHERE id=?", (acu_id,)
         ).fetchone()
         if not row:
             conn.close()
+            return
+        if row['sub_partida_id']:
+            conn.close()
+            self._editar_ficha_subpartida(row['sub_partida_id'])
             return
         recurso_id = row['recurso_id']
         part_id    = row['partida_id']
@@ -8280,6 +8421,14 @@ class ProyectoView(QWidget):
     def _actualizar_arbol_partida(self, part_id: int):
         """Actualiza P.U. y Parcial del ítem en el árbol después de un cambio en ACU."""
         if part_id not in self._id_to_item:
+            # Una sub-partida no está en el árbol, pero su cambio ya llegó a
+            # los precios de las partidas que la usan.
+            conn = get_db()
+            from core.subpartidas import es_subpartida
+            sub = es_subpartida(conn, part_id)
+            conn.close()
+            if sub:
+                self.recargar_partidas()
             return
         conn = get_db()
         p = conn.execute(
@@ -8382,6 +8531,9 @@ class ProyectoView(QWidget):
         self._actualizar_arbol_partida(self._partida_actual_id)
         self.actualizar_total()
         self.cargar_insumos()
+        if sin_pegar:
+            QMessageBox.information(self, tr("Pegar"), tr(
+                "Una sub-partida no puede contener otra sub-partida."))
 
     def _actualizar_lbl_clipboard(self):
         """Avisa en la barra de estado, como al copiar partidas. Antes era un
@@ -8527,9 +8679,10 @@ class ProyectoView(QWidget):
             return
         from views.recurso_selector_dialog import RecursoSelectorDialog
         dlg = RecursoSelectorDialog(self._partida_actual_id, self._proy, parent=self)
-        if dlg.exec():
+        if dlg.exec() or dlg.subs_cambiadas:
             self.cargar_acu(self._partida_actual_id)
             self.recargar_partidas()
+            self.actualizar_total()
             self.cargar_insumos()
 
     def _guardar_en_biblioteca(self):

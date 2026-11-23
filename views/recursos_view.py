@@ -517,7 +517,7 @@ class RecursosView(CatalogoTablaMixin, QWidget):
             "SELECT r.id, r.codigo, r.descripcion, r.tipo, r.unidad, r.precio, "
             "       r.indice_inei, "
             "       (SELECT COUNT(*) FROM acu_items ai WHERE ai.recurso_id=r.id) AS usos "
-            "FROM recursos r WHERE 1=1"
+            "FROM recursos r WHERE COALESCE(r.codigo,'') != 'SUBPARTIDA'"
         )
         params: list = []
         if q:
