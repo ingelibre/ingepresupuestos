@@ -14,13 +14,15 @@ complemento se ejecuta protegido: si falla se explica y el programa sigue.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from html import escape
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox,
-    QProgressDialog, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea, QSpinBox,
+    QTableWidget, QVBoxLayout, QWidget)
 
 from core.complementos import cargador
 from core.complementos.contexto import Cancelado
@@ -47,7 +49,12 @@ class DatosDialog(QDialog):
             w = self._w[c.clave] = self._campo(c)
             if c.ayuda:
                 w.setToolTip(escape(str(c.ayuda)[:500]))
-            if c.tipo == 'si_no':
+            if c.tipo == 'tabla':
+                rot = QLabel(str(c.titulo)[:120])
+                rot.setTextFormat(Qt.PlainText)
+                form.addRow(rot)
+                form.addRow(w)
+            elif c.tipo == 'si_no':
                 form.addRow(w)
             else:
                 rot = QLabel(str(c.titulo)[:120] + ":")
@@ -57,8 +64,9 @@ class DatosDialog(QDialog):
         sc.setWidgetResizable(True)
         sc.setFrameShape(QScrollArea.NoFrame)
         sc.setWidget(dentro)
-        sc.setMinimumSize(min(620, dentro.sizeHint().width() + 30),
-                          min(460, dentro.sizeHint().height() + 8))
+        tablas = any(c.tipo == 'tabla' for c in campos)
+        sc.setMinimumSize(min(940 if tablas else 620, dentro.sizeHint().width() + 30),
+                          min(520 if tablas else 460, dentro.sizeHint().height() + 8))
         vl.addWidget(sc, 1)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText(tr("Aceptar"))
@@ -68,46 +76,167 @@ class DatosDialog(QDialog):
         vl.addWidget(bb)
 
     def _campo(self, c):
-        v = c.valor
-        num = isinstance(v, (int, float)) and not isinstance(v, bool)
-        if c.tipo == 'entero':
-            w = QSpinBox()
-            w.setRange(int(max(c.minimo, -2**31)), int(min(c.maximo, 2**31 - 1)))
-            w.setValue(int(v) if num else w.minimum())
-        elif c.tipo == 'numero':
-            w = QDoubleSpinBox()
-            w.setDecimals(max(0, min(6, int(c.decimales))))
-            w.setRange(c.minimo, c.maximo)
-            w.setGroupSeparatorShown(True)
-            w.setMinimumWidth(170)
-            w.setValue(float(v) if num else c.minimo)
-        elif c.tipo == 'opcion':
-            w = QComboBox()
-            w.addItems([str(o) for o in c.opciones])
-            w.setCurrentIndex(max(0, w.findText(str(v))))
-        elif c.tipo == 'si_no':
-            w = QCheckBox(str(c.titulo).replace('&', '&&')[:120])
-            w.setChecked(v is True)
-        else:
-            w = QLineEdit(str(v or ''))
-            w.setMaxLength(1000)
-            w.setMinimumWidth(300)
-        if c.tipo in ('entero', 'numero') and c.sufijo:
-            w.setSuffix(f" {c.sufijo}"[:12])
-        return w
+        return _campo(c)
 
     def valores(self) -> dict:
-        out = {}
-        for k, w in self._w.items():
-            if isinstance(w, (QSpinBox, QDoubleSpinBox)):
-                out[k] = w.value()
-            elif isinstance(w, QComboBox):
-                out[k] = w.currentText()
-            elif isinstance(w, QCheckBox):
-                out[k] = w.isChecked()
-            else:
-                out[k] = w.text().strip()
-        return out
+        return {k: _valor(w) for k, w in self._w.items()}
+
+
+def _campo(c):
+    v = c.valor
+    num = isinstance(v, (int, float)) and not isinstance(v, bool)
+    if c.tipo == 'entero':
+        w = QSpinBox()
+        w.setRange(int(max(c.minimo, -2**31)), int(min(c.maximo, 2**31 - 1)))
+        w.setValue(int(v) if num else w.minimum())
+    elif c.tipo == 'numero':
+        w = QDoubleSpinBox()
+        w.setDecimals(max(0, min(6, int(c.decimales))))
+        w.setRange(c.minimo, c.maximo)
+        w.setGroupSeparatorShown(True)
+        w.setMinimumWidth(170)
+        w.setValue(float(v) if num else c.minimo)
+    elif c.tipo == 'opcion':
+        w = QComboBox()
+        w.addItems([str(o) for o in c.opciones])
+        w.setCurrentIndex(max(0, w.findText(str(v))))
+    elif c.tipo == 'si_no':
+        w = QCheckBox(str(c.titulo).replace('&', '&&')[:120])
+        w.setChecked(v is True)
+    elif c.tipo == 'tabla':
+        return _TablaDatos(c)
+    elif c.tipo == 'parrafo':
+        w = QPlainTextEdit(str(v or ''))
+        w.setMinimumSize(380, 120)
+        w.setTabChangesFocus(True)
+    else:
+        w = QLineEdit(str(v or ''))
+        w.setMaxLength(1000)
+        w.setMinimumWidth(300)
+    if c.tipo in ('entero', 'numero') and c.sufijo:
+        w.setSuffix(f" {c.sufijo}"[:12])
+    return w
+
+
+def _valor(w):
+    if isinstance(w, _TablaDatos):
+        return w.filas()
+    if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+        return w.value()
+    if isinstance(w, QComboBox):
+        return w.currentText()
+    if isinstance(w, QPlainTextEdit):
+        return w.toPlainText().strip()[:5000]
+    if isinstance(w, QCheckBox):
+        return w.isChecked()
+    return w.text().strip()
+
+
+class _TablaDatos(QWidget):
+    """Un `Dato` de tipo «tabla»: filas que se agregan, duplican y quitan."""
+
+    MAX_FILAS = 200
+
+    def __init__(self, c):
+        super().__init__()
+        self._cols = list(c.columnas)
+        vl = QVBoxLayout(self)
+        vl.setContentsMargins(0, 0, 0, 0)
+        self.t = QTableWidget(0, len(self._cols))
+        self.t.setHorizontalHeaderLabels([
+            str(x.titulo)[:60] + (f" ({x.sufijo})" if x.sufijo else '')
+            for x in self._cols])
+        for i, x in enumerate(self._cols):
+            if x.ayuda:
+                self.t.horizontalHeaderItem(i).setToolTip(escape(str(x.ayuda)[:500]))
+        self.t.setSelectionBehavior(QTableWidget.SelectRows)
+        self.t.setMinimumSize(880, 130)
+        vl.addWidget(self.t)
+        hl = QHBoxLayout()
+        for texto, fn in ((tr("Agregar fila"), lambda: self.poner({})),
+                          (tr("Duplicar fila"), self._duplicar),
+                          (tr("Quitar fila"), self._quitar)):
+            b = QPushButton(texto)
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _=False, f=fn: f())
+            hl.addWidget(b)
+        hl.addStretch(1)
+        vl.addLayout(hl)
+        for f in c.valor if isinstance(c.valor, (list, tuple)) else ():
+            if isinstance(f, dict):
+                self.poner(f)
+        self.t.resizeColumnsToContents()
+
+    def poner(self, fila):
+        if self.t.rowCount() >= self.MAX_FILAS:
+            return
+        r = self.t.rowCount()
+        self.t.insertRow(r)
+        for i, c in enumerate(self._cols):
+            w = _campo(replace(c, valor=fila.get(c.clave, c.valor), sufijo='',
+                               titulo='' if c.tipo == 'si_no' else c.titulo))
+            ancho = 70
+            if isinstance(w, QLineEdit):
+                # Que se lea entero lo escrito; el ejemplo, mientras está vacío.
+                w.setPlaceholderText(str(c.ayuda)[:60])
+                ancho = max(110, *(min(280, w.fontMetrics().horizontalAdvance(x) + 24)
+                                   for x in (w.text(), w.placeholderText())))
+                w.setCursorPosition(0)
+            w.setMinimumWidth(ancho)
+            w.installEventFilter(self)
+            self.t.setCellWidget(r, i, w)
+        self.t.resizeRowToContents(r)
+        self.t.selectRow(r)
+
+    def eventFilter(self, w, e):
+        # La fila «actual» es la del campo donde se está escribiendo.
+        if e.type() == QEvent.FocusIn:
+            for r in range(self.t.rowCount()):
+                if any(self.t.cellWidget(r, i) is w for i in range(len(self._cols))):
+                    self.t.selectRow(r)
+                    break
+        return super().eventFilter(w, e)
+
+    def _actual(self):
+        s = self.t.selectionModel().selectedRows()
+        return s[0].row() if s else self.t.rowCount() - 1
+
+    def _fila(self, r):
+        return {c.clave: _valor(self.t.cellWidget(r, i))
+                for i, c in enumerate(self._cols)}
+
+    def _duplicar(self):
+        if self.t.rowCount():
+            self.poner(self._fila(self._actual()))
+
+    def _quitar(self):
+        if self.t.rowCount():
+            self.t.removeRow(self._actual())
+
+    def filas(self):
+        return [self._fila(r) for r in range(self.t.rowCount())]
+
+
+class VistaDialog(QDialog):
+    """Un texto largo con barra, para leerlo entero antes de decidir."""
+
+    def __init__(self, titulo, texto, preguntar, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(titulo[:80])
+        vl = QVBoxLayout(self)
+        self.txt = QPlainTextEdit(texto)
+        self.txt.setReadOnly(True)
+        self.txt.setMinimumSize(720, 460)
+        vl.addWidget(self.txt)
+        b = QDialogButtonBox.Yes | QDialogButtonBox.No if preguntar \
+            else QDialogButtonBox.StandardButtons(QDialogButtonBox.Ok)
+        bb = QDialogButtonBox(b)
+        if preguntar:
+            bb.button(QDialogButtonBox.Yes).setText(tr("Sí"))
+            bb.button(QDialogButtonBox.No).setText(tr("No"))
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        vl.addWidget(bb)
 
 
 class Interfaz:
@@ -149,13 +278,28 @@ class Interfaz:
         box.setWindowModality(Qt.WindowModal)
         return box.exec()
 
+    def _larga(self, texto, preguntar):
+        self.fin()
+        d = VistaDialog(self._titulo, texto[:60_000], preguntar, self._padre)
+        d.setWindowModality(Qt.WindowModal)
+        return d.exec() == QDialog.Accepted
+
+    @staticmethod
+    def _es_larga(texto):
+        return len(texto) > 1500 or texto.count("\n") > 20
+
     def avisar(self, texto):
+        if self._es_larga(texto):
+            self._larga(texto, False)
+            return
         self._caja(QMessageBox.Information, texto)
 
     def error(self, texto):
         self._caja(QMessageBox.Warning, texto)
 
     def preguntar(self, texto):
+        if self._es_larga(texto):
+            return self._larga(texto, True)
         return self._caja(QMessageBox.Question, texto,
                           QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes
 

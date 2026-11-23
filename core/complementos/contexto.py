@@ -16,19 +16,29 @@ import math
 from types import MappingProxyType
 
 from core.mcp_operaciones import ErrorMCP, Operaciones
+from utils.i18n import tr
 from ingepresupuestos import api
 
 
 class OperacionesComplemento(Operaciones):
     """Las mismas operaciones, con el nombre del complemento en el deshacer."""
 
+    #: f(conn, resultado): se hace después del cambio, en su misma transacción.
+    _despues = None
+
     def __init__(self, usuario, complemento: str, pila=None):
         super().__init__(usuario, pila)
         self._complemento = complemento
 
     def _escribir(self, herramienta, pid, nivel, cambio):
-        return super()._escribir(f"complemento:{self._complemento}", pid, nivel,
-                                 cambio)
+        despues = self._despues
+
+        def todo(conn, proy):
+            res = cambio(conn, proy)
+            if despues is not None:
+                despues(conn, res)
+            return res
+        return super()._escribir(f"complemento:{self._complemento}", pid, nivel, todo)
 
 
 def moneda(nombre: str) -> api.Moneda:
@@ -37,12 +47,30 @@ def moneda(nombre: str) -> api.Moneda:
     return api.Moneda(nombre, c['simbolo'], c['sep_miles'], c['sep_dec'])
 
 
-MAX_AJUSTES = 10_000
+MAX_AJUSTES = 60_000
 
 
 def _valor_ok(v) -> bool:
     return isinstance(v, (str, bool, int)) or (
         isinstance(v, float) and math.isfinite(v))
+
+
+def _ajustes_ok(ajustes) -> dict:
+    nuevos = dict(ajustes)
+    if not all(isinstance(k, str) and _valor_ok(v) for k, v in nuevos.items()) \
+            or len(json.dumps(nuevos)) > MAX_AJUSTES:
+        raise api.ErrorComplemento(
+            "ajustes: solo textos, números y sí/no, hasta 60 KB")
+    return nuevos
+
+
+def _escribir_ajustes(conn, pid, complemento, nuevos):
+    r = conn.execute("SELECT complementos_ajustes FROM proyectos WHERE id=?",
+                     (pid,)).fetchone()
+    todos = _todos_los_ajustes(r[0] if r else '')
+    todos[complemento] = nuevos
+    conn.execute("UPDATE proyectos SET complementos_ajustes=? WHERE id=?",
+                 (json.dumps(todos, ensure_ascii=False), pid))
 
 
 def _todos_los_ajustes(crudo) -> dict:
@@ -60,7 +88,7 @@ def ajustes_de(proy: dict, complemento: str | None):
                             if isinstance(d, dict) else {})
 
 
-def comprobar_datos(campos) -> list:
+def comprobar_datos(campos, *, dentro=False) -> list:
     """Los campos de `pedir_datos`, o ErrorComplemento."""
     campos, vistos = list(campos), set()
     if not 1 <= len(campos) <= 40:
@@ -69,7 +97,8 @@ def comprobar_datos(campos) -> list:
         if not isinstance(c, api.Dato) or not str(c.clave) or c.clave in vistos:
             raise api.ErrorComplemento("pedir_datos: campo repetido o que no es Dato")
         vistos.add(c.clave)
-        if c.tipo not in ('numero', 'entero', 'texto', 'opcion', 'si_no'):
+        if c.tipo not in ('numero', 'entero', 'texto', 'parrafo', 'opcion', 'si_no',
+                          'tabla') or dentro and c.tipo in ('tabla', 'parrafo'):
             raise api.ErrorComplemento(f"pedir_datos: tipo {c.tipo!r}")
         if c.tipo == 'opcion' and not c.opciones:
             raise api.ErrorComplemento(f"pedir_datos: «{c.titulo}» sin opciones")
@@ -77,6 +106,8 @@ def comprobar_datos(campos) -> list:
                 math.isfinite(c.minimo) and math.isfinite(c.maximo)
                 and c.minimo <= c.maximo):
             raise api.ErrorComplemento(f"pedir_datos: límites de «{c.titulo}»")
+        if c.tipo == 'tabla':
+            comprobar_datos(c.columnas, dentro=True)
     return campos
 
 
@@ -99,6 +130,7 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
         subs.update((r['id'], r['nombre']) for r in conn.execute(
             "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=?", (pid,)))
         partidas, cache = [], {}
+        planillas = _planillas(conn, pid)
         for p in partidas_ops.partidas_en_orden(conn, pid):
             acu = () if p['es_titulo'] else tuple(
                 map(_insumo, get_acu_items(conn, p['id'])[0]))
@@ -113,7 +145,12 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
                 parcial=parciales.get(p['id'], 0.0),
                 rendimiento=p['rendimiento'] or 0.0,
                 sub_presupuesto=subs.get(p['sub_presupuesto_id'], ''), acu=acu,
-                abierto=abierto))
+                abierto=abierto,
+                especificacion=_texto_plano(p['especificaciones']),
+                mediciones=tuple(planillas.get(p['id'], ()))))
+        auxiliares = tuple(_auxiliar(conn, x) for x in conn.execute(
+            "SELECT * FROM partidas WHERE proyecto_id=? AND es_subanalisis=1 "
+            "ORDER BY item, id", (pid,)).fetchall())
         lineas, total = pie_efectivo(conn, pid, t['cd'])
         insumos = get_insumos_proyecto(conn, pid)
     finally:
@@ -137,8 +174,48 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
         costo_directo=t['cd'], total=total,
         ajustes=ajustes_de(proy, complemento),
         decimales_metrado=get_decimales_metrado(),
-        modalidad=proy.get('modalidad') or '',
+        auxiliares=auxiliares, modalidad=proy.get('modalidad') or '',
         nombre_total=(proy.get('total_nombre') or '').strip())
+
+
+def _texto_plano(spec) -> str:
+    if not spec:
+        return ''
+    from core.pdf_reports import especificacion_en_parrafos
+    return "\n".join(especificacion_en_parrafos(spec))[:20_000]
+
+
+def _planillas(conn, pid) -> dict:
+    """{partida_id: [LineaMetrado]} de todo el proyecto."""
+    out = {}
+
+    def veces(*ns):
+        ns = [n for n in ns if n is not None]
+        return math.prod(ns) if ns else None
+    for r in conn.execute(
+            "SELECT m.* FROM metrados_detalle m JOIN partidas p ON p.id=m.partida_id "
+            "WHERE p.proyecto_id=? ORDER BY m.partida_id, m.orden, m.id", (pid,)):
+        out.setdefault(r['partida_id'], []).append(api.LineaMetrado(
+            r['descripcion'] or '', veces(r['n_estructuras'], r['n_elementos']),
+            r['largo'], r['ancho'], r['alto'], r['parcial'] or 0.0, r['area']))
+    for r in conn.execute(
+            "SELECT m.* FROM acero_detalle m JOIN partidas p ON p.id=m.partida_id "
+            "WHERE p.proyecto_id=? ORDER BY m.partida_id, m.orden, m.id", (pid,)):
+        d = " ".join(x for x in (r['descripcion'], r['diametro']) if x)
+        out.setdefault(r['partida_id'], []).append(api.LineaMetrado(
+            d, veces(r['n_estructuras'], r['n_elementos'], r['n_veces']), r['longitud'], None, None,
+            r['parcial'] or 0.0, kg_m=r['kg_ml']))
+    return out
+
+
+def _auxiliar(conn, p) -> api.Partida:
+    from core.database import get_acu_items
+    return api.Partida(
+        id=p['id'], item=p['item'] or '', descripcion=p['descripcion'] or '', nivel=1,
+        es_titulo=False, unidad=p['unidad'] or '', metrado=0.0,
+        precio_unitario=p['precio_unitario'] or 0.0, parcial=0.0,
+        rendimiento=p['rendimiento'] or 0.0, sub_presupuesto='',
+        acu=tuple(map(_insumo, get_acu_items(conn, p['id'])[0])))
 
 
 def _insumo(a: dict) -> api.Insumo:
@@ -147,7 +224,8 @@ def _insumo(a: dict) -> api.Insumo:
         descripcion=a['descripcion'] or '', tipo=a['tipo'] or 'MAT',
         unidad=a['unidad'] or '', cuadrilla=a['cuadrilla'] or 0.0,
         cantidad=a['cantidad'] or 0.0, precio=a['precio'] or 0.0,
-        parcial=a['parcial'] or 0.0, es_subpartida=bool(a['sub_partida_id']))
+        parcial=a['parcial'] or 0.0, es_subpartida=bool(a['sub_partida_id']),
+        auxiliar_id=a['sub_partida_id'] or 0)
 
 
 class _Editor(api.Editor):
@@ -203,6 +281,95 @@ class _Editor(api.Editor):
                     quantity=_numero(cantidad, "cantidad"),
                     replace=bool(reemplazar_planilla))
 
+    def agregar_metrados(self, metrados, *, ajustes=None):
+        metrados = list(metrados)
+        for n, m in enumerate(metrados):
+            if not isinstance(m, api.Metrado) \
+                    or (m.nueva is None) == (not m.partida_id):
+                raise api.ErrorComplemento(
+                    f"[{n}]: un Metrado con partida_id o con nueva")
+            for f in m.filas:
+                if not isinstance(f, api.FilaMetrado):
+                    raise api.ErrorComplemento(f"[{n}]: se esperaba FilaMetrado")
+                for x in (*_dims(f), f.kg_m):
+                    if isinstance(x, bool) or not isinstance(x, (int, float)) \
+                            or not math.isfinite(x):
+                        raise api.ErrorComplemento(f"[{n}]: un número no es válido")
+        if ajustes is not None:
+            ajustes = _ajustes_ok(ajustes)
+        nuevas = [m for m in metrados if m.nueva is not None]
+        ops = self._ops
+
+        def despues(conn, res):
+            ids = iter([x['item_id'] for x in res['added']] if nuevas else ())
+            for m in metrados:
+                pid = m.partida_id if m.nueva is None else next(ids)
+                if m.filas:
+                    self._agregar_filas(conn, pid, m.filas)
+            if ajustes is not None:
+                _escribir_ajustes(conn, self._pid, ops._complemento, ajustes)
+        ops._despues = despues
+        try:
+            if nuevas:
+                self.agregar([m.nueva for m in nuevas])
+            else:
+                self._hacer(ops._escribir, '', self._pid, 'presupuesto',
+                            lambda conn, proy: None)
+        finally:
+            ops._despues = None
+
+    def _agregar_filas(self, conn, partida_id, filas):
+        from core.database import _rn, get_decimales_metrado
+        from core.partidas_ops import CAMPOS_PLANILLA, parcial_fila
+        p = self._ops._partida_de(conn, partida_id, self._pid)
+        que = f"{p['item']} {p['descripcion']}"
+        if p['es_titulo'] or p['es_subanalisis']:
+            raise ErrorMCP(f"«{que}» no lleva planilla de metrado")
+        if self._ops._filas_bim(conn, partida_id):
+            raise ErrorMCP(tr("El metrado de «{que}» viene de un modelo BIM.").format(
+                que=que))
+        acero = any(f.diametro for f in filas)
+        if acero and not all(f.diametro for f in filas):
+            raise ErrorMCP("no se mezclan filas de acero y normales")
+        tabla, otra = (('acero_detalle', 'metrados_detalle') if acero else
+                       ('metrados_detalle', 'acero_detalle'))
+        if conn.execute(f"SELECT 1 FROM {otra} WHERE partida_id=?",
+                        (partida_id,)).fetchone():
+            raise ErrorMCP(tr("«{que}» tiene una planilla de otra clase (acero / "
+                              "metrado normal): elige otra partida.").format(que=que))
+        n, suma, orden = conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(parcial),0), COALESCE(MAX(orden),0) "
+            f"FROM {tabla} WHERE partida_id=?", (partida_id,)).fetchone()
+        dec = get_decimales_metrado()
+        if abs((p['metrado'] or 0) - suma) > 0.011 + 10 ** -dec:
+            raise ErrorMCP(tr(
+                "«{que}» tiene un metrado escrito a mano que no sale de su planilla: "
+                "se perdería. Elige otra partida o ponla antes en 0.").format(que=que))
+        for f in filas:
+            orden += 1
+            desc = str(f.descripcion).strip()[:200]
+            if acero:
+                m = _rn(math.prod(_dims(f)), 4) if _dims(f) else 0.0
+                parcial = _rn(m * f.kg_m, 4)
+                conn.execute(
+                    "INSERT INTO acero_detalle (partida_id, orden, descripcion, "
+                    "diametro, n_estructuras, n_elementos, n_veces, longitud, kg_ml, "
+                    "parcial) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (partida_id, orden, desc, str(f.diametro)[:20], f.estructuras,
+                     f.elementos, f.veces, f.largo, f.kg_m, parcial))
+            else:
+                d = dict(zip(CAMPOS_PLANILLA, (f.estructuras, f.elementos, f.area,
+                                               f.largo, f.ancho, f.alto)))
+                parcial = parcial_fila(d)
+                conn.execute(
+                    "INSERT INTO metrados_detalle (partida_id, orden, descripcion, "
+                    "n_estructuras, n_elementos, area, largo, ancho, alto, parcial) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (partida_id, orden, desc, *d.values(), parcial))
+            suma += parcial
+        conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
+                     (_rn(suma, dec), partida_id))
+
     def fijar_precio(self, recurso_id, precio):
         self._hacer(self._ops.set_price, self._pid, recurso_id,
                     _numero(precio, "precio"))
@@ -249,6 +416,12 @@ class _Editor(api.Editor):
         self._propia(partida_id)
         self._hacer(self._ops.edit_items, self._pid,
                     [{'item_id': partida_id, 'description': str(descripcion)[:500]}])
+
+
+def _dims(f) -> list:
+    v = ((f.estructuras, f.elementos, f.veces, f.largo) if f.diametro else
+         (f.estructuras, f.elementos, f.area, f.largo, f.ancho, f.alto))
+    return [x for x in v if x is not None]
 
 
 def _numero(x, donde) -> float:
@@ -311,17 +484,10 @@ class ContextoReal(api.Contexto):
         return ajustes_de(proy, self.complemento)
 
     def guardar_ajustes(self, ajustes):
-        nuevos = dict(ajustes)
-        if not all(isinstance(k, str) and _valor_ok(v) for k, v in nuevos.items()) \
-                or len(json.dumps(nuevos)) > MAX_AJUSTES:
-            raise api.ErrorComplemento(
-                "ajustes: solo textos, números y sí/no, hasta 10 KB")
+        nuevos = _ajustes_ok(ajustes)
 
         def cambio(conn, proy):
-            todos = _todos_los_ajustes(proy.get('complementos_ajustes'))
-            todos[self.complemento] = nuevos
-            conn.execute("UPDATE proyectos SET complementos_ajustes=? WHERE id=?",
-                         (json.dumps(todos, ensure_ascii=False), self._pid))
+            _escribir_ajustes(conn, self._pid, self.complemento, nuevos)
         try:
             self.operaciones._escribir('', self._pid, 'presupuesto', cambio)
         except ErrorMCP as e:

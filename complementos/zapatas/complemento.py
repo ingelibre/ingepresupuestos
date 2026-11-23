@@ -5,7 +5,7 @@ Solo cuenta cantidades: no diseña ni verifica la estructura.
 """
 import math
 
-from ingepresupuestos import api
+from ingepresupuestos import api, piezas
 
 from .textos import t
 
@@ -75,13 +75,6 @@ def calcular(x):
     return res, formulas
 
 
-def siguiente(p):
-    """El primer ítem de título libre en la raíz («07»)."""
-    raices = [int(x.item) for x in p.partidas
-              if x.item.isascii() and x.item.isdigit()]
-    return f"{max(raices, default=0) + 1:02d}"
-
-
 def agregar(ctx):
     r = ctx.pedir_datos(t("Zapatas"), campos(), texto=t(AVISO))
     if r is None:
@@ -93,7 +86,7 @@ def agregar(ctx):
               (t("CONCRETO EN ZAPATA"), "m3", res["concreto"]),
               (t("ENCOFRADO Y DESENCOFRADO DE ZAPATA"), "m2", res["encofrado"]),
               (t("ACERO DE REFUERZO EN ZAPATA"), "kg", res["acero"])]
-    item = siguiente(ctx.presupuesto)
+    item = piezas.siguiente_item(ctx.presupuesto)
     texto = [*formulas, "", t("Se agregará el título {item} «{titulo}» con 4 partidas "
                               "sin precio.").format(item=item, titulo=titulo),
              t(AVISO), "", t("¿Agregar?")]

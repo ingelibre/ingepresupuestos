@@ -960,7 +960,7 @@ def test_ajustes_por_proyecto_sobreviven_a_exportar_e_importar(pid, admin, tmp_p
     with pytest.raises(api.ErrorComplemento):
         ctx.guardar_ajustes({'x': [1]})
     with pytest.raises(api.ErrorComplemento):
-        ctx.guardar_ajustes({'x': 'a' * 20_000})
+        ctx.guardar_ajustes({'x': 'a' * 70_000})
     with pytest.raises(api.ErrorComplemento):
         ctx.guardar_ajustes({'x': float('nan')})
     ctx.guardar_ajustes({})

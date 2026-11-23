@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "pais-honduras",
+  "nombre": "Honduras",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Análisis de precios sin cuadrilla, con la mano de obra en horas o en jornales de las horas que elijas. Es un reporte: no cambia precios ni totales.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "paises",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Honduras",
+      "descripcion": "Price analysis without crew, with labor in hours or in workdays of the hours you choose. It is a report: it does not change prices or totals."
+    },
+    "pt_BR": {
+      "nombre": "Honduras",
+      "descripcion": "Composição de preços sem equipe, com a mão de obra em horas ou em diárias das horas que você escolher. É um relatório: não altera preços nem totais."
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "esquema": 1,
+  "id": "pais-italia",
+  "nombre": "Italia",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Euros, Analisi dei Prezzi, Computo Metrico Estimativo, Elenco Prezzi Unitari y Quadro Economico, con spese generali, utile, costi della sicurezza, ribasso e IVA editables. El índice ISTAT viene vacío: se importa desde un CSV (periodo; valor). Los reportes no cambian precios ni totales.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "paises",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Italy",
+      "descripcion": "Euros, Analisi dei Prezzi, Computo Metrico Estimativo, Elenco Prezzi Unitari and Quadro Economico, with editable spese generali, utile, safety costs, ribasso and VAT. The ISTAT index comes empty: import it from a CSV (period; value). The reports do not change prices or totals."
+    },
+    "pt_BR": {
+      "nombre": "Itália",
+      "descripcion": "Euros, Analisi dei Prezzi, Computo Metrico Estimativo, Elenco Prezzi Unitari e Quadro Economico, com spese generali, utile, custos de segurança, ribasso e IVA editáveis. O índice ISTAT vem vazio: é importado de um CSV (período; valor). Os relatórios não alteram preços nem totais."
+    }
+  },
+  "paises": [
+    {
+      "iso": "IT",
+      "nombre": "Italia",
+      "moneda": "Euros",
+      "identificacion": "P. IVA",
+      "impuesto": {
+        "nombre": "IVA",
+        "pct": 0
+      },
+      "indirectos": {
+        "gastos_generales": 0,
+        "utilidad": 0
+      },
+      "pie": [
+        {
+          "codigo": "GG",
+          "nombre": "Spese generali",
+          "tipo": "pct_cd",
+          "pct": 0
+        },
+        {
+          "codigo": "UTIL",
+          "nombre": "Utile d'impresa",
+          "tipo": "pct_cd",
+          "pct": 0
+        },
+        {
+          "codigo": "SUB",
+          "nombre": "Totale lavori",
+          "tipo": "subtotal"
+        },
+        {
+          "codigo": "IGV",
+          "nombre": "{impuesto_pct}",
+          "tipo": "pct_sub",
+          "pct": "impuesto"
+        }
+      ]
+    }
+  ],
+  "indices": [
+    {
+      "clave": "ISTAT",
+      "nombre": "ISTAT (costo di costruzione)"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "movimiento-tierras",
+  "nombre": "Movimiento de tierras",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Excavación de zanjas y zapatas (con talud y sobreancho), secciones de corte y relleno, relleno y eliminación, con el balance a la vista para no contar nada dos veces. Los factores los pones tú. No diseña taludes.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "metrados",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Earthworks",
+      "descripcion": "Trench and footing excavation (with slope and extra width), cut and fill sections, fill and removal, with the balance in view so nothing is counted twice. You enter the factors. It does not design slopes."
+    },
+    "pt_BR": {
+      "nombre": "Movimento de terra",
+      "descripcion": "Escavação de valas e sapatas (com talude e sobrelargura), seções de corte e aterro, aterro e bota-fora, com o balanço à vista para não contar nada duas vezes. Os fatores são seus. Não dimensiona taludes."
+    }
+  }
+}

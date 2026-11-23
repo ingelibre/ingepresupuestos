@@ -104,7 +104,7 @@ hiddenimports = [
     # PyInstaller normalmente los detecta, pero se listan por seguridad.
     'core.plantillas_estructura',
     # API pública de complementos: la importa código que PyInstaller no ve.
-    'ingepresupuestos.api', 'ingepresupuestos.pruebas', 'core.complementos.cli',
+    'ingepresupuestos.api', 'ingepresupuestos.pruebas', 'ingepresupuestos.piezas', 'core.complementos.cli',
     'core.complementos.plantilla', 'core.complementos.reportes',
     'core.complementos.contexto',
     'views.complementos_dialog', 'views.complementos_menu',

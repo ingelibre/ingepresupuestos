@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "pais-dominicana",
+  "nombre": "República Dominicana",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "ITBIS sobre los materiales, por partida y en total, con la tasa al 18 % para empezar y editable por proyecto. Misma cuenta que «Impuesto sobre materiales». Es un reporte: no cambia precios ni totales.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "paises",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Dominican Republic",
+      "descripcion": "ITBIS on materials, per item and in total, starting at 18% and editable per project. Same calculation as «Tax on materials». It is a report: it does not change prices or totals."
+    },
+    "pt_BR": {
+      "nombre": "República Dominicana",
+      "descripcion": "ITBIS sobre os materiais, por item e no total, com a alíquota em 18 % no início e editável por projeto. Mesma conta de «Imposto sobre materiais». É um relatório: não altera preços nem totais."
+    }
+  }
+}

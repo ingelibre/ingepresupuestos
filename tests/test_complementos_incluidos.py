@@ -17,7 +17,12 @@ from tests.test_complementos import (  # noqa: F401 — fixtures
 
 RAIZ = Path(__file__).resolve().parent.parent
 NUEVOS = ('apu-mexico', 'ajustar-total', 'impuesto-materiales',
-          'presupuesto-con-datos', 'zapatas')
+          'presupuesto-con-datos', 'zapatas', 'pais-brasil', 'pu-con-indirectos',
+          'pais-espana', 'pais-argentina', 'pais-honduras', 'pais-dominicana',
+          'pais-italia', 'acero-facil', 'movimiento-tierras', 'ladrillos',
+          'dosificacion-concreto')
+#: Reportes que van en el idioma del país, no en el del programa.
+EN_SU_IDIOMA = {'pais-brasil', 'pais-italia'}
 
 
 @pytest.fixture
@@ -120,11 +125,15 @@ def test_tienen_todos_sus_textos_en_ingles_y_portugues(nombre):
     i18n.set_idioma('en')
     c = _cargar(nombre)
     titulos = [r.titulo for t in ('accion', 'reporte') for r in c.de(t)]
+    if nombre in EN_SU_IDIOMA:
+        titulos = [r.titulo for r in c.de('accion')]
     assert titulos and all(x in espacio['TEXTOS']['en'].values() for x in titulos)
 
 
-@pytest.mark.parametrize('nombre', [n for n in NUEVOS if n != 'zapatas'
-                                    and n != 'ajustar-total'])
+@pytest.mark.parametrize('nombre', [n for n in NUEVOS if n not in
+                                    ('zapatas', 'ajustar-total', 'pais-brasil',
+                                     'acero-facil', 'movimiento-tierras', 'ladrillos',
+                                     'dosificacion-concreto')])
 def test_los_reportes_no_escriben(nombre, obra, admin, tmp_path):
     antes = contexto.presupuesto(obra[0], admin)
     _generar(_cargar(nombre), obra[0], admin, tmp_path)
