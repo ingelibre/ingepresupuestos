@@ -704,6 +704,8 @@ def init_db():
         # Pie: separador destacado como total y nombre del total final (issue #34).
         ('pie_destacado', "ALTER TABLE pie_rubros ADD COLUMN destacado INTEGER DEFAULT 0"),
         ('total_nombre',  "ALTER TABLE proyectos ADD COLUMN total_nombre TEXT DEFAULT ''"),
+        # Gantt: títulos contraídos en pantalla, ids separados por comas (#33).
+        ('gantt_plegado', "ALTER TABLE proyectos ADD COLUMN gantt_plegado TEXT DEFAULT ''"),
         # Hash del código de recuperación de la cuenta (issue #32).
         ('usr_recuperacion', "ALTER TABLE usuarios ADD COLUMN recuperacion_hash TEXT DEFAULT ''"),
         # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,

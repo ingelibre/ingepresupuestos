@@ -1792,6 +1792,15 @@ class GanttWidget(QWidget):
         btn_fer.clicked.connect(self._abrir_feriados)
         tb_hl.addWidget(btn_fer)
 
+        self._btn_niveles = QPushButton(tr("Niveles") + " ▾")
+        self._btn_niveles.setCursor(Qt.PointingHandCursor)
+        set_tooltip(self._btn_niveles, tr(
+            "Contraer o expandir los títulos del Gantt. Solo cambia la vista: "
+            "ni las fechas ni los reportes."))
+        self._btn_niveles.setStyleSheet(btn_fer.styleSheet())
+        self._btn_niveles.clicked.connect(self._menu_niveles)
+        tb_hl.addWidget(self._btn_niveles)
+
         tb_hl.addSpacing(20)
         btn_pdf = QPushButton("📄 PDF")
         btn_pdf.setCursor(Qt.PointingHandCursor)
@@ -1958,6 +1967,7 @@ class GanttWidget(QWidget):
         self.tbl.setItemDelegateForColumn(1, self._item_delegate)
         self.tbl.setItemDelegateForColumn(2, self._desc_delegate)
         self.tbl.cellChanged.connect(self._on_cell_changed)
+        self.tbl.cellClicked.connect(self._on_cell_clicked)
         self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl.customContextMenuRequested.connect(self._on_table_ctx_menu)
         sp.addWidget(self.tbl)
@@ -2489,9 +2499,13 @@ class GanttWidget(QWidget):
         # arándano y el Gantt perdía la jerarquía que el árbol sí mostraba
         # (reporte de David Ramos, 5 sep 2026).
         zebra_i = 0
+        plegados = self._plegados()
+        ocultas = self._filas_ocultas(filas)
         for p in filas:
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
+            # Contraída: la fila sigue en la tabla (y con su #), solo no se ve.
+            self.tbl.setRowHidden(r, p['id'] in ocultas)
             es_titulo = p['es_titulo']
             virtual = p.get('_virtual')
             cd = cmap.get(p['id'], {})
@@ -2534,6 +2548,9 @@ class GanttWidget(QWidget):
 
             editable = not (es_titulo or virtual)
             desc_txt = p['descripcion'] or ''
+            if self._es_plegable(p):
+                # Solo en pantalla: contraer / expandir (issue #33).
+                desc_txt = ("▸ " if p['id'] in plegados else "▾ ") + desc_txt
             if virtual in ('inicio', 'fin'):
                 # Solo en pantalla: el PDF del Gantt sigue en el idioma del proyecto.
                 desc_txt = "◆ " + tr(desc_txt)
@@ -2602,6 +2619,76 @@ class GanttWidget(QWidget):
             self.tbl.item(r, 0).setData(Qt.UserRole + 1, es_titulo)
 
         self.tbl.blockSignals(False)
+
+    # ── Contraer / expandir títulos (issue #33) ───────────────────────────
+    # Solo la vista: `filas_con_hitos` (numeración #, PDF, MS Project) y el CPM
+    # no saben nada de esto.
+
+    @staticmethod
+    def _es_plegable(p) -> bool:
+        return bool(p['es_titulo']) and p.get('_virtual') != 'proyecto'
+
+    def _plegados(self) -> set:
+        pid = self._cv.pid
+        cache = getattr(self, '_plegados_cache', None)
+        if cache is None:
+            conn = get_db()
+            r = conn.execute("SELECT gantt_plegado FROM proyectos WHERE id=?",
+                             (pid,)).fetchone()
+            conn.close()
+            txt = (r['gantt_plegado'] if r else '') or ''
+            cache = {int(x) for x in txt.split(',') if x.lstrip('-').isdigit()}
+            self._plegados_cache = cache
+        return cache
+
+    def _set_plegados(self, ids: set):
+        self._plegados_cache = set(ids)
+        conn = get_db()
+        conn.execute("UPDATE proyectos SET gantt_plegado=? WHERE id=?",
+                     (','.join(str(i) for i in sorted(ids)), self._cv.pid))
+        conn.commit(); conn.close()
+        pos = self.tbl.verticalScrollBar().value()
+        self._llenar_tabla()
+        self._render_gantt()
+        self.tbl.verticalScrollBar().setValue(pos)
+
+    def _filas_ocultas(self, filas) -> set:
+        """Ids de las filas que quedan dentro de un título contraído."""
+        plegados = self._plegados()
+        ocultas, corte = set(), None
+        for p in filas if plegados else ():
+            nivel = (0 if p.get('_virtual') else p['nivel'] or 1)
+            if corte is not None and nivel > corte:
+                ocultas.add(p['id'])
+                continue
+            corte = (nivel if self._es_plegable(p) and p['id'] in plegados
+                     else None)
+        return ocultas
+
+    def _on_cell_clicked(self, row, col):
+        if col != 2:
+            return
+        pid = self.tbl.item(row, 0).data(Qt.UserRole)
+        p = next((f for f in self._cv.filas_con_hitos() if f['id'] == pid), None)
+        if p is not None and self._es_plegable(p):
+            self._set_plegados(self._plegados() ^ {pid})
+
+    def mostrar_hasta_nivel(self, nivel: int | None):
+        """Contrae todos los títulos de `nivel` para abajo; None = todo."""
+        self._set_plegados(set() if nivel is None else {
+            p['id'] for p in self._cv.filas_con_hitos()
+            if self._es_plegable(p) and not p.get('_virtual')
+            and (p['nivel'] or 1) >= nivel})
+
+    def _menu_niveles(self):
+        menu = QMenu(self)
+        menu.addAction(tr("Mostrar todo"), lambda: self.mostrar_hasta_nivel(None))
+        niveles = sorted({p['nivel'] or 1 for p in self._cv.filas_con_hitos()
+                          if self._es_plegable(p) and not p.get('_virtual')})
+        for n in niveles:
+            menu.addAction(tr("Hasta el nivel {n}").format(n=n),
+                           lambda n=n: self.mostrar_hasta_nivel(n))
+        menu.exec(self._btn_niveles.mapToGlobal(self._btn_niveles.rect().bottomLeft()))
 
     def _on_cell_changed(self, row, col):
         # Editables: 4=Días lab., 5=Inicio, 6=Fin, 7=Pred (col 3=Días cal. es derivada)
@@ -6294,6 +6381,10 @@ class GanttWidget(QWidget):
         if not hasattr(self._cv, '_partidas'):
             return
         partidas = self._cv.filas_con_hitos()   # [Inicio] + partidas + [Fin]
+        # Lo contraído no ocupa fila (igual que en la tabla); sus flechas no se
+        # dibujan porque no entra en `row_info`.
+        ocultas  = self._filas_ocultas(partidas)
+        partidas = [p for p in partidas if p['id'] not in ocultas]
         tasks    = self._cv._tasks
         cmap     = self._cv._cron_map
         plazo    = self._cv._proy.get('plazo') or 0
