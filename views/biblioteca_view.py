@@ -32,6 +32,7 @@ from widgets.num_item import NumItem
 from utils.i18n import tr
 from utils.icons import icon
 from utils.theme import C
+from views.unidades_dialog import poner_lista
 
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
@@ -100,6 +101,7 @@ class CUFormDialog(UnidadSuperindiceMixin, QDialog):
         self.inp_unidad = QLineEdit()
         self.inp_unidad.setMaximumWidth(120)
         self.inp_unidad.setPlaceholderText("m, m², m³, kg, hh, glb…")
+        poner_lista(self.inp_unidad)
         self.inp_unidad.textEdited.connect(self._auto_superindice_unidad)
         form.addRow(tr("Unidad:"), self.inp_unidad)
 

@@ -256,6 +256,16 @@ class LoginDialog(QDialog):
         btn_ing.clicked.connect(self._do_login)
         vl.addWidget(btn_ing)
 
+        btn_olvido = QPushButton(tr("¿Olvidaste tu contraseña?"))
+        btn_olvido.setCursor(Qt.PointingHandCursor)
+        btn_olvido.setStyleSheet(
+            "QPushButton { border:none; background:transparent; color:#6b7a8d;"
+            " font-size:12px; }"
+            f"QPushButton:hover {{ color:{NARANJA}; }}")
+        btn_olvido.setAutoDefault(False)
+        btn_olvido.clicked.connect(self._recuperar)
+        vl.addWidget(btn_olvido)
+
         # Separador "o continuar sin cuenta"
         sep = self._make_sep(tr("o continuar sin cuenta"))
         vl.addWidget(sep)
@@ -372,12 +382,42 @@ class LoginDialog(QDialog):
                 guardar_sesion(u)
             else:
                 borrar_sesion()   # Si antes tenía sesión guardada, la borra
+            self._ofrecer_codigo(u)
             self.login_exitoso.emit(u)
             self.accept()
         else:
             self.lbl_err_login.setText(msg)
             self.inp_pass.clear()
             self.inp_pass.setFocus()
+
+    def _recuperar(self):
+        from views.recuperar_dialog import RecuperarPasswordDialog
+        dlg = RecuperarPasswordDialog(self, self.inp_user.text().strip())
+        if dlg.exec() == QDialog.Accepted:
+            self.inp_user.setText(dlg.inp_user.text().strip())
+            self.inp_pass.setFocus()
+
+    def _ofrecer_codigo(self, u):
+        """Las cuentas anteriores no tienen código: se les ofrece UNA vez (luego
+        está en Configuración → Usuarios)."""
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QMessageBox
+        from utils.auth import crear_codigo_recuperacion, tiene_codigo_recuperacion
+        from views.recuperar_dialog import CodigoRecuperacionDialog
+        if tiene_codigo_recuperacion(u.id):
+            return
+        qs = QSettings("ingePresupuestos", "avisos")
+        clave = f"avisos/codigo_recuperacion_{u.username}"
+        if qs.value(clave, "") == "1":
+            return
+        qs.setValue(clave, "1")
+        r = QMessageBox.question(
+            self, tr("Código de recuperación"),
+            tr("Tu cuenta no tiene código de recuperación. ¿Crear uno ahora? Sirve "
+               "para poner otra contraseña si la olvidas, sin internet."),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if r == QMessageBox.Yes:
+            CodigoRecuperacionDialog(crear_codigo_recuperacion(u.id), self).exec()
 
     def _do_invitado(self):
         from utils.auth import usuario_actual
@@ -405,7 +445,10 @@ class LoginDialog(QDialog):
         ok, msg = crear_admin(nombre, usuario, p1, email=email)
         if ok:
             login(usuario, p1)
-            from utils.auth import usuario_actual
+            from utils.auth import usuario_actual, crear_codigo_recuperacion
+            from views.recuperar_dialog import CodigoRecuperacionDialog
+            CodigoRecuperacionDialog(
+                crear_codigo_recuperacion(usuario_actual().id), self).exec()
             self.login_exitoso.emit(usuario_actual())
             self.accept()
         else:

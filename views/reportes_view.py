@@ -866,7 +866,7 @@ class ReportesView(QWidget):
                     f"QPushButton:hover {{ background:{SILVER_100}; border-color:{ORANGE};"
                     f"  color:{ORANGE_DARK}; }}"
                 )
-            b.clicked.connect(handler)
+            b.clicked.connect(lambda _=False, h=handler: self._con_aviso_precios(h))
             return b
 
         self._btn_xlsx = mk("Excel", False, self._guardar_excel)
@@ -910,6 +910,13 @@ class ReportesView(QWidget):
         hl.addWidget(self._btn_pdf)
 
         return bar
+
+    def _con_aviso_precios(self, accion):
+        """Antes de imprimir o exportar: avisa si hay partidas con precio de
+        relleno o sin precio (issue #53)."""
+        from views.aviso_partidas_dialog import confirmar_salida
+        if confirmar_salida(self, self.pid, self._tipo_actual or ''):
+            accion()
 
     # ─── Editor de formato ───────────────────────────────────────────────────
 

@@ -1849,7 +1849,8 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
     page-break. Cada chunk repite las partidas con su subconjunto de
     períodos y las 4 filas de resumen (TOTAL · % PERÍODO · ACUMULADO ·
     % ACUMULADO) calculadas globalmente."""
-    from core.cronograma import distribuir_periodos, cpm
+    from core.cronograma import (distribuir_ventanas, ventanas_periodos,
+                                 corte_fin_de_mes, nombre_mes_corte, cpm)
     o, od, _os = _brand_colors()
     dec = get_decimales_ppto()
     plazo = int(proy.get('plazo') or 30)
@@ -1869,8 +1870,8 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
         tasks_cpm = {}
     max_ef = max((t['EF'] for t in tasks_cpm.values() if t.get('EF', 0) > 0),
                   default=plazo)
-    n_dias = max(max_ef, plazo, period_days)
-    n_periods = max(1, (n_dias + period_days - 1) // period_days)
+    ventanas = ventanas_periodos(proy, max(max_ef, plazo), period_days)
+    n_periods = len(ventanas)
 
     # Paleta — alineada con `table.data` del resto de reportes (ver
     # `_base_css()`). Gridlines suaves silver-100, header sin fondo con
@@ -1936,9 +1937,8 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
         ini = t_cpm.get('ES') or (c.get('inicio_dia') or 1)
         metrado_tot = p.get('metrado') or 0
         if dur > 0 and parcial > 0:
-            distrib = distribuir_periodos(segs, ini, dur, parcial, n_periods, period_days)
-            distrib_met = (distribuir_periodos(segs, ini, dur, metrado_tot,
-                                                n_periods, period_days)
+            distrib = distribuir_ventanas(segs, ini, dur, parcial, ventanas)
+            distrib_met = (distribuir_ventanas(segs, ini, dur, metrado_tot, ventanas)
                            if metrado_tot else [0.0] * n_periods)
         else:
             distrib = [0.0] * n_periods
@@ -2013,9 +2013,11 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
         """Devuelve el HTML interno del header para el período k (0-based)."""
         base = f"{label[0]}{k+1}"
         if not show_fechas or f_ini_proy is None:
+            if corte_fin_de_mes(proy, period_days):
+                return (f"{base}<br/><span style='font-weight:400;font-size:7pt'>"
+                        f"{nombre_mes_corte(proy, ventanas[k])}</span>")
             return base
-        start_day = k * period_days + 1
-        end_day   = (k + 1) * period_days
+        start_day, end_day = ventanas[k]
         d_ini = f_ini_proy + _td_obj(days=start_day - 1)
         d_fin = f_ini_proy + _td_obj(days=end_day - 1)
         if d_ini.month == d_fin.month and d_ini.year == d_fin.year:
@@ -2313,7 +2315,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
 def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
                               escala: str = 'semana') -> str:
     """Curva S — avance acumulado en % a lo largo del tiempo."""
-    from core.cronograma import distribuir_periodos
+    from core.cronograma import distribuir_ventanas, ventanas_periodos
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
     dec = get_decimales_ppto()
     plazo = int(proy.get('plazo') or 30)
@@ -2321,7 +2323,8 @@ def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
 
     period_days = 7 if escala == 'semana' else 30
     label = 'Semana' if escala == 'semana' else 'Mes'
-    n_periods = max(1, (plazo + period_days - 1) // period_days)
+    ventanas = ventanas_periodos(proy, plazo, period_days)
+    n_periods = len(ventanas)
 
     totales_periodo = [0.0] * n_periods
     cd_total = 0.0
@@ -2336,7 +2339,7 @@ def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
         ini = c.get('inicio_dia') or 1
         segs = c.get('segmentos') or ''
         if dur > 0 and parcial > 0:
-            distrib = distribuir_periodos(segs, ini, dur, parcial, n_periods, period_days)
+            distrib = distribuir_ventanas(segs, ini, dur, parcial, ventanas)
             for k, v in enumerate(distrib):
                 totales_periodo[k] += v
 
@@ -2410,7 +2413,8 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
     """Versión nueva del reporte de adquisiciones — sigue el mismo patrón
     visual que `_html_cronograma_valorizado` pero usando insumos como
     "filas" en lugar de partidas."""
-    from core.cronograma import distribuir_periodos, cpm
+    from core.cronograma import (distribuir_ventanas, ventanas_periodos,
+                                 corte_fin_de_mes, nombre_mes_corte, cpm)
     from datetime import datetime as _dt, timedelta as _td_obj
 
     o, od, _os = _brand_colors()
@@ -2431,8 +2435,8 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
         tasks_cpm = {}
     max_ef = max((t['EF'] for t in tasks_cpm.values() if t.get('EF', 0) > 0),
                   default=plazo)
-    n_dias = max(max_ef, plazo, period_days)
-    n_periods = max(1, (n_dias + period_days - 1) // period_days)
+    ventanas = ventanas_periodos(proy, max(max_ef, plazo), period_days)
+    n_periods = len(ventanas)
 
     # Paleta — espejo del valorizado, alineada con `table.data`.
     GRID         = "#CBD5E1"   # idem valorizado
@@ -2499,13 +2503,11 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             und_i = it.get('unidad') or ''
             qty_total = (it.get('cantidad') or 0) * metrado
             if dur > 0 and monto_total > 0:
-                distrib = distribuir_periodos(segs, ini, dur, monto_total,
-                                                 n_periods, period_days)
+                distrib = distribuir_ventanas(segs, ini, dur, monto_total, ventanas)
             else:
                 distrib = [0.0] * n_periods
             if dur > 0 and qty_total > 0 and not und_i.startswith('%'):
-                distrib_qty = distribuir_periodos(segs, ini, dur, qty_total,
-                                                    n_periods, period_days)
+                distrib_qty = distribuir_ventanas(segs, ini, dur, qty_total, ventanas)
             else:
                 distrib_qty = [0.0] * n_periods
             if rid not in insumos:
@@ -2601,9 +2603,11 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
     def _periodo_label_html(k: int) -> str:
         base = f"{label[0]}{k+1}"
         if not show_fechas or f_ini_proy is None:
+            if corte_fin_de_mes(proy, period_days):
+                return (f"{base}<br/><span style='font-weight:400;font-size:7pt'>"
+                        f"{nombre_mes_corte(proy, ventanas[k])}</span>")
             return base
-        s_day = k * period_days + 1
-        e_day = (k + 1) * period_days
+        s_day, e_day = ventanas[k]
         d_i = f_ini_proy + _td_obj(days=s_day - 1)
         d_f = f_ini_proy + _td_obj(days=e_day - 1)
         if d_i.month == d_f.month and d_i.year == d_f.year:
@@ -3457,16 +3461,17 @@ def _build_pie_rows(pid: int, cd: float) -> list:
     Devuelve lista de tuplas (label, monto, cls) donde cls es:
       'sub'  → subtotal (CD, Sub Total)
       ''     → rubro normal (GG, Util, IGV, supervisión…)
-      'gran' → PRESUPUESTO TOTAL (último)
+      'gran' → total final (siempre el último) y separadores destacados
     """
-    from core.pie import calcular_pie, etiqueta
+    from core.pie import calcular_pie, etiqueta, nombre_total
     conn = get_db()
     lineas, total = calcular_pie(conn, pid, cd)
     conn.close()
     filas = [('Costo Directo', _rn(cd or 0, get_decimales_ppto()), 'sub')]
     for l in lineas or []:
-        filas.append((etiqueta(l), l['valor'], 'sub' if l['tipo'] == 'subtotal' else ''))
-    filas.append(('PRESUPUESTO TOTAL', total, 'gran'))
+        cls = 'gran' if l['destacado'] else 'sub' if l['tipo'] == 'subtotal' else ''
+        filas.append((etiqueta(l), l['valor'], cls))
+    filas.append((nombre_total(pid), total, 'gran'))
     return filas
 
 
@@ -3487,6 +3492,7 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     pie = _build_pie_rows(pid, cd)
     if not pie:
         return (1.0, [('PRESUPUESTO TOTAL', cd, 'gran')])
+    nom_total = pie[-1][0]
     total = pie[-1][1] or 0
     # Filas de impuesto (IGV/IVA) — se mantienen abajo, separadas del PU.
     # `\b` evita falsos positivos (p.ej. «IVA» dentro de otra palabra).
@@ -3499,9 +3505,9 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     factor = (base / cd) if cd else 1.0
     if tax_rows:
         pie_rows = ([('Sub Total', base, 'sub')] + tax_rows
-                    + [('PRESUPUESTO TOTAL', total, 'gran')])
+                    + [(nom_total, total, 'gran')])
     else:
-        pie_rows = [('PRESUPUESTO TOTAL', total, 'gran')]
+        pie_rows = [(nom_total, total, 'gran')]
     return (factor, pie_rows)
 
 
@@ -3646,7 +3652,8 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
             parts.append(_fila_resumen(rub['nombre'].upper(), rub['valor'], bold=True))
 
     conn.close()
-    parts.append(_fila_resumen('COSTO TOTAL DE OBRA', total_final, bold=True, top=True))
+    from core.pie import nombre_total
+    parts.append(_fila_resumen(nombre_total(proy, 'COSTO TOTAL DE OBRA'), total_final, bold=True, top=True))
     return ''.join(parts)
 
 
@@ -3676,9 +3683,10 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
     parts = []
     parts.append('<h2>Resumen Ejecutivo</h2>')
 
+    from core.pie import nombre_total
     # KPIs en grilla 4 columnas — usando atributos HTML que QTextDocument respeta
     kpis = [
-        ('Presupuesto Total', f'{sym} {_fmt(totales["total"], dec)}', 'Todos los conceptos'),
+        (nombre_total(proy, 'Presupuesto Total'), f'{sym} {_fmt(totales["total"], dec)}', 'Todos los conceptos'),
         ('Costo Directo',     f'{sym} {_fmt(totales["cd"], dec)}',
          f'{(totales["cd"]/totales["total"]*100 if totales["total"] else 0):.1f}% del total'),
         ('Partidas',          f'{n_partidas}',  f'{n_titulos} títulos'),

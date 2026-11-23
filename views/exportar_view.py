@@ -638,6 +638,11 @@ class ExportarView(QWidget):
             QMessageBox.warning(self, tr("Exportar"), tr("Selecciona un proyecto primero."))
             return
 
+        # El .db es una copia de trabajo, no un documento: no se avisa.
+        from views.aviso_partidas_dialog import confirmar_salida
+        if spec["id"] != "db" and not confirmar_salida(self, pid):
+            return
+
         nombre_proy = self.cmb_proy.currentText().split('  ·  ')[0]
         slug = re.sub(r'[^\w\s-]', '', nombre_proy)[:40].strip()
         slug = re.sub(r'\s+', '_', slug) or "proyecto"

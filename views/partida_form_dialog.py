@@ -7,7 +7,7 @@ import sqlite3
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QComboBox,
-    QDoubleSpinBox, QMessageBox, QFrame, QCompleter
+    QDoubleSpinBox, QMessageBox, QFrame
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QStandardItemModel, QStandardItem
@@ -17,6 +17,7 @@ from core.config import DB_PATH
 from core.database import get_db
 from models.usuario import Usuario
 from utils.i18n import tr
+from views.unidades_dialog import poner_lista
 
 
 class PartidaFormDialog(QDialog):
@@ -119,27 +120,7 @@ class PartidaFormDialog(QDialog):
         self.inp_unidad = QLineEdit()
         self.inp_unidad.setPlaceholderText(tr("m², m³, kg, glb, …"))
         self.inp_unidad.setMinimumHeight(32)
-        _UNIDADES = [
-            "m", "m²", "m³", "ml", "km", "cm", "mm",
-            "kg", "tn", "ton", "lb",
-            "und", "glb", "pza", "pzas", "jgo", "cjt", "vj", "est",
-            "hh", "hm", "h", "hr", "día", "mes", "sem",
-            "lt", "l", "gal",
-            "bls", "bol",
-            "pie²", "pie³", "p2", "p3",
-            "ha", "pto", "rll",
-        ]
-        _comp = QCompleter(sorted(set(_UNIDADES)), self.inp_unidad)
-        _comp.setCaseSensitivity(Qt.CaseInsensitive)
-        _comp.setFilterMode(Qt.MatchContains)
-        _comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        _comp.popup().setStyleSheet(
-            "QListView { background:white; border:1px solid #D4D4D4;"
-            " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
-            "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
-        )
-        self.inp_unidad.setCompleter(_comp)
+        poner_lista(self.inp_unidad)
 
         # Auto-convertir "m2"→"m²", "m3"→"m³" al escribir
         _SUP = {'2': '²', '3': '³'}

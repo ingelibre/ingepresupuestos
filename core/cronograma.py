@@ -602,6 +602,41 @@ def distribuir_periodos(segs_json: str, ini: int, dur: int, parcial: float,
     return weekly
 
 
+# ── Períodos de los cronogramas ──────────────────────────────────────────────
+# Único dueño de dónde corta cada período (valorizado, adquisiciones, Curva S;
+# pantalla y reportes). Por defecto ventanas de 7 o 30 días desde el inicio;
+# con `proyectos.corte_mes = 'cal'` los meses cortan a fin de mes calendario y
+# el primero es parcial, como las valorizaciones (issue #52).
+
+def corte_fin_de_mes(proy: dict, period_days: int) -> bool:
+    return period_days == 30 and (proy.get('corte_mes') or '') == 'cal'
+
+
+def ventanas_periodos(proy: dict, n_dias: int, period_days: int) -> list:
+    """[(día_ini, día_fin)] 1-based de cada período hasta cubrir `n_dias`."""
+    if corte_fin_de_mes(proy, period_days):
+        from core.curva_s import _ventanas
+        return _ventanas('mes_cal', fecha_dia1(proy).date(), n_dias)[0]
+    n_dias = max(n_dias, period_days)
+    n = max(1, (n_dias + period_days - 1) // period_days)
+    return [(i * period_days + 1, (i + 1) * period_days) for i in range(n)]
+
+
+def distribuir_ventanas(segs_json: str, ini: int, dur: int, parcial: float,
+                        ventanas: list) -> list:
+    """`distribuir_periodos` sobre las ventanas de `ventanas_periodos`."""
+    from core.curva_s import _distribuir_ventanas
+    return _distribuir_ventanas(segs_json, ini, dur, parcial, ventanas)
+
+
+def nombre_mes_corte(proy: dict, ventana: tuple) -> str:
+    """«Jun 26» de un período cortado a fin de mes."""
+    from datetime import timedelta
+    from core.curva_s import _MESES_ABR
+    f = fecha_dia1(proy) + timedelta(days=ventana[0] - 1)
+    return f"{_MESES_ABR[f.month - 1]} {f.year % 100:02d}"
+
+
 def get_cronograma_map(conn, pid: int) -> dict:
     """Devuelve {partida_id: {duracion, inicio_dia, predecesoras, es_hito, segmentos}}."""
     rows = conn.execute(

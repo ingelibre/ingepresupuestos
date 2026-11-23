@@ -471,15 +471,6 @@ _BTN_PRIMARY_SS_FALLBACK = (
 class _EditarRecursoDialog(QDialog):
     """Diálogo para editar Descripción, Unidad y Tipo de un recurso del catálogo."""
 
-    _UNIDADES = sorted({
-        "m","m²","m³","ml","km","cm","mm",
-        "kg","tn","ton","lb",
-        "und","glb","pza","pzas","jgo","cjt","vj","est",
-        "hh","hm","h","hr","día","mes","sem",
-        "lt","l","gal","bls","bol",
-        "pie²","pie³","p2","p3","ha","pto","rll",
-    })
-
     def __init__(self, recurso: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Editar insumo"))
@@ -502,18 +493,8 @@ class _EditarRecursoDialog(QDialog):
         # Unidad con autocompletado
         self._inp_und = QLineEdit(recurso.get('unidad', ''))
         self._inp_und.setMinimumHeight(32)
-        from PySide6.QtWidgets import QCompleter
-        comp = QCompleter(self._UNIDADES, self._inp_und)
-        comp.setCaseSensitivity(Qt.CaseInsensitive)
-        comp.setFilterMode(Qt.MatchContains)
-        comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        comp.popup().setStyleSheet(
-            "QListView { background:white; border:1px solid #D4D4D4;"
-            " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
-            "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
-        )
-        self._inp_und.setCompleter(comp)
+        from views.unidades_dialog import poner_lista
+        poner_lista(self._inp_und)
         form.addRow(tr("Unidad:"), self._inp_und)
 
         # Tipo
@@ -3778,7 +3759,7 @@ class ProyectoView(QWidget):
         all_subs=True usa el CD global del proyecto (todos los subpresupuestos)."""
         # El cálculo es `core.pie.calcular_pie`, el mismo del PDF y el Excel
         # (issue #3: estaba copiado cinco veces y ninguna redondeaba).
-        from core.pie import calcular_pie
+        from core.pie import calcular_pie, nombre_total
         cd = self._total_proyecto(all_subs=all_subs)
         conn = get_db()
         lineas, total = calcular_pie(conn, self.pid, cd)
@@ -3789,10 +3770,11 @@ class ProyectoView(QWidget):
         filas = [(tr("COSTO DIRECTO"), _rn(cd, get_decimales_ppto()), SLATE_700, True)]
         for l in lineas or []:
             if l['tipo'] == 'subtotal':
-                filas.append((l['nombre'], l['valor'], SLATE_700, True))
+                filas.append((l['nombre'], l['valor'],
+                              BLUE_500 if l['destacado'] else SLATE_700, True))
             else:
                 filas.append((l['nombre'], l['valor'], SLATE_500, False))
-        filas.append((tr("PRESUPUESTO TOTAL"), total, BLUE_500, True))
+        filas.append((nombre_total(self.pid, tr("PRESUPUESTO TOTAL")), total, BLUE_500, True))
         return filas, total
 
     def _build_resumen_card(self, title=N_("RESUMEN DE COSTOS"), all_subs: bool = False):
@@ -4646,6 +4628,24 @@ class ProyectoView(QWidget):
 
         # Lista drag & drop
         self._pl_data = [dict(r) for r in rubros]
+        # Montos fijos (líneas «Con detalle» en modo monto manual): se ven y
+        # se editan aquí mismo (issue #34).
+        conn = get_db()
+        fijos = {r['rubro']: r['precio'] or 0 for r in conn.execute(
+            "SELECT rubro, precio FROM gastos_generales"
+            " WHERE proyecto_id=? AND tipo='manual'", (self.pid,))}
+        conn.close()
+
+        def _guardar_fijo(cod, texto):
+            val = parse_num_opt(texto)
+            if val is None or val == fijos.get(cod):
+                return
+            fijos[cod] = val
+            conn = get_db()
+            conn.execute("UPDATE gastos_generales SET precio=? WHERE proyecto_id=?"
+                         " AND rubro=? AND tipo='manual'", (val, self.pid, cod))
+            conn.commit(); conn.close()
+            QTimer.singleShot(0, self._render_pie)
 
         list_w = _RubDragList()
         list_w.setFrameShape(QFrame.NoFrame)
@@ -4668,11 +4668,13 @@ class ProyectoView(QWidget):
             for i, r in enumerate(self._pl_data):
                 conn.execute(
                     "INSERT INTO pie_rubros"
-                    " (proyecto_id, codigo, nombre, pct, activo, orden, tipo, mostrar_pct)"
-                    " VALUES (?,?,?,?,?,?,?,?)",
+                    " (proyecto_id, codigo, nombre, pct, activo, orden, tipo,"
+                    "  mostrar_pct, destacado)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
                     (self.pid, r['codigo'], r['nombre'],
                      r.get('pct') or 0, 1 if r['activo'] else 0,
-                     i, r['tipo'], r.get('mostrar_pct', 1))
+                     i, r['tipo'], r.get('mostrar_pct', 1),
+                     r.get('destacado') or 0)
                 )
             conn.commit(); conn.close()
             self._render_pie()
@@ -4720,7 +4722,8 @@ class ProyectoView(QWidget):
             list_w.clear()
             for i, rub in enumerate(self._pl_data):
                 tipo  = rub['tipo']
-                badge = TIPO_BADGE.get(tipo, tipo)
+                es_fijo = tipo == 'rubro' and rub['codigo'] in fijos
+                badge = tr("Monto fijo") if es_fijo else TIPO_BADGE.get(tipo, tipo)
                 has_pct = tipo in ('pct_cd', 'pct_sub', 'pct_util')
 
                 # Widget de fila
@@ -4812,6 +4815,36 @@ class ProyectoView(QWidget):
                     lbl_p = QLabel("%")
                     lbl_p.setStyleSheet(f"color:{SLATE_100}; font-size:10px; border:none;")
                     row_hl.addWidget(lbl_p)
+                elif es_fijo:
+                    inp_f = _StyledLineEdit(
+                        f"{fijos[rub['codigo']]:,.{get_decimales_ppto()}f}")
+                    inp_f.setFixedWidth(88)
+                    inp_f.setAlignment(Qt.AlignRight)
+                    inp_f.setToolTip(tr("Monto fijo de la línea"))
+                    inp_f.setStyleSheet(
+                        f"border:none; border-bottom:1px solid {SILVER_300};"
+                        f" border-radius:0; padding:1px 2px; font-size:11px;"
+                        f" color:{SLATE_500}; background:transparent;"
+                    )
+                    inp_f.editingFinished.connect(
+                        lambda c=rub['codigo'], w=inp_f: _guardar_fijo(c, w.text()))
+                    row_hl.addWidget(inp_f)
+                elif tipo == 'subtotal':
+                    b_dest = QPushButton("★" if rub.get('destacado') else "☆")
+                    b_dest.setFixedSize(58, 20)
+                    b_dest.setCursor(Qt.PointingHandCursor)
+                    b_dest.setToolTip(tr("Destacar como total en la vista y los reportes"))
+                    b_dest.setStyleSheet(
+                        f"QPushButton {{ border:none; background:transparent; padding:0;"
+                        f" min-height:0; font-size:14px;"
+                        f" color:{BLUE_500 if rub.get('destacado') else SLATE_300}; }}")
+
+                    def _destacar(_=False, idx=i):
+                        _save_field(idx, 'destacado',
+                                    0 if self._pl_data[idx].get('destacado') else 1)
+                        QTimer.singleShot(0, self._render_pie)
+                    b_dest.clicked.connect(_destacar)
+                    row_hl.addWidget(b_dest)
                 else:
                     sp = QWidget(); sp.setFixedWidth(58)
                     row_hl.addWidget(sp)
@@ -4861,7 +4894,7 @@ class ProyectoView(QWidget):
         _ITEM_H  = 37
         _LIST_H  = max(_ITEM_H, list_w.count() * _ITEM_H)
         _HDR_H   = 32
-        _FOOT_H  = 68
+        _FOOT_H  = 102
         list_w.setFixedHeight(_LIST_H)
 
         vl.addWidget(list_w)
@@ -4876,6 +4909,37 @@ class ProyectoView(QWidget):
         f_vl = QVBoxLayout(footer)
         f_vl.setContentsMargins(10, 6, 10, 8)
         f_vl.setSpacing(4)
+
+        # Nombre del total final («Costo de inversión»), por proyecto.
+        conn = get_db()
+        _tn = conn.execute("SELECT total_nombre FROM proyectos WHERE id=?",
+                           (self.pid,)).fetchone()
+        conn.close()
+        tot_hl = QHBoxLayout()
+        tot_hl.setContentsMargins(0, 0, 0, 0)
+        lbl_tn = QLabel(tr("Nombre del total final:"))
+        lbl_tn.setStyleSheet(f"color:{SLATE_300}; font-size:10px; border:none;")
+        tot_hl.addWidget(lbl_tn)
+        self.inp_total_nombre = _StyledLineEdit((_tn['total_nombre'] if _tn else '') or '')
+        self.inp_total_nombre.setPlaceholderText(tr("PRESUPUESTO TOTAL"))
+        self.inp_total_nombre.setStyleSheet(
+            f"border:none; border-bottom:1px solid {SILVER_300}; border-radius:0;"
+            f" padding:1px 2px; font-size:11px; color:{SLATE_700}; background:transparent;")
+
+        def _guardar_total_nombre(previo=self.inp_total_nombre.text(),
+                                  w=self.inp_total_nombre):
+            nuevo = w.text().strip()
+            if nuevo == previo.strip():
+                return
+            conn = get_db()
+            conn.execute("UPDATE proyectos SET total_nombre=? WHERE id=?",
+                         (nuevo, self.pid))
+            conn.commit(); conn.close()
+            QTimer.singleShot(0, self._render_pie)
+        self.inp_total_nombre.editingFinished.connect(_guardar_total_nombre)
+        tot_hl.addWidget(self.inp_total_nombre, stretch=1)
+        f_vl.addLayout(tot_hl)
+
         lbl_add = QLabel(tr("Agregar línea:"))
         lbl_add.setStyleSheet(f"color:{SLATE_300}; font-size:10px; border:none;")
         f_vl.addWidget(lbl_add)
@@ -4887,11 +4951,22 @@ class ProyectoView(QWidget):
         def _agregar(tipo):
             # La línea nueva va DEBAJO de la seleccionada, como «insertar
             # partida»; sin selección, al final (David Ramos, 16 sep 2026).
+            fijo = tipo == 'fijo'
+            if fijo:
+                tipo = 'rubro'
             mp = 0 if tipo == 'rubro' else 1
             fila = list_w.currentRow()
             pos = fila + 1 if 0 <= fila < len(self._pl_data) else len(self._pl_data)
+            codigo = self._codigo_linea_pie_nuevo()
+            if fijo:
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO gastos_generales (proyecto_id, rubro, tipo,"
+                    " descripcion, precio, orden) VALUES (?,?,'manual','__manual__',0,0)",
+                    (self.pid, codigo))
+                conn.commit(); conn.close()
             self._pl_data.insert(pos, {
-                'id': 0, 'codigo': self._codigo_linea_pie_nuevo(),
+                'id': 0, 'codigo': codigo,
                 'nombre': 'Nueva línea', 'pct': 0.0, 'activo': 1,
                 'orden': pos, 'tipo': tipo, 'mostrar_pct': mp,
             })
@@ -4900,6 +4975,7 @@ class ProyectoView(QWidget):
 
         for lbl_t, tipo in [
             (tr("Con detalle"), "rubro"),
+            (tr("Monto fijo"),  "fijo"),
             (tr("% CD"),        "pct_cd"),
             (tr("% Sub Tot."),  "pct_sub"),
             (tr("% Utilidad"),  "pct_util"),
@@ -5358,6 +5434,10 @@ class ProyectoView(QWidget):
             "JOIN partidas p ON p.id=md.partida_id WHERE p.proyecto_id=?",
             (self.pid,)
         ).fetchall()}
+        con_acu = {r[0] for r in conn.execute(
+            "SELECT DISTINCT a.partida_id FROM acu_items a "
+            "JOIN partidas p ON p.id=a.partida_id WHERE p.proyecto_id=?",
+            (self.pid,))}
         conn.close()
 
         self.tree.blockSignals(True)
@@ -5442,6 +5522,7 @@ class ProyectoView(QWidget):
                 tw.setText(3, f"{met:,.{get_decimales_metrado()}f}")
                 tw.setData(3, Qt.UserRole, tiene_planilla)   # ✓ en Metrado = planilla
                 tw.setText(4, f"{pu:,.{dec}f}")
+                self._marcar_precio(tw, pu, row['id'] in con_acu)
                 parcial = parcial_wysiwyg(met, pu, dec)
                 tw.setText(5, fmt_num(parcial, self._moneda, dec))
                 tw.setData(5, Qt.UserRole, float(parcial))  # valor numérico para totales de títulos
@@ -8418,6 +8499,16 @@ class ProyectoView(QWidget):
         if self.tabs.currentIndex() == 1:
             self.cargar_insumos(self._ins_estado)
 
+    def _marcar_precio(self, tw, pu, tiene_acu: bool):
+        """P.U. en rojo discreto (y el motivo en el tooltip) si la partida tiene
+        el precio de relleno 1.00, no tiene precio o no tiene ACU (issue #53)."""
+        from core.database import motivo_revision
+        from utils.theme import RED_500
+        from views.aviso_partidas_dialog import motivo_texto
+        motivo = motivo_revision(pu, tiene_acu)
+        tw.setForeground(4, QBrush(QColor(RED_500 if motivo else SLATE_700)))
+        tw.setToolTip(4, motivo_texto(motivo) if motivo else '')
+
     def _actualizar_arbol_partida(self, part_id: int):
         """Actualiza P.U. y Parcial del ítem en el árbol después de un cambio en ACU."""
         if part_id not in self._id_to_item:
@@ -8434,6 +8525,8 @@ class ProyectoView(QWidget):
         p = conn.execute(
             "SELECT metrado, precio_unitario FROM partidas WHERE id=?", (part_id,)
         ).fetchone()
+        tiene_acu = conn.execute("SELECT 1 FROM acu_items WHERE partida_id=? LIMIT 1",
+                                 (part_id,)).fetchone() is not None
         conn.close()
         if not p:
             return
@@ -8443,6 +8536,7 @@ class ProyectoView(QWidget):
         dec     = get_decimales_ppto()
         parcial = parcial_wysiwyg(met, pu, dec)
         tw.setText(4, f"{pu:,.{dec}f}")
+        self._marcar_precio(tw, pu, tiene_acu)
         tw.setText(5, fmt(parcial, self._moneda, dec))
         tw.setData(5, Qt.UserRole, float(parcial))
         # Recalcular totales de los títulos padres
@@ -10512,6 +10606,10 @@ class ProyectoView(QWidget):
             if dlg.exec() != QDialog.Accepted or lw.currentRow() < 0:
                 return
             clave, nombre, generador = opciones[lw.currentRow()]
+
+        from views.aviso_partidas_dialog import confirmar_salida
+        if not confirmar_salida(self, self.pid, clave):
+            return
 
         # Ventanita de progreso: se genera en este hilo y el Completo o un
         # cronograma tardan; sin esto parecía colgado.
@@ -12938,6 +13036,10 @@ class _DialogAmpliarSeccion(QDialog):
         return self._texto_resultado
 
 
+# Consultas de IA que siguen en vuelo tras cerrar su diálogo.
+_HILOS_HUERFANOS: set = set()
+
+
 class _WorkerSugerirPartidas(QThread):
     """Sugiere partidas con IA en segundo plano. Incluye TODO el RAG: cargar el
     modelo de embeddings la 1ª vez (~6 s), recuperación y la llamada al LLM. Va
@@ -12948,11 +13050,12 @@ class _WorkerSugerirPartidas(QThread):
     def __init__(self, proyecto_id: int):
         super().__init__()
         self.proyecto_id = proyecto_id
+        self.avisos: list[str] = []
 
     def run(self):
         try:
             from core.ai_specs import sugerir_partidas_ia
-            ps, err = sugerir_partidas_ia(self.proyecto_id)
+            ps, err = sugerir_partidas_ia(self.proyecto_id, self.avisos)
             self.terminado.emit(ps, err or '')
         except Exception as e:
             self.terminado.emit(None, tr("Error inesperado: {e}").format(e=e))
@@ -13100,6 +13203,10 @@ class _DialogSugerirPartidas(QDialog):
         from PySide6.QtWidgets import QMessageBox
         self.btn_ia.setEnabled(True)
         self.btn_ia.setText(tr("🌐  Sugerir con IA"))
+        if err and not err.startswith("Error IA:"):
+            # La conexión funcionó: mandar a revisar la clave despistaría (#50).
+            QMessageBox.warning(self, tr("Sugerir con IA"), err)
+            return
         if err:
             QMessageBox.warning(self, tr("Sugerir con IA"),
                 tr("No se pudo obtener la sugerencia:\n\n{err}\n\nRevisa Configuración → Inteligencia artificial: elige un proveedor (Groq, Gemini y OpenRouter son gratuitos), pega tu clave y pulsa «Probar conexión». O usa una plantilla local mientras tanto.").format(err=err))
@@ -13111,13 +13218,24 @@ class _DialogSugerirPartidas(QDialog):
                 "intentarlo."))
             return
         self._poblar(ps)
+        avisos = getattr(self._worker_sug, 'avisos', None)
+        if avisos:
+            QMessageBox.information(self, tr("Sugerir con IA"), "\n".join(avisos))
 
     def done(self, r):
-        # QDialog + QThread: esperar al worker en vuelo antes de cerrar para no
-        # destruir el hilo con la tarea corriendo (CLAUDE.md). No usar closeEvent.
+        # QDialog + QThread: no destruir el hilo con la tarea corriendo
+        # (CLAUDE.md). Una consulta puede durar minutos (tandas, modelos que
+        # razonan): se espera un momento y, si sigue, se suelta el diálogo y el
+        # hilo termina solo. No usar closeEvent.
         w = getattr(self, '_worker_sug', None)
         if w and w.isRunning():
-            w.wait(15000)
+            try:
+                w.terminado.disconnect(self._on_ia_terminado)
+            except (RuntimeError, TypeError):
+                pass
+            if not w.wait(500):
+                _HILOS_HUERFANOS.add(w)
+                w.finished.connect(lambda w=w: _HILOS_HUERFANOS.discard(w))
         super().done(r)
 
     def _cargar_plantilla(self, idx: int):

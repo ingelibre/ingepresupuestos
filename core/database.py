@@ -736,6 +736,16 @@ def init_db():
         # Color «post-it» de la card del dashboard (hex). Vacío = hereda el
         # color de su portafolio; ver utils.theme.color_postit.
         ('proy_color',    "ALTER TABLE proyectos ADD COLUMN color TEXT DEFAULT ''"),
+        # Pie: separador destacado como total y nombre del total final (issue #34).
+        ('pie_destacado', "ALTER TABLE pie_rubros ADD COLUMN destacado INTEGER DEFAULT 0"),
+        ('total_nombre',  "ALTER TABLE proyectos ADD COLUMN total_nombre TEXT DEFAULT ''"),
+        # Gantt: títulos contraídos en pantalla, ids separados por comas (#33).
+        ('gantt_plegado', "ALTER TABLE proyectos ADD COLUMN gantt_plegado TEXT DEFAULT ''"),
+        # Hash del código de recuperación de la cuenta (issue #32).
+        ('usr_recuperacion', "ALTER TABLE usuarios ADD COLUMN recuperacion_hash TEXT DEFAULT ''"),
+        # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,
+        # 'cal' = fin de mes calendario (issue #52).
+        ('corte_mes',     "ALTER TABLE proyectos ADD COLUMN corte_mes TEXT DEFAULT ''"),
         # Art. 4: varias fórmulas polinómicas por obra.
         ('fm_formula_id',  "ALTER TABLE formula_monomios ADD COLUMN formula_id INTEGER"),
         ('fmiu_formula_id',"ALTER TABLE formula_monomio_iu ADD COLUMN formula_id INTEGER"),
@@ -1373,6 +1383,33 @@ def partidas_pu_inconsistente(conn, pid: int) -> list[dict]:
                         'descripcion': meta[part_id]['descripcion'] or '',
                         'pu_guardado': float(guardado), 'pu_acu': cu})
     out.sort(key=lambda d: [int(s) if s.isdigit() else 0 for s in d['item'].split('.')])
+    return out
+
+
+def motivo_revision(pu, tiene_acu: bool) -> str | None:
+    """Por qué conviene revisar el precio de una partida (issue #53):
+    'precio_1' (relleno 1.00 del banco), 'sin_precio', 'sin_acu' o None."""
+    p = round(float(pu or 0), 2)
+    if p == 1.0:
+        return 'precio_1'
+    if p == 0:
+        return 'sin_precio'
+    return None if tiene_acu else 'sin_acu'
+
+
+def partidas_por_revisar(conn, pid: int) -> list[dict]:
+    """Partidas (no títulos) del proyecto con precio 1.00, sin precio o sin ACU."""
+    rows = conn.execute(
+        """SELECT p.id, p.item, p.descripcion, p.precio_unitario,
+                  EXISTS(SELECT 1 FROM acu_items a WHERE a.partida_id=p.id) AS acu
+           FROM partidas p WHERE p.proyecto_id=? AND COALESCE(p.es_titulo,0)=0
+           ORDER BY COALESCE(p.sub_presupuesto_id,0), p.item""", (pid,)).fetchall()
+    out = []
+    for r in rows:
+        m = motivo_revision(r['precio_unitario'], bool(r['acu']))
+        if m:
+            out.append({'partida_id': r['id'], 'item': r['item'] or '',
+                        'descripcion': r['descripcion'] or '', 'motivo': m})
     return out
 
 

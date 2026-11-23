@@ -10,6 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from core.config import DB_PATH, SESSION_FILE
 from models.usuario import Usuario
+from utils.i18n import N_
 
 
 _usuario_actual: Usuario | None = None
@@ -206,6 +207,75 @@ def cambiar_password(user_id: int, password: str) -> tuple[bool, str]:
         return True, "Contraseña actualizada"
     except sqlite3.Error as e:
         return False, f"Error: {e}"
+
+
+# ── Código de recuperación (issue #32) ───────────────────────────────────────
+# Se muestra una sola vez; en la base queda solo su hash, como la contraseña.
+# Cada uso lo gasta y entrega otro. Sin letras ni cifras que se confundan.
+_ALFABETO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+MSG_CODIGO_INVALIDO = N_("El usuario o el código de recuperación no es correcto.")
+MSG_PASS_CORTA = N_("La contraseña debe tener al menos 6 caracteres")
+
+
+def _normalizar_codigo(codigo: str) -> str:
+    return ''.join(c for c in (codigo or '').upper() if c in _ALFABETO)
+
+
+def _nuevo_codigo(conn, user_id: int) -> str:
+    import secrets
+    crudo = ''.join(secrets.choice(_ALFABETO) for _ in range(16))
+    conn.execute("UPDATE usuarios SET recuperacion_hash=? WHERE id=?",
+                 (generate_password_hash(crudo), user_id))
+    return '-'.join(crudo[i:i + 4] for i in range(0, 16, 4))
+
+
+def crear_codigo_recuperacion(user_id: int) -> str:
+    """Genera (o reemplaza) el código de una cuenta y lo devuelve en claro."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        codigo = _nuevo_codigo(conn, user_id)
+        conn.commit()
+        return codigo
+    finally:
+        conn.close()
+
+
+def tiene_codigo_recuperacion(user_id: int) -> bool:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT recuperacion_hash FROM usuarios WHERE id=?",
+                           (user_id,)).fetchone()
+        conn.close()
+        return bool(row and row[0])
+    except sqlite3.Error:
+        return False
+
+
+def restablecer_con_codigo(username: str, codigo: str,
+                           password: str) -> tuple[bool, str, str]:
+    """(ok, mensaje, código nuevo). El mensaje de error no dice si lo que
+    falla es el usuario o el código."""
+    if len(password) < 6:
+        return False, MSG_PASS_CORTA, ''
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM usuarios WHERE (username=? OR email=?) AND activo=1",
+                (username, username)).fetchone() if username else None
+            h = (row['recuperacion_hash'] or '') if row else ''
+            if not h or not check_password_hash(h, _normalizar_codigo(codigo)):
+                return False, MSG_CODIGO_INVALIDO, ''
+            conn.execute("UPDATE usuarios SET password_hash=? WHERE id=?",
+                         (generate_password_hash(password), row['id']))
+            nuevo = _nuevo_codigo(conn, row['id'])
+            conn.commit()
+            return True, "Contraseña actualizada", nuevo
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        return False, f"Error: {e}", ''
 
 
 def toggle_activo(user_id: int) -> tuple[bool, str]:

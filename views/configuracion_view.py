@@ -1048,6 +1048,16 @@ class ConfiguracionView(QWidget):
         self.spin_dec_met.valueChanged.connect(self._actualizar_ejemplo)
         self._actualizar_ejemplo()
 
+        from PySide6.QtWidgets import QCheckBox
+        from views.aviso_partidas_dialog import CLAVE, aviso_activo
+        self.chk_aviso_precios = QCheckBox(
+            tr("Avisar antes de imprimir o exportar si hay partidas con precio "
+               "1.00 o sin precio"))
+        self.chk_aviso_precios.setChecked(aviso_activo())
+        self.chk_aviso_precios.toggled.connect(
+            lambda on: set_config(CLAVE, '1' if on else '0'))
+        vl.addWidget(self.chk_aviso_precios)
+
         hl = QHBoxLayout()
         hl.addStretch()
         btn = QPushButton(tr("Guardar"))
@@ -1417,6 +1427,16 @@ class ConfiguracionView(QWidget):
         self._btn_password.clicked.connect(self._usr_cambiar_pass)
         hl_acc.addWidget(self._btn_password)
 
+        self._btn_codigo = QPushButton(tr("Código de recuperación"))
+        self._btn_codigo.setFixedHeight(32)
+        self._btn_codigo.setCursor(Qt.PointingHandCursor)
+        self._btn_codigo.setStyleSheet(_BTN_SS)
+        self._btn_codigo.setToolTip(tr(
+            "Crear un código nuevo para esta cuenta: sirve para poner otra "
+            "contraseña si se olvida. El anterior deja de valer."))
+        self._btn_codigo.clicked.connect(self._usr_codigo)
+        hl_acc.addWidget(self._btn_codigo)
+
         self._btn_toggle = QPushButton(tr("Activar/Desactivar"))
         self._btn_toggle.setFixedHeight(32)
         self._btn_toggle.setCursor(Qt.PointingHandCursor)
@@ -1469,6 +1489,7 @@ class ConfiguracionView(QWidget):
         es_self = uid == (u_actual.id if u_actual else -1)
         self._btn_editar.setEnabled(tiene)
         self._btn_password.setEnabled(tiene)
+        self._btn_codigo.setEnabled(tiene)
         self._btn_toggle.setEnabled(tiene and not es_self)
         self._btn_eliminar.setEnabled(tiene and not es_self)
 
@@ -1494,6 +1515,13 @@ class ConfiguracionView(QWidget):
             )
             if ok:
                 self._usr_cargar_tabla()
+                nuevo = next((u for u in listar_usuarios()
+                              if u.username == d['username']), None)
+                if nuevo:
+                    from utils.auth import crear_codigo_recuperacion
+                    from views.recuperar_dialog import CodigoRecuperacionDialog
+                    CodigoRecuperacionDialog(
+                        crear_codigo_recuperacion(nuevo.id), self).exec()
 
     def _usr_editar(self):
         uid = self._usr_id_seleccionado()
@@ -1527,6 +1555,20 @@ class ConfiguracionView(QWidget):
                 f"color:{'#68B723' if ok else '#C6262E'}; font-size:11px;"
                 f" background:transparent; border:none;"
             )
+
+    def _usr_codigo(self):
+        uid = self._usr_id_seleccionado()
+        if not uid:
+            return
+        from utils.auth import crear_codigo_recuperacion, tiene_codigo_recuperacion
+        from views.recuperar_dialog import CodigoRecuperacionDialog
+        if tiene_codigo_recuperacion(uid) and QMessageBox.question(
+                self, tr("Código de recuperación"),
+                tr("Esta cuenta ya tiene un código. ¿Crear otro? El anterior "
+                   "dejará de valer."),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        CodigoRecuperacionDialog(crear_codigo_recuperacion(uid), self).exec()
 
     def _usr_toggle(self):
         uid = self._usr_id_seleccionado()

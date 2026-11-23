@@ -35,6 +35,9 @@ PAISES: dict[str, dict] = {
     'CO': dict(nombre='Colombia',             moneda='Pesos Colombianos', id='NIT',  imp=('IVA', 19.0),   centro=(4.7110, -74.0721)),
     'EC': dict(nombre='Ecuador',              moneda='Dólares',           id='RUC',  imp=('IVA', 15.0),   centro=(-0.1807, -78.4678)),
     'BO': dict(nombre='Bolivia',              moneda='Bolivianos',        id='NIT',  imp=('IVA', 13.0),   centro=(-16.4897, -68.1193)),
+    # Brasil (issue #21): no hay un impuesto único de obra (ISS, PIS y COFINS van
+    # dentro del BDI), así que la línea de impuesto queda en 0 % y editable.
+    'BR': dict(nombre='Brasil',               moneda='Reales',            id='CNPJ', imp=('Impostos', 0.0), centro=(-15.7939, -47.8828)),
     'CL': dict(nombre='Chile',                moneda='Pesos Chilenos',    id='RUT',  imp=('IVA', 19.0),   centro=(-33.4489, -70.6693)),
     'AR': dict(nombre='Argentina',            moneda='Pesos Argentinos',  id='CUIT', imp=('IVA', 21.0),   centro=(-34.6037, -58.3816)),
     'MX': dict(nombre='México',               moneda='Pesos Mexicanos',   id='RFC',  imp=('IVA', 16.0),   centro=(19.4326, -99.1332)),
@@ -112,6 +115,12 @@ def impuesto() -> tuple[str, float]:
     except ValueError:
         pct = p['imp'][1]
     return nombre, pct
+
+
+def indirectos_defecto() -> tuple[float, float]:
+    """(gastos generales %, utilidad %) de un proyecto nuevo hasta que se abra
+    su pie. En Brasil 0: los pone el BDI de cada obra."""
+    return (0.0, 0.0) if pais_actual() == 'BR' else (10.0, 5.0)
 
 
 def centro_mapa() -> tuple[float, float]:

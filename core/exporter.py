@@ -2322,7 +2322,8 @@ def _hoja_gastos_generales(wb, proyecto_id):
     # Total final → solo línea superior (sin cuadro), espejo del PDF
     r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N - 1)
-    ws.cell(r, 1, 'COSTO TOTAL DE OBRA').font = Font(name='Inter',bold=True, size=11)
+    from core.pie import nombre_total
+    ws.cell(r, 1, nombre_total(proyecto, 'COSTO TOTAL DE OBRA')).font = Font(name='Inter',bold=True, size=11)
     ws.cell(r, 1).alignment = Alignment(horizontal='right')
     ws.cell(r, N, total_final).number_format = '[$-0409]#,##0.00'
     ws.cell(r, N).font = Font(name='Inter',bold=True, size=11)
@@ -2604,11 +2605,14 @@ def exportar_reporte_completo(proyecto_id):
             ws_p.cell(r, c).border = _borde_total()
         r += 1
 
+    from core.pie import nombre_total
     if rubros_pie is not None:
         _fila_p('COSTO DIRECTO', totales['cd'])
         for rub in rubros_pie:
             is_b = rub['tipo'] == 'subtotal' or rub['nombre'].upper().startswith('TOTAL')
             _fila_p(rub['nombre'].upper(), rub['valor'], bold=is_b)
+        if nombre_total(proyecto, ''):      # con nombre propio, también aquí
+            _fila_p(nombre_total(proyecto), total_final)
     else:
         for lb, v in [
             ('COSTO DIRECTO', totales['cd']),
@@ -2616,7 +2620,7 @@ def exportar_reporte_completo(proyecto_id):
             (f"UTILIDAD ({proyecto['utilidad_pct']}%)", totales['utilidad']),
             ('SUB TOTAL', totales['subtotal']),
             (f"IGV ({proyecto['igv_pct']}%)", totales['igv']),
-            ('PRESUPUESTO TOTAL', totales['total']),
+            (nombre_total(proyecto), totales['total']),
         ]:
             _fila_p(lb, v)
 
@@ -3056,10 +3060,13 @@ def exportar_pdf(proyecto_id):
     story.append(Spacer(1, 0.1*cm))
     col_t2 = [sum(col_p[:-1]), col_p[-1]]
 
+    from core.pie import nombre_total
     if rubros_pie is not None:
         tot_rows = [['COSTO DIRECTO', _fmt(totales['cd'])]]
         for rub in rubros_pie:
             tot_rows.append([rub['nombre'].upper(), _fmt(rub['valor'])])
+        if nombre_total(proyecto, ''):
+            tot_rows.append([nombre_total(proyecto), _fmt(total_final)])
     else:
         tot_rows = [
             ['COSTO DIRECTO',                             _fmt(totales['cd'])],
@@ -3067,7 +3074,7 @@ def exportar_pdf(proyecto_id):
             [f"UTILIDAD ({proyecto['utilidad_pct']}%)",   _fmt(totales['utilidad'])],
             ['SUB TOTAL',                                 _fmt(totales['subtotal'])],
             [f"IGV ({proyecto['igv_pct']}%)",             _fmt(totales['igv'])],
-            ['PRESUPUESTO TOTAL',                         _fmt(totales['total'])],
+            [nombre_total(proyecto),                      _fmt(totales['total'])],
         ]
 
     t_tot = Table(tot_rows, colWidths=col_t2)
@@ -3524,12 +3531,12 @@ def exportar_pdf(proyecto_id):
         for rub in rubros_pie:
             if rub['tipo'] == 'subtotal':
                 res_gg.append([rub['nombre'].upper(), _fmt(rub['valor'])])
-        res_gg.append(['MONTO TOTAL PRESUPUESTO', _fmt(monto_final)])
+        res_gg.append([nombre_total(proyecto, 'MONTO TOTAL PRESUPUESTO'), _fmt(monto_final)])
     else:
         res_gg = [
             ['TOTAL COSTO DIRECTO',       _fmt(totales['cd'])],
             ['TOTAL COSTOS INDIRECTOS',   _fmt(totales['total'] - totales['cd'])],
-            ['MONTO TOTAL PRESUPUESTO',   _fmt(totales['total'])],
+            [nombre_total(proyecto, 'MONTO TOTAL PRESUPUESTO'), _fmt(totales['total'])],
         ]
     t_res = Table(res_gg, colWidths=col_gg2)
     ts_res = TableStyle([

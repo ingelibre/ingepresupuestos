@@ -34,7 +34,8 @@ from core.database import (
     _clave_insumo, get_acu_hojas,
 )
 from core.cronograma import (
-    cpm, get_cronograma_map, distribuir_periodos,
+    cpm, get_cronograma_map, distribuir_ventanas, ventanas_periodos,
+    corte_fin_de_mes, nombre_mes_corte,
     auto_programar, auto_programar_local, auto_programar_ia,
     calcular_duraciones_desde_metrado, cargar_feriados_ia,
 )
@@ -316,6 +317,23 @@ class CronogramaView(QWidget):
         (ver `core.cronograma.dias_no_laborables`)."""
         from core.cronograma import dias_no_laborables
         return dias_no_laborables(self._proy, n_dias)
+
+    def corte_mes(self) -> str:
+        """Corte de los meses del proyecto, leído de la base: esta vista puede
+        ser la oculta del Centro de reportes y el cambio hacerse en la otra."""
+        conn = get_db()
+        row = conn.execute("SELECT corte_mes FROM proyectos WHERE id=?",
+                           (self.pid,)).fetchone()
+        conn.close()
+        self._proy['corte_mes'] = (row['corte_mes'] if row else '') or ''
+        return self._proy['corte_mes']
+
+    def set_corte_mes(self, corte: str):
+        conn = get_db()
+        conn.execute("UPDATE proyectos SET corte_mes=? WHERE id=?", (corte, self.pid))
+        conn.commit()
+        conn.close()
+        self._proy['corte_mes'] = corte
 
     def fecha_dia1(self) -> datetime:
         """Día 1 del proyecto (ver `core.cronograma.fecha_dia1`)."""
@@ -1774,6 +1792,15 @@ class GanttWidget(QWidget):
         btn_fer.clicked.connect(self._abrir_feriados)
         tb_hl.addWidget(btn_fer)
 
+        self._btn_niveles = QPushButton(tr("Niveles") + " ▾")
+        self._btn_niveles.setCursor(Qt.PointingHandCursor)
+        set_tooltip(self._btn_niveles, tr(
+            "Contraer o expandir los títulos del Gantt. Solo cambia la vista: "
+            "ni las fechas ni los reportes."))
+        self._btn_niveles.setStyleSheet(btn_fer.styleSheet())
+        self._btn_niveles.clicked.connect(self._menu_niveles)
+        tb_hl.addWidget(self._btn_niveles)
+
         tb_hl.addSpacing(20)
         btn_pdf = QPushButton("📄 PDF")
         btn_pdf.setCursor(Qt.PointingHandCursor)
@@ -1940,6 +1967,7 @@ class GanttWidget(QWidget):
         self.tbl.setItemDelegateForColumn(1, self._item_delegate)
         self.tbl.setItemDelegateForColumn(2, self._desc_delegate)
         self.tbl.cellChanged.connect(self._on_cell_changed)
+        self.tbl.cellClicked.connect(self._on_cell_clicked)
         self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl.customContextMenuRequested.connect(self._on_table_ctx_menu)
         sp.addWidget(self.tbl)
@@ -2471,9 +2499,13 @@ class GanttWidget(QWidget):
         # arándano y el Gantt perdía la jerarquía que el árbol sí mostraba
         # (reporte de David Ramos, 5 sep 2026).
         zebra_i = 0
+        plegados = self._plegados()
+        ocultas = self._filas_ocultas(filas)
         for p in filas:
             r = self.tbl.rowCount()
             self.tbl.insertRow(r)
+            # Contraída: la fila sigue en la tabla (y con su #), solo no se ve.
+            self.tbl.setRowHidden(r, p['id'] in ocultas)
             es_titulo = p['es_titulo']
             virtual = p.get('_virtual')
             cd = cmap.get(p['id'], {})
@@ -2516,6 +2548,9 @@ class GanttWidget(QWidget):
 
             editable = not (es_titulo or virtual)
             desc_txt = p['descripcion'] or ''
+            if self._es_plegable(p):
+                # Solo en pantalla: contraer / expandir (issue #33).
+                desc_txt = ("▸ " if p['id'] in plegados else "▾ ") + desc_txt
             if virtual in ('inicio', 'fin'):
                 # Solo en pantalla: el PDF del Gantt sigue en el idioma del proyecto.
                 desc_txt = "◆ " + tr(desc_txt)
@@ -2584,6 +2619,76 @@ class GanttWidget(QWidget):
             self.tbl.item(r, 0).setData(Qt.UserRole + 1, es_titulo)
 
         self.tbl.blockSignals(False)
+
+    # ── Contraer / expandir títulos (issue #33) ───────────────────────────
+    # Solo la vista: `filas_con_hitos` (numeración #, PDF, MS Project) y el CPM
+    # no saben nada de esto.
+
+    @staticmethod
+    def _es_plegable(p) -> bool:
+        return bool(p['es_titulo']) and p.get('_virtual') != 'proyecto'
+
+    def _plegados(self) -> set:
+        pid = self._cv.pid
+        cache = getattr(self, '_plegados_cache', None)
+        if cache is None:
+            conn = get_db()
+            r = conn.execute("SELECT gantt_plegado FROM proyectos WHERE id=?",
+                             (pid,)).fetchone()
+            conn.close()
+            txt = (r['gantt_plegado'] if r else '') or ''
+            cache = {int(x) for x in txt.split(',') if x.lstrip('-').isdigit()}
+            self._plegados_cache = cache
+        return cache
+
+    def _set_plegados(self, ids: set):
+        self._plegados_cache = set(ids)
+        conn = get_db()
+        conn.execute("UPDATE proyectos SET gantt_plegado=? WHERE id=?",
+                     (','.join(str(i) for i in sorted(ids)), self._cv.pid))
+        conn.commit(); conn.close()
+        pos = self.tbl.verticalScrollBar().value()
+        self._llenar_tabla()
+        self._render_gantt()
+        self.tbl.verticalScrollBar().setValue(pos)
+
+    def _filas_ocultas(self, filas) -> set:
+        """Ids de las filas que quedan dentro de un título contraído."""
+        plegados = self._plegados()
+        ocultas, corte = set(), None
+        for p in filas if plegados else ():
+            nivel = (0 if p.get('_virtual') else p['nivel'] or 1)
+            if corte is not None and nivel > corte:
+                ocultas.add(p['id'])
+                continue
+            corte = (nivel if self._es_plegable(p) and p['id'] in plegados
+                     else None)
+        return ocultas
+
+    def _on_cell_clicked(self, row, col):
+        if col != 2:
+            return
+        pid = self.tbl.item(row, 0).data(Qt.UserRole)
+        p = next((f for f in self._cv.filas_con_hitos() if f['id'] == pid), None)
+        if p is not None and self._es_plegable(p):
+            self._set_plegados(self._plegados() ^ {pid})
+
+    def mostrar_hasta_nivel(self, nivel: int | None):
+        """Contrae todos los títulos de `nivel` para abajo; None = todo."""
+        self._set_plegados(set() if nivel is None else {
+            p['id'] for p in self._cv.filas_con_hitos()
+            if self._es_plegable(p) and not p.get('_virtual')
+            and (p['nivel'] or 1) >= nivel})
+
+    def _menu_niveles(self):
+        menu = QMenu(self)
+        menu.addAction(tr("Mostrar todo"), lambda: self.mostrar_hasta_nivel(None))
+        niveles = sorted({p['nivel'] or 1 for p in self._cv.filas_con_hitos()
+                          if self._es_plegable(p) and not p.get('_virtual')})
+        for n in niveles:
+            menu.addAction(tr("Hasta el nivel {n}").format(n=n),
+                           lambda n=n: self.mostrar_hasta_nivel(n))
+        menu.exec(self._btn_niveles.mapToGlobal(self._btn_niveles.rect().bottomLeft()))
 
     def _on_cell_changed(self, row, col):
         # Editables: 4=Días lab., 5=Inicio, 6=Fin, 7=Pred (col 3=Días cal. es derivada)
@@ -6276,6 +6381,10 @@ class GanttWidget(QWidget):
         if not hasattr(self._cv, '_partidas'):
             return
         partidas = self._cv.filas_con_hitos()   # [Inicio] + partidas + [Fin]
+        # Lo contraído no ocupa fila (igual que en la tabla); sus flechas no se
+        # dibujan porque no entra en `row_info`.
+        ocultas  = self._filas_ocultas(partidas)
+        partidas = [p for p in partidas if p['id'] not in ocultas]
         tasks    = self._cv._tasks
         cmap     = self._cv._cron_map
         plazo    = self._cv._proy.get('plazo') or 0
@@ -7199,7 +7308,54 @@ class _DescDesbordeDelegate(_BgFillDelegate):
         self._cuadricula(painter, option.rect)
 
 
-class ValorizadoWidget(QWidget):
+class _PeriodosMixin:
+    """Período de las pestañas Valorizado, Adquisiciones y Curva S: semanas,
+    meses de 30 días o meses que cortan a fin de mes calendario. Lo último es
+    una opción del PROYECTO (`proyectos.corte_mes`, issue #52): vale para las
+    tres pestañas y para sus reportes."""
+
+    def _preparar_combo_periodo(self, cmb):
+        self._ventanas = []
+        self._cmb_per = cmb
+        cmb.addItems([tr("Semanal"), tr("Mensual"), tr("Mensual (fin de mes)")])
+        cmb.setToolTip(tr(
+            "«Mensual» cuenta 30 días desde el inicio; «Mensual (fin de mes)» corta "
+            "el último día de cada mes, como las valorizaciones. Vale para todos los "
+            "cronogramas de este presupuesto y sus reportes."))
+        cmb.setCurrentIndex(1)  # espejo de _period_days=30
+        cmb.currentIndexChanged.connect(self._on_periodo)
+
+    def _on_periodo(self, idx: int):
+        self._period_days = 7 if idx == 0 else 30
+        if idx > 0:
+            self._cv.set_corte_mes('cal' if idx == 2 else '')
+        self.cargar()
+
+    def _cortar(self, n_dias: int) -> list:
+        """Ventanas del cronograma; deja el combo como está el proyecto."""
+        corte = self._cv.corte_mes()
+        idx = 0 if self._period_days == 7 else 2 if corte == 'cal' else 1
+        if self._cmb_per.currentIndex() != idx:
+            self._cmb_per.blockSignals(True)
+            self._cmb_per.setCurrentIndex(idx)
+            self._cmb_per.blockSignals(False)
+        self._ventanas = ventanas_periodos(self._cv._proy, n_dias, self._period_days)
+        return self._ventanas
+
+    def _ventana(self, i: int) -> tuple:
+        if 0 <= i < len(self._ventanas):
+            return self._ventanas[i]
+        return i * self._period_days + 1, (i + 1) * self._period_days
+
+    def _sufijo_mes(self, i: int, traducir: bool) -> str:
+        """Con corte a fin de mes «Mes 1» no dice qué mes es: se añade."""
+        if not corte_fin_de_mes(self._cv._proy, self._period_days):
+            return ''
+        mes, anio = nombre_mes_corte(self._cv._proy, self._ventana(i)).split()
+        return f"\n{tr(mes) if traducir else mes} {anio}"
+
+
+class ValorizadoWidget(_PeriodosMixin, QWidget):
     """Tabla con distribución valorizada por semanas/meses con totales,
     % por período, acumulados, %-distribución por partida y resaltado del
     período actual."""
@@ -7229,9 +7385,7 @@ class ValorizadoWidget(QWidget):
         tb_hl.addWidget(lbl)
 
         cmb = QComboBox()
-        cmb.addItems([tr("Semanal"), tr("Mensual")])
-        cmb.setCurrentIndex(1)  # default Mensual (espejo de _period_days=30)
-        cmb.currentIndexChanged.connect(self._on_periodo)
+        self._preparar_combo_periodo(cmb)
         cmb.setStyleSheet(
             "QComboBox { min-height:0; padding:2px 8px; font-size:11px;"
             f" border:1px solid {SILVER_300}; border-radius:4px; }}"
@@ -7447,10 +7601,6 @@ class ValorizadoWidget(QWidget):
         finally:
             dst.blockSignals(False)
 
-    def _on_periodo(self, idx: int):
-        self._period_days = 7 if idx == 0 else 30
-        self.cargar()
-
     def _on_toggle_fechas(self, checked: bool):
         self._show_fechas = bool(checked)
         self.cargar()
@@ -7560,14 +7710,13 @@ class ValorizadoWidget(QWidget):
         _t = tr if traducir else (lambda s: s)
         base = f"{_t(unidad)} {i + 1}"
         if not self._show_fechas:
-            return base
+            return base + self._sufijo_mes(i, traducir)
         f_ini = self._project_start()
         if f_ini is None:
             return base
         MESES = [_t(m) for m in ("Ene", "Feb", "Mar", "Abr", "May", "Jun",
                                  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")]
-        start_day = i * self._period_days + 1
-        end_day   = (i + 1) * self._period_days
+        start_day, end_day = self._ventana(i)
         d_ini = f_ini + timedelta(days=start_day - 1)
         d_fin = f_ini + timedelta(days=end_day - 1)
         if d_ini.month == d_fin.month and d_ini.year == d_fin.year:
@@ -7603,8 +7752,8 @@ class ValorizadoWidget(QWidget):
             return -1
         if delta_dias < 1:
             return -1
-        idx = (delta_dias - 1) // self._period_days
-        return idx if 0 <= idx < n_periods else -1
+        return next((i for i in range(n_periods)
+                     if self._ventana(i)[0] <= delta_dias <= self._ventana(i)[1]), -1)
 
     def _fila_sub_val(self, nombre: str, n_left: int, n_right: int,
                       bg: QColor, fg: QColor):
@@ -7644,8 +7793,8 @@ class ValorizadoWidget(QWidget):
         plazo = self._cv._proy.get('plazo') or 0
         max_ef = max((t['EF'] for t in tasks.values() if t['EF'] > 0),
                       default=plazo)
-        n_dias = max(max_ef, plazo, self._period_days)
-        n_periods = (n_dias + self._period_days - 1) // self._period_days
+        ventanas = self._cortar(max(max_ef, plazo))
+        n_periods = len(ventanas)
 
         unidad = N_("Sem") if self._period_days == 7 else N_("Mes")
         moneda = self._cv._moneda
@@ -7670,7 +7819,7 @@ class ValorizadoWidget(QWidget):
         n_sub = 2 * n_periods      # sub-columnas de período
 
         # Header de 2 niveles: período (1-2 líneas con fecha) + sub-columna.
-        hdr_h = 50 if self._show_fechas else 34
+        hdr_h = 50 if self._show_fechas or self._sufijo_mes(0, False) else 34
         self.tbl_r.horizontalHeader().setFixedHeight(hdr_h)
         self.tbl_l.horizontalHeader().setFixedHeight(hdr_h)
         if hasattr(self, '_period_header'):
@@ -7832,12 +7981,10 @@ class ValorizadoWidget(QWidget):
 
             parcial = parcial_wysiwyg(p['metrado'], p['precio_unitario'])
             segs_ = cd.get('segmentos', '') or ''
-            weekly = distribuir_periodos(
-                segs_, ini, dur, parcial, n_periods, self._period_days
-            )
+            weekly = distribuir_ventanas(segs_, ini, dur, parcial, ventanas)
             metrado_tot = p['metrado'] or 0
-            weekly_met = (distribuir_periodos(
-                segs_, ini, dur, metrado_tot, n_periods, self._period_days)
+            weekly_met = (distribuir_ventanas(
+                segs_, ini, dur, metrado_tot, ventanas)
                 if metrado_tot else [0.0] * n_periods)
 
             # Panel izquierdo: Ítem · Descripción · Und · Cantidad · Precio · Precio Total
@@ -8850,7 +8997,7 @@ class ValorizadoWidget(QWidget):
 # 3. CURVA S
 # ════════════════════════════════════════════════════════════════════════════
 
-class CurvaSWidget(QWidget):
+class CurvaSWidget(_PeriodosMixin, QWidget):
     """Curva S — avance acumulado por semana/mes con tabla + gráfico
     sincronizados. Mismo patrón visual que Valorizado/Insumos:
     KPI strip + toolbar + splitter (tabla zebra | chart) + footer + exportes.
@@ -8883,9 +9030,7 @@ class CurvaSWidget(QWidget):
         lbl.setStyleSheet(f"color:{SLATE_500}; font-size:11px;")
         tb_hl.addWidget(lbl)
         cmb = QComboBox()
-        cmb.addItems([tr("Semanal"), tr("Mensual")])
-        cmb.setCurrentIndex(1)  # default Mensual (espejo de _period_days=30)
-        cmb.currentIndexChanged.connect(self._on_periodo)
+        self._preparar_combo_periodo(cmb)
         cmb.setStyleSheet(
             "QComboBox { min-height:0; padding:2px 8px; font-size:11px;"
             f" border:1px solid {SILVER_300}; border-radius:4px; }}"
@@ -9044,10 +9189,6 @@ class CurvaSWidget(QWidget):
         vl.addWidget(self.split, stretch=1)
 
     # ── Acciones de toolbar ─────────────────────────────────────────────
-    def _on_periodo(self, idx: int):
-        self._period_days = 7 if idx == 0 else 30
-        self.cargar()
-
     def _on_toggle_fechas(self, on: bool):
         self._show_fechas = bool(on)
         self.cargar()
@@ -9069,12 +9210,13 @@ class CurvaSWidget(QWidget):
         `traducir=True` solo en pantalla: los reportes la usan en español."""
         base = f"{tr(unidad) if traducir else unidad} {i + 1}"
         if not self._show_fechas:
-            return base
+            return base + self._sufijo_mes(i, traducir)
         f_ini = self._project_start()
         if f_ini is None:
             return base
-        ini = f_ini + timedelta(days=i * self._period_days)
-        fin = ini + timedelta(days=self._period_days - 1)
+        v_ini, v_fin = self._ventana(i)
+        ini = f_ini + timedelta(days=v_ini - 1)
+        fin = f_ini + timedelta(days=v_fin - 1)
         return f"{base}\n{ini.strftime('%d/%m')}–{fin.strftime('%d/%m')}"
 
     def _moneda_simbolo(self):
@@ -9094,8 +9236,8 @@ class CurvaSWidget(QWidget):
         plazo    = self._cv._proy.get('plazo') or 0
         max_ef   = max((t['EF'] for t in tasks.values() if t['EF'] > 0),
                         default=plazo)
-        n_dias   = max(max_ef, plazo, self._period_days)
-        n_periods = max(1, (n_dias + self._period_days - 1) // self._period_days)
+        ventanas = self._cortar(max(max_ef, plazo))
+        n_periods = len(ventanas)
         unidad   = N_("Sem") if self._period_days == 7 else N_("Mes")
         sym      = self._moneda_simbolo()
         dec      = get_decimales_ppto()
@@ -9111,10 +9253,8 @@ class CurvaSWidget(QWidget):
             t = tasks.get(p['id'], {})
             ini = t.get('ES', ini)
             parcial = parcial_wysiwyg(p['metrado'], p['precio_unitario'])
-            weekly = distribuir_periodos(
-                cd.get('segmentos', '') or '',
-                ini, dur, parcial, n_periods, self._period_days
-            )
+            weekly = distribuir_ventanas(
+                cd.get('segmentos', '') or '', ini, dur, parcial, ventanas)
             for i, v in enumerate(weekly):
                 total_per[i] += v
 
@@ -10716,7 +10856,7 @@ class _PeriodGroupHeader(QHeaderView):
         painter.drawLine(0, h - 1, self.viewport().width(), h - 1)
 
 
-class InsumosWidget(QWidget):
+class InsumosWidget(_PeriodosMixin, QWidget):
     """Cronograma de Adquisición de Insumos — espejo visual del Valorizado.
     Columnas izq (frozen): Tipo · Código · Descripción · Und · Precio · % Total.
     Columnas der (scroll): [períodos] · Total. Footer sticky con TOTAL ·
@@ -10748,9 +10888,7 @@ class InsumosWidget(QWidget):
         lbl.setStyleSheet(f"color:{SLATE_500}; font-size:11px;")
         tb_hl.addWidget(lbl)
         cmb = QComboBox()
-        cmb.addItems([tr("Semanal"), tr("Mensual")])
-        cmb.setCurrentIndex(1)  # default Mensual (espejo de _period_days=30)
-        cmb.currentIndexChanged.connect(self._on_periodo)
+        self._preparar_combo_periodo(cmb)
         cmb.setStyleSheet(
             "QComboBox { min-height:0; padding:2px 8px; font-size:11px;"
             f" border:1px solid {SILVER_300}; border-radius:4px; }}"
@@ -10925,10 +11063,6 @@ class InsumosWidget(QWidget):
         self.tbl_r.verticalScrollBar().setValue(v_r)
         self.tbl_l.verticalScrollBar().setValue(v_l)
 
-    def _on_periodo(self, idx: int):
-        self._period_days = 7 if idx == 0 else 30
-        self.cargar()
-
     def _on_toggle_fechas(self, checked: bool):
         self._show_fechas = bool(checked)
         self.cargar()
@@ -10948,14 +11082,13 @@ class InsumosWidget(QWidget):
         _t = tr if traducir else (lambda s: s)
         base = f"{_t(unidad)} {i + 1}"
         if not self._show_fechas:
-            return base
+            return base + self._sufijo_mes(i, traducir)
         f_ini = self._project_start()
         if f_ini is None:
             return base
         MESES = [_t(m) for m in ("Ene", "Feb", "Mar", "Abr", "May", "Jun",
                                  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")]
-        s_day = i * self._period_days + 1
-        e_day = (i + 1) * self._period_days
+        s_day, e_day = self._ventana(i)
         d_i = f_ini + timedelta(days=s_day - 1)
         d_f = f_ini + timedelta(days=e_day - 1)
         if d_i.month == d_f.month and d_i.year == d_f.year:
@@ -10998,8 +11131,8 @@ class InsumosWidget(QWidget):
         plazo = self._cv._proy.get('plazo') or 0
         max_ef = max((t['EF'] for t in tasks.values() if t['EF'] > 0),
                       default=plazo)
-        n_dias = max(max_ef, plazo, self._period_days)
-        n_periods = max(1, (n_dias + self._period_days - 1) // self._period_days)
+        ventanas = self._cortar(max(max_ef, plazo))
+        n_periods = len(ventanas)
 
         unidad = N_("Sem") if self._period_days == 7 else N_("Mes")
         moneda = self._cv._moneda
@@ -11030,17 +11163,15 @@ class InsumosWidget(QWidget):
                 else:
                     costo = 0.0
                 segs_ = cd.get('segmentos', '') or ''
-                weekly = distribuir_periodos(
-                    segs_, ini, dur, costo, n_periods, self._period_days
-                )
+                weekly = distribuir_ventanas(segs_, ini, dur, costo, ventanas)
                 # Cantidad del insumo en esta partida, repartida por el mismo
                 # cronograma. Los items de overhead (%MO/%MAT) no tienen
                 # cantidad física → quedan en 0.
                 und_i = it.get('unidad') or ''
                 qty_tot = (it.get('cantidad') or 0) * metrado
                 if qty_tot and not und_i.startswith('%'):
-                    weekly_qty = distribuir_periodos(
-                        segs_, ini, dur, qty_tot, n_periods, self._period_days)
+                    weekly_qty = distribuir_ventanas(
+                        segs_, ini, dur, qty_tot, ventanas)
                 else:
                     weekly_qty = [0.0] * n_periods
                 rid = _clave_insumo(it)
@@ -11103,7 +11234,7 @@ class InsumosWidget(QWidget):
         self.tbl_rf.setColumnCount(N_RIGHT)
 
         # Header heights — período (1-2 líneas con fecha) + sub-columna (~16px)
-        hdr_h = 50 if self._show_fechas else 34
+        hdr_h = 50 if self._show_fechas or self._sufijo_mes(0, False) else 34
         self.tbl_r.horizontalHeader().setFixedHeight(hdr_h)
         self.tbl_l.horizontalHeader().setFixedHeight(hdr_h)
         # Cargar la estructura de 2 niveles en el header personalizado.

@@ -604,9 +604,10 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
     hojas = [e for e in items if not e['partida'].get('es_titulo')]
     n_partidas = len(hojas)
     n_titulos  = len(items) - n_partidas
+    from core.pie import nombre_total
     pct_cd = (cd / total * 100) if total else 0
     kpis = [
-        ("PRESUPUESTO TOTAL", f"{sym} {_fmt(total, dec)}", "Todos los conceptos"),
+        (nombre_total(proy), f"{sym} {_fmt(total, dec)}", "Todos los conceptos"),
         ("COSTO DIRECTO",     f"{sym} {_fmt(cd, dec)}",    f"{pct_cd:.1f}% del total"),
         ("PARTIDAS",          f"{n_partidas}",             f"{n_titulos} títulos"),
         ("PLAZO DE OBRA",     f"{proy.get('plazo') or 0} d",

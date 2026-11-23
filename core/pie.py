@@ -96,9 +96,29 @@ def calcular_pie(conn, proyecto_id: int, cd: float):
         lineas.append({
             'tipo': tipo, 'nombre': r['nombre'], 'codigo': codigo, 'pct': pct,
             'valor': val, 'mostrar_pct': mp, 'has_items': has_items,
+            'destacado': bool(tipo == 'subtotal' and r['destacado']),
             'pct_real': round(val / cd * 100, 2) if (cd and tipo != 'subtotal') else 0,
         })
     return lineas, acum
+
+
+def nombre_total(proy, defecto: str = 'PRESUPUESTO TOTAL') -> str:
+    """Nombre del total final: el que escribió el usuario («Costo de
+    inversión», issue #34) o el de siempre. Un nombre propio sigue las
+    mayúsculas del defecto. `proy` es la fila/dict del proyecto o su id."""
+    if isinstance(proy, int):
+        from core.database import get_db
+        conn = get_db()
+        proy = conn.execute("SELECT total_nombre FROM proyectos WHERE id=?",
+                            (proy,)).fetchone()
+        conn.close()
+    try:
+        propio = (proy['total_nombre'] or '').strip()
+    except (IndexError, KeyError, TypeError):
+        propio = ''
+    if not propio:
+        return defecto
+    return propio.upper() if defecto.isupper() else propio
 
 
 def etiqueta(linea: dict, *, mayus: bool = False) -> str:
@@ -126,7 +146,7 @@ def es_impuesto(linea: dict) -> bool:
 def lineas_por_defecto(proy) -> list[tuple]:
     """(codigo, nombre, pct, activo, orden, tipo, mostrar_pct) del pie que
     se siembra la primera vez. Colombia usa AIU con IVA sobre la utilidad
-    (issue #10); el resto, gastos generales + utilidad + impuesto."""
+    (issue #10), Brasil un solo BDI (issue #21); el resto, gastos generales + utilidad + impuesto."""
     from core.paises import nombre_rubro_impuesto, pais_actual
     igv = proy['igv_pct'] if proy['igv_pct'] is not None else 18.0
     if pais_actual() == 'CO':
@@ -139,6 +159,16 @@ def lineas_por_defecto(proy) -> list[tuple]:
             ('SUB',  'Sub Total',           0,   1, 3, 'subtotal', 1),
             ('IGV',  f"{nombre_rubro_impuesto(igv)} sobre la utilidad",
                                             igv, 1, 4, 'pct_util', 0),
+        ]
+    if pais_actual() == 'BR':
+        # El BDI (Benefícios e Despesas Indiretas) es un solo % sobre el costo
+        # directo e incluye indirectos, lucro y tributos. Cada obra pone el
+        # suyo: sembrar 10 + 5 + 18 % como en el Perú inflaba el total.
+        from core.paises import impuesto
+        return [
+            ('GG',  'BDI',           0.0, 1, 0, 'pct_cd',   1),
+            ('SUB', 'Subtotal',      0,   1, 1, 'subtotal', 1),
+            ('IGV', impuesto()[0],   igv, 1, 2, 'pct_sub',  1),
         ]
     gf = proy['gf_pct'] or 10.0
     util = proy['utilidad_pct'] or 5.0

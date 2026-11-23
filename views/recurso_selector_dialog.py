@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QComboBox, QHeaderView, QAbstractItemView, QTabWidget,
-    QWidget, QMessageBox, QFrame, QCompleter, QMenu
+    QWidget, QMessageBox, QFrame, QMenu
 )
 from PySide6.QtCore import Qt, QTimer, QRegularExpression
 from PySide6.QtGui import (QColor, QFont, QRegularExpressionValidator,
@@ -23,6 +23,7 @@ from core.database import (get_db, _rn, _recalcular_pu, _siguiente_codigo_inei,
                            partida_global as _es_partida_global)
 from utils.formatting import parse_num
 from utils.i18n import tr
+from views.unidades_dialog import poner_lista
 
 # Precio, cuadrilla y cantidad solo aceptan un número. Sin esto el campo
 # tragaba texto y `parse_num` lo convertía en 0.0 SIN avisar: el recurso
@@ -370,25 +371,7 @@ class RecursoSelectorDialog(QDialog):
 
         self.inp_n_unidad = QLineEdit()
         self.inp_n_unidad.setPlaceholderText(tr("hh, m³, kg, glb, …"))
-        _UNIDADES = sorted({
-            "m","m²","m³","ml","km","cm","mm",
-            "kg","tn","ton","lb",
-            "und","glb","pza","pzas","jgo","cjt","vj","est",
-            "hh","hm","h","hr","día","mes","sem",
-            "lt","l","gal","bls","bol",
-            "pie²","pie³","p2","p3","ha","pto","rll",
-        })
-        comp_u = QCompleter(_UNIDADES, self.inp_n_unidad)
-        comp_u.setCaseSensitivity(Qt.CaseInsensitive)
-        comp_u.setFilterMode(Qt.MatchContains)
-        comp_u.setCompletionMode(QCompleter.PopupCompletion)
-        comp_u.popup().setStyleSheet(
-            "QListView { background:white; border:1px solid #D4D4D4;"
-            " border-radius:6px; font-size:12px; padding:4px; color:#273445; }"
-            "QListView::item { padding:4px 10px; }"
-            "QListView::item:selected { background:#FDE8D0; color:#7A3800; }"
-        )
-        self.inp_n_unidad.setCompleter(comp_u)
+        poner_lista(self.inp_n_unidad)
         self.inp_n_unidad.textChanged.connect(self._sync_cuadrilla_nuevo)
         form.addRow(tr("Unidad:"), self.inp_n_unidad)
 
