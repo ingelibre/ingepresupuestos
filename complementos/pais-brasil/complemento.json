@@ -1,0 +1,44 @@
+{
+  "esquema": 1,
+  "id": "pais-brasil",
+  "nombre": "Brasil",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos, con las pruebas de la comunidad (issue #21)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Brasil: CNPJ/CPF, pie con BDI en portugués y formato de los insumos de SINAPI para el importador de Excel. No incluye datos de SINAPI: usa la planilla que tú descargas.\n\nEl BDI queda en 0 % y lo pone cada obra.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/21",
+  "paises": [
+    {
+      "iso": "BR",
+      "nombre": "Brasil",
+      "moneda": "Reales",
+      "identificacion": "CNPJ/CPF",
+      "impuesto": {"nombre": "Impostos", "pct": 0},
+      "indirectos": {"gastos_generales": 0, "utilidad": 0},
+      "pie": [
+        {"codigo": "GG", "nombre": "BDI", "tipo": "pct_cd", "pct": 0},
+        {"codigo": "SUB", "nombre": "Subtotal", "tipo": "subtotal"},
+        {"codigo": "IGV", "nombre": "{impuesto}", "tipo": "pct_sub", "pct": "impuesto"}
+      ]
+    }
+  ],
+  "importadores_excel": [
+    {
+      "nombre": "SINAPI — insumos",
+      "detectar": ["Classificação", "Código do Insumo"],
+      "columnas": {
+        "tipo": ["Classificação"],
+        "codigo": ["Código do Insumo"],
+        "descripcion": ["Descrição do Insumo", "Descrição"],
+        "unidad": ["Unidade"]
+      },
+      "tipos": {
+        "MO": ["MÃO DE OBRA", "ENCARGOS COMPLEMENTARES", "ENCARGOS"],
+        "MAT": ["MATERIAL", "ESPECIAIS"],
+        "EQ": ["EQUIPAMENTO"],
+        "SC": ["SERVIÇOS", "SERVIÇO"]
+      },
+      "aviso": "Elige en «Precio» la columna de tu estado (AC, AL… TO) y la hoja del régimen que usas (ISD, ICD o ISE)."
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "esquema": 1,
+  "id": "pais-argentina",
+  "nombre": "Argentina",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #22)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/22",
+  "paises": [
+    {
+      "iso": "AR",
+      "nombre": "Argentina",
+      "moneda": "Pesos Argentinos",
+      "identificacion": "CUIT",
+      "impuesto": {"nombre": "IVA", "pct": 21}
+    }
+  ],
+  "vocabulario": [
+    {
+      "idioma": "es",
+      "pais": "AR",
+      "textos": {
+        "Título": "Rubro",
+        "Agregar título": "Agregar rubro",
+        "Agregar título / sección": "Agregar rubro / sección",
+        "Insertar título / rama": "Insertar rubro / rama",
+        "agregar títulos": "agregar rubros",
+        "Elige una partida (no un título).": "Elige una partida (no un rubro).",
+        "Es título de sección (sin metrado ni precio)": "Es un rubro (sin metrado ni precio)",
+        "Los títulos no se guardan en la biblioteca.": "Los rubros no se guardan en la biblioteca.",
+        "Selecciona al menos una partida (los títulos no cuentan).": "Selecciona al menos una partida (los rubros no cuentan).",
+        "Colores de títulos": "Colores de rubros",
+        "Contraer o expandir los títulos del Gantt. Solo cambia la vista: ni las fechas ni los reportes.": "Contraer o expandir los rubros del Gantt. Solo cambia la vista: ni las fechas ni los reportes."
+      }
+    }
+  ],
+  "indices": [
+    {"clave": "CAC", "nombre": "Índice CAC (Cámara Argentina de la Construcción)"}
+  ]
+}
