@@ -129,6 +129,14 @@ def _olvidar_indices():
         pass            # sin numpy/model2vec no hay índice que olvidar
 
 
+def _de_complementos() -> list:
+    try:
+        from core.complementos import registro
+        return registro.unidades()
+    except Exception:
+        return []
+
+
 def lista(conn=None) -> list:
     """Unidades para elegir: las comunes —con la grafía de casa si solo se usa
     una— y después las demás que ya están en uso."""
@@ -149,6 +157,11 @@ def lista(conn=None) -> list:
         g = usos.get(k, set())
         out.append(next(iter(g)) if len(g) == 1 else c)
         vistas.add(k)
+    for u in _de_complementos():
+        if clave(u) not in vistas:
+            g = usos.get(clave(u), set())
+            out.append(next(iter(g)) if len(g) == 1 else u)
+            vistas.add(clave(u))
     out += sorted((u for k, g in usos.items() if k not in vistas for u in g),
                   key=str.lower)
     return out

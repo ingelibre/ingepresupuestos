@@ -219,9 +219,17 @@ class AgregarTituloDialog(QDialog):
         except Exception:
             rows = []
 
-        for r in rows:
-            item = QListWidgetItem(r[0])
-            self.lst_titulos.addItem(item)
+        textos = [r[0] for r in rows]
+        # Los títulos que proponen los complementos, después de los propios.
+        try:
+            from core.complementos import registro
+            norma = norm_busqueda(texto)
+            textos += [t for t in registro.titulos()
+                       if t not in textos and norma in norm_busqueda(t)]
+        except Exception:
+            pass
+        for t in textos:
+            self.lst_titulos.addItem(QListWidgetItem(t))
 
         self.btn_agregar_bib.setEnabled(False)
 

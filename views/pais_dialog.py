@@ -37,7 +37,7 @@ class PaisForm(QWidget):
         form.setSpacing(10)
 
         self.cmb_pais = QComboBox()
-        for code, p in sorted(paises.PAISES.items(), key=lambda kv: kv[1]['nombre']):
+        for code, p in sorted(paises.todos().items(), key=lambda kv: kv[1]['nombre']):
             self.cmb_pais.addItem(p['nombre'], code)
         self.cmb_pais.setMinimumHeight(34)
         form.addRow(tr("País:"), self.cmb_pais)
@@ -95,7 +95,7 @@ class PaisForm(QWidget):
         self._rellenar(self.cmb_pais.currentData())
 
     def _rellenar(self, iso: str):
-        p = paises.PAISES[iso]
+        p = paises.perfil(iso)
         self.cmb_moneda.setCurrentText(p['moneda'])
         self.inp_etiqueta.setText(p['id'])
         self.inp_imp_nombre.setText(p['imp'][0])

@@ -118,15 +118,24 @@ def _puntaje(campo: str, cabecera_norm: str) -> int:
     return 0
 
 
-def campo_tipo(valor) -> str | None:
-    """Texto de una celda de «Tipo» → MO/MAT/EQ/SC, o None si no se entiende."""
+def campo_tipo(valor, extra: dict | None = None) -> str | None:
+    """Texto de una celda de «Tipo» → MO/MAT/EQ/SC, o None si no se entiende.
+
+    `extra` son los sinónimos del formato de un complemento: mandan sobre los
+    de fábrica y valen también como comienzo («EQUIPAMENTO (LOCAÇÃO)»)."""
     n = normalizar(valor)
     if not n:
         return None
+    for tipo, sins in (extra or {}).items():
+        if n in sins:
+            return tipo
     if n.upper() in TIPOS_RECURSO:
         return n.upper()
     for tipo, sins in _TIPOS_SINONIMOS.items():
         if n in sins:
+            return tipo
+    for tipo, sins in (extra or {}).items():
+        if any(n.startswith(s + ' ') for s in sins):
             return tipo
     return None
 
@@ -366,10 +375,13 @@ class Opciones:
     prefijo: str = ''
     # Por qué se propuso cada cosa (para explicárselo al usuario).
     motivos: dict = field(default_factory=dict)
+    # Sinónimos de tipo del formato reconocido (de un complemento).
+    tipos_extra: dict = field(default_factory=dict)
 
     def a_json(self) -> str:
         d = asdict(self)
         d.pop('motivos', None)
+        d.pop('tipos_extra', None)
         d.pop('hoja', None)
         return json.dumps(d)
 
@@ -391,6 +403,66 @@ class Opciones:
         return True
 
 
+def _formatos() -> list[dict]:
+    try:
+        from core.complementos import registro
+        return registro.importadores_excel()
+    except Exception:
+        return []
+
+
+def formato_reconocido(filas: list[list], fila_cabecera: int | None = None):
+    """(formato, fila) del primer formato de un complemento cuyos títulos
+    («detectar») están TODOS en una fila; (None, None) si ninguno."""
+    formatos = _formatos()
+    # La lista del MTOP es de fábrica: ningún complemento la reemplaza.
+    if not formatos or es_lista_mtop(filas):
+        return None, None
+    if fila_cabecera is not None:
+        candidatas = [fila_cabecera] if fila_cabecera < len(filas) else []
+    else:
+        candidatas = range(min(len(filas), FILAS_BUSQUEDA_CABECERA))
+    normas = {i: {normalizar(v) for v in filas[i] if v is not None}
+              for i in candidatas}
+    for fmt in formatos:
+        buscadas = {normalizar(t) for t in fmt['detectar']}
+        for i, hay in normas.items():
+            if buscadas <= hay:
+                return fmt, i
+    return None, None
+
+
+def _aplicar_formato(op: 'Opciones', fmt: dict, cab: list) -> None:
+    normas = [normalizar(h) for h in cab]
+    op.columnas = {c: None for c in CAMPOS}
+    usadas: set[int] = set()
+    for campo, titulos in fmt['columnas'].items():
+        buscados = [normalizar(t) for t in titulos]
+        for exacto in (True, False):
+            col = next((i for b in buscados for i, h in enumerate(normas)
+                        if i not in usadas and b and
+                        (h == b if exacto else f' {b} ' in f' {h} ')), None)
+            if col is not None:
+                op.columnas[campo] = col
+                usadas.add(col)
+                break
+    op.tipos_extra = {t: [normalizar(s) for s in sins]
+                      for t, sins in fmt['tipos'].items()}
+    op.tipo_fijo = fmt['tipo_fijo']
+    if op.columnas['tipo'] is None and op.tipo_fijo is None:
+        op.tipo_fijo = 'MAT'
+    elif op.tipo_fijo:
+        op.columnas['tipo'] = None
+    op.prefijo = fmt['prefijo']
+    op.omitir_sin_precio = fmt['omitir_sin_precio']
+    op.cantidad_en_unidad = fmt['cantidad_en_unidad']
+    if fmt['quitar_impuesto_pct'] is not None:
+        op.quitar_impuesto = True
+        op.impuesto_pct = fmt['quitar_impuesto_pct']
+    op.motivos['formato'] = fmt['nombre']
+    op.motivos['formato_aviso'] = fmt['aviso']
+
+
 def configuracion_inicial(filas: list[list], hoja: str, *,
                           impuesto_pct: float,
                           fila_cabecera: int | None = None) -> Opciones:
@@ -399,6 +471,11 @@ def configuracion_inicial(filas: list[list], hoja: str, *,
     cab = filas[fc] if fc < len(filas) else []
     datos = datos_de(filas, fc)
     op = Opciones(hoja=hoja, fila_cabecera=fc, impuesto_pct=impuesto_pct)
+    fmt, fila = formato_reconocido(filas, fila_cabecera)
+    if fmt is not None:
+        op.fila_cabecera = fila
+        _aplicar_formato(op, fmt, filas[fila])
+        return op
     op.columnas = auto_asignar(cab, datos)
     if op.columnas['tipo'] is None:
         op.tipo_fijo = 'MAT'           # sin columna de tipo, lo normal es una lista de materiales
@@ -437,6 +514,9 @@ def hoja_inicial(libro: Libro) -> str:
         a = auto_asignar(f[detectar_cabecera(f)] if f else [], [])
         return a['descripcion'] is not None and a['precio'] is not None
 
+    for h in libro.hojas:
+        if formato_reconocido(libro.filas.get(h) or [])[0] is not None:
+            return h
     mtop = [h for h in libro.hojas if es_lista_mtop(libro.filas.get(h) or [])
             and sirve(h)]
     if mtop:
@@ -493,7 +573,7 @@ def preparar_insumos(filas: list[list], op: Opciones):
         if op.tipo_fijo:
             tipo = op.tipo_fijo
         else:
-            tipo = campo_tipo(_celda(f, cols.get('tipo')))
+            tipo = campo_tipo(_celda(f, cols.get('tipo')), op.tipos_extra)
             if tipo is None:
                 omitidos.append((nfila, 'tipo_invalido'))
                 continue

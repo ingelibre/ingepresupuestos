@@ -192,39 +192,17 @@ def es_impuesto(linea: dict) -> bool:
 
 def lineas_por_defecto(proy) -> list[tuple]:
     """(codigo, nombre, pct, activo, orden, tipo, mostrar_pct) del pie que
-    se siembra la primera vez. Colombia usa AIU con IVA sobre la utilidad
-    (issue #10), Brasil un solo BDI (issue #21); el resto, gastos generales + utilidad + impuesto."""
-    from core.paises import nombre_rubro_impuesto, pais_actual
+    se siembra la primera vez. Las líneas son las del país (`core.paises`):
+    Colombia usa AIU con IVA sobre la utilidad, Brasil un solo BDI, el resto
+    gastos generales + utilidad + impuesto; un complemento puede traer otras."""
+    from core import paises
     igv = proy['igv_pct'] if proy['igv_pct'] is not None else 18.0
-    if pais_actual() == 'CO':
-        # AIU ≈ 27 %: Administración 20 · Imprevistos 2 · Utilidad 5 (valores
-        # de partida, cada obra los ajusta). El IVA grava SOLO la utilidad.
-        return [
-            ('GG',   'Administración (A)', 20.0, 1, 0, 'pct_cd',   1),
-            ('IMP',  'Imprevistos (I)',     2.0, 1, 1, 'pct_cd',   1),
-            ('UTIL', 'Utilidad (U)',        5.0, 1, 2, 'pct_cd',   1),
-            ('SUB',  'Sub Total',           0,   1, 3, 'subtotal', 1),
-            ('IGV',  f"{nombre_rubro_impuesto(igv)} sobre la utilidad",
-                                            igv, 1, 4, 'pct_util', 0),
-        ]
-    if pais_actual() == 'BR':
-        # El BDI (Benefícios e Despesas Indiretas) es un solo % sobre el costo
-        # directo e incluye indirectos, lucro y tributos. Cada obra pone el
-        # suyo: sembrar 10 + 5 + 18 % como en el Perú inflaba el total.
-        from core.paises import impuesto
-        return [
-            ('GG',  'BDI',           0.0, 1, 0, 'pct_cd',   1),
-            ('SUB', 'Subtotal',      0,   1, 1, 'subtotal', 1),
-            ('IGV', impuesto()[0],   igv, 1, 2, 'pct_sub',  1),
-        ]
-    gf = proy['gf_pct'] or 10.0
-    util = proy['utilidad_pct'] or 5.0
-    return [
-        ('GG',   'Gastos Generales',   gf,   1, 0, 'rubro',    1),
-        ('UTIL', 'Utilidad',            util, 1, 1, 'pct_cd',   1),
-        ('SUB',  'Sub Total',           0,    1, 2, 'subtotal', 1),
-        ('SUP',  'Supervisión',         5.0,  0, 3, 'rubro',    0),
-        ('ET',   'Expediente Técnico',  3.0,  0, 4, 'rubro',    0),
-        ('LQ',   'Liquidación de Obra', 2.0,  0, 5, 'rubro',    0),
-        ('IGV',  nombre_rubro_impuesto(igv), igv, 1, 6, 'pct_sub', 1),
-    ]
+    datos = {'gastos_generales': proy['gf_pct'] or 10.0,
+             'utilidad': proy['utilidad_pct'] or 5.0, 'impuesto': igv}
+    nombre, rubro = paises.impuesto()[0], paises.nombre_rubro_impuesto(igv)
+    return [(l['codigo'],
+             l['nombre'].replace('{impuesto_pct}', rubro)
+                        .replace('{impuesto}', nombre),
+             datos[l['pct']] if isinstance(l['pct'], str) else l['pct'],
+             int(l['activo']), orden, l['tipo'], int(l['mostrar_pct']))
+            for orden, l in enumerate(paises.pie_de(paises.perfil()))]

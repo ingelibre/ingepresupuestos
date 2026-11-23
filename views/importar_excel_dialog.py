@@ -19,6 +19,7 @@ la Lista del MTOP del mes siguiente es un clic.
 from __future__ import annotations
 
 import os
+from html import escape
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QColor
@@ -373,6 +374,12 @@ class ImportarExcelDialog(QDialog):
                              "(Uruguay): quedó configurada sola — materiales, cantidad en "
                              "la unidad e IVA. La hoja «NUEVOS MATERIALES» se importa "
                              "eligiéndola arriba."))
+        if self.op.motivos.get('formato'):
+            partes.append(tr("Se reconoció el formato <b>{nombre}</b> (de un "
+                             "complemento).").format(
+                                 nombre=escape(self.op.motivos['formato'])))
+            if self.op.motivos.get('formato_aviso'):
+                partes.append(escape(self.op.motivos['formato_aviso']))
         if self._memoria:
             partes.append(tr("Se usó la asignación de la última importación de este "
                              "formato."))

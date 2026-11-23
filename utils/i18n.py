@@ -36,6 +36,8 @@ DIR_I18N = Path(BASE_DIR) / "resources" / "i18n"
 
 _idioma_actual: str | None = None
 _catalogos: dict[str, dict[str, str]] = {}
+# Textos que reemplazan los complementos activos (None = sin leer todavía).
+_vocabulario: dict[str, str] | None = None
 
 
 def _catalogo(codigo: str) -> dict[str, str]:
@@ -72,11 +74,34 @@ def set_idioma(codigo: str):
     """Cambia el idioma en memoria (para la sesión actual tras guardar config)."""
     global _idioma_actual
     _idioma_actual = codigo
+    olvidar_vocabulario()
+
+
+def olvidar_vocabulario():
+    """Al activar o quitar un complemento, o al cambiar de país."""
+    global _vocabulario
+    _vocabulario = None
+
+
+def _vocab(idioma: str) -> dict[str, str]:
+    global _vocabulario
+    if _vocabulario is None:
+        # Antes de leer: lo que se importe abajo puede llamar a tr().
+        _vocabulario = {}
+        try:
+            from core.complementos.registro import vocabulario
+            _vocabulario = vocabulario(idioma)
+        except Exception:
+            pass
+    return _vocabulario
 
 
 def tr(texto: str) -> str:
     """Traduce un texto. Si no hay traducción o el idioma es 'es', devuelve el original."""
     idioma = _get_idioma()
+    propio = _vocab(idioma).get(texto)
+    if propio:
+        return propio
     if idioma == 'es':
         return texto
     trad = _catalogo(idioma).get(texto)
