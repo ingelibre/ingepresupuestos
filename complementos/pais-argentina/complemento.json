@@ -2,10 +2,10 @@
   "esquema": 1,
   "id": "pais-argentina",
   "nombre": "Argentina",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "autor": "IngePresupuestos (issue #22)",
   "licencia": "GPL-3.0-or-later",
-  "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú.",
+  "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú. Reporte de materiales y mano de obra por partida, que no cambia precios ni totales.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/22",
   "paises": [
     {
@@ -13,7 +13,10 @@
       "nombre": "Argentina",
       "moneda": "Pesos Argentinos",
       "identificacion": "CUIT",
-      "impuesto": {"nombre": "IVA", "pct": 21}
+      "impuesto": {
+        "nombre": "IVA",
+        "pct": 21
+      }
     }
   ],
   "vocabulario": [
@@ -36,19 +39,26 @@
     }
   ],
   "indices": [
-    {"clave": "CAC", "nombre": "Índice CAC (Cámara Argentina de la Construcción)"}
+    {
+      "clave": "CAC",
+      "nombre": "Índice CAC (Cámara Argentina de la Construcción)"
+    }
   ],
   "categorias": [
-    "paises"
+    "paises",
+    "reportes"
   ],
   "traducciones": {
     "en": {
       "nombre": "Argentina",
-      "descripcion": "Argentina: pesos, CUIT, IVA and «rubro» instead of «título». The CAC index comes empty: import it with «Import index…» from a CSV (period; value) you obtain yourself."
+      "descripcion": "Argentina: pesos, CUIT, IVA and «rubro» instead of «título». The CAC index comes empty: import it with «Import index…» from a CSV (period; value) you obtain yourself. Report of materials and labor per item, which does not change prices or totals."
     },
     "pt_BR": {
       "nombre": "Argentina",
-      "descripcion": "Argentina: pesos, CUIT, IVA e «rubro» em vez de «título». O índice CAC vem vazio: é importado com «Importar índice…» de um CSV (período; valor) que você obtiver."
+      "descripcion": "Argentina: pesos, CUIT, IVA e «rubro» em vez de «título». O índice CAC vem vazio: é importado com «Importar índice…» de um CSV (período; valor) que você obtiver. Relatório de materiais e mão de obra por item, que não altera preços nem totais."
     }
-  }
+  },
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "imagen": "imagen.png"
 }
