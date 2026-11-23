@@ -2971,56 +2971,49 @@ class ProyectoView(QWidget):
         return w
 
     def _make_acu_subtotales(self, parent_layout):
+        """Pie del ACU: un subtotal por tipo de recurso y el costo unitario.
+        Nombre completo arriba y monto abajo, para que se lea de un vistazo
+        sin ensanchar el panel (pedido de un usuario de Argentina)."""
         sub = QFrame()
-        sub.setFixedHeight(32)
+        sub.setObjectName("acuPie")
+        sub.setFixedHeight(46)
         sub.setStyleSheet(
-            f"background:#EEF1F5; border-top:2px solid {SILVER_300};"
+            f"QFrame#acuPie {{ background:#EEF1F5; border-top:2px solid {SILVER_300}; }}"
         )
         hl = QHBoxLayout(sub)
-        hl.setContentsMargins(8, 0, 8, 0)
-        hl.setSpacing(0)
+        hl.setContentsMargins(8, 2, 8, 2)
+        hl.setSpacing(8)
 
+        def celda(nombre, color, alineacion):
+            caja = QWidget()
+            caja.setStyleSheet("background:transparent;")
+            # En un panel angosto se acorta el nombre (queda en el tooltip),
+            # nunca el monto: un monto cortado se lee como otro número.
+            caja.setToolTip(nombre)
+            v = QVBoxLayout(caja)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(0)
+            lbl_n, lbl_v = QLabel(nombre), QLabel("—")
+            for lbl, css in (
+                    (lbl_n, f"color:{color}; font-size:11px; font-weight:700;"),
+                    (lbl_v, f"color:{SLATE_700}; font-size:13px; font-weight:700;")):
+                lbl.setStyleSheet(css + " border:none; background:transparent;")
+                lbl.setAlignment(alineacion | Qt.AlignVCenter)
+                v.addWidget(lbl)
+            lbl_n.setMinimumWidth(1)
+            hl.addWidget(caja)
+            return lbl_v
+
+        # Tonos oscuros de los colores de cada tipo: contraste con el gris.
         self._sub_labels = {}
-        _TIPOS = [
-            ('MO',  "#F39C12", "MO"),
-            ('MAT', "#27AE60", "MAT"),
-            ('EQ',  "#607D8B", "EQ"),
-            ('SC',  "#7A36B1", "SC"),
-        ]
-        for tipo, color, abrev in _TIPOS:
-            lbl_key = QLabel(f"{abrev}:")
-            lbl_key.setStyleSheet(
-                f"color:{color}; font-size:10px; font-weight:700; border:none;"
-                f" padding:0 3px 0 10px;"
-            )
-            lbl_val = QLabel("—")
-            lbl_val.setStyleSheet(
-                f"color:{SLATE_700}; font-size:11px; font-weight:700; border:none;"
-                f" padding:0 4px 0 0;"
-            )
-            hl.addWidget(lbl_key)
-            hl.addWidget(lbl_val)
-            self._sub_labels[tipo] = lbl_val
-
-            sep = QFrame()
-            sep.setFrameShape(QFrame.VLine)
-            sep.setFixedHeight(16)
-            sep.setStyleSheet(f"color:{SILVER_300};")
-            hl.addWidget(sep)
-
+        for tipo, color, nombre in (
+                ('MO',  "#9A5B00", tr("Mano de obra")),
+                ('MAT', "#1B7A43", tr("Materiales")),
+                ('EQ',  "#4A616D", tr("Equipos")),
+                ('SC',  "#7A36B1", tr("Subcontratos"))):
+            self._sub_labels[tipo] = celda(nombre, color, Qt.AlignLeft)
         hl.addStretch()
-
-        lbl_cu_k = QLabel(tr("CU:"))
-        lbl_cu_k.setStyleSheet(
-            f"color:{SLATE_300}; font-size:10px; font-weight:700; border:none; padding:0 3px;"
-        )
-        self.lbl_pu = QLabel("—")
-        # Negro (como el total de metrados) — el naranja no era consistente.
-        self.lbl_pu.setStyleSheet(
-            f"color:{SLATE_700}; font-size:11px; font-weight:700; border:none; padding:0 4px 0 0;"
-        )
-        hl.addWidget(lbl_cu_k)
-        hl.addWidget(self.lbl_pu)
+        self.lbl_pu = celda(tr("Costo unitario"), SLATE_700, Qt.AlignRight)
 
         parent_layout.addWidget(sub)
 
