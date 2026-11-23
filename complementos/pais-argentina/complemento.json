@@ -2,7 +2,7 @@
   "esquema": 1,
   "id": "pais-argentina",
   "nombre": "Argentina",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "autor": "IngePresupuestos (issue #22)",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú. Reporte de materiales y mano de obra por partida, que no cambia precios ni totales.",

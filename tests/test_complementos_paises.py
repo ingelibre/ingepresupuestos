@@ -225,6 +225,101 @@ def test_argentina_reparto():
     assert _celdas(doc)[1][4:] == [52, 13.3, 65.3, 653]
 
 
+def _dos_sc(**aj):
+    """MAT 50 + SC A 10 + SC B 5 = 65; metrado 10."""
+    p = presupuesto_ejemplo()
+    a, b = (dataclasses.replace(p.hojas()[0].acu[3], recurso_id=n, codigo=c,
+                                descripcion=x, parcial=v)
+            for n, c, x, v in ((11, 'A1', 'YESERO', 10.0), (12, 'B1', 'PINTOR', 5.0)))
+    x = dataclasses.replace(p.hojas()[0], acu=(p.hojas()[0].acu[1], a, b),
+                            precio_unitario=65.0, parcial=650.0)
+    return dataclasses.replace(p, partidas=(p.partidas[0], x), costo_directo=650.0,
+                               ajustes=aj)
+
+
+A, B = 'A1|YESERO|glb', 'B1|PINTOR|glb'
+
+
+def _sc(**k):
+    import json
+    return json.dumps({{'a': A, 'b': B, 'z': 'Z|NO|x'}[c]: v for c, v in k.items()})
+
+
+def test_argentina_un_porcentaje_por_subcontrato():
+    def fila_(**aj):
+        doc = _doc('pais-argentina', 'mat-mo', _dos_sc(repartir=True, **aj))
+        return _celdas(doc)[1][4:], _texto(doc)
+    # Uno a 0 y otro a 100: mat 50 + 5; mo 10
+    f, t = fila_(mat=40.0, sc=_sc(a=0, b=100))
+    assert f == [55, 10, 65, 650]
+    assert 'más de un porcentaje' in t and 'YESERO 0 %; PINTOR 100 %' in t
+    # A 30 % propio y B el general 40 %: 50 + 3 + 2; 7 + 3
+    f, t = fila_(mat=40.0, sc=_sc(a=30))
+    assert f == [55, 10, 65, 650] and 'YESERO 30 %; PINTOR 40 %' in t
+    # Vacío, proyecto viejo (sin «sc») e insumo que ya no existe: el general
+    for aj in ({'sc': ''}, {}, {'sc': _sc(z=90)}):
+        f, t = fila_(mat=40.0, **aj)
+        assert f == [56, 9, 65, 650] and 'repartidos: 40 % materiales' in t
+    # Los dos con el mismo: un solo porcentaje
+    assert 'repartidos: 25 % materiales' in fila_(mat=40.0, sc=_sc(a=25, b=25))[1]
+    # Ajustes raros no rompen
+    for raro in (5, True, '[]', '{', '[' * 100000, '{"%s": "x"}' % A,
+                 '{"%s": 500}' % A, '{"%s": NaN}' % A, '{"%s": true}' % A):
+        assert fila_(mat=40.0, sc=raro)[0] == [56, 9, 65, 650]
+    # Sin repartir, los propios no cuentan
+    doc = _doc('pais-argentina', 'mat-mo', _dos_sc(mat=40.0, sc=_sc(a=0)))
+    assert _celdas(doc)[1][4:] == [50, 0, 15, 65, 650]
+
+
+def test_argentina_cuadra_con_el_precio():
+    m = _modulo('pais-argentina')
+    p = _dos_sc()
+    x = dataclasses.replace(p.hojas()[0], precio_unitario=64.99)
+    for a in (0, 33.33, 66.67, 100):
+        v = m.calcular(p, x, 12.5, {A: a, B: 33.335})
+        assert api.redondear(sum(v.values()), 2) == 64.99
+
+
+class _Ctx:
+    def __init__(self, p, *respuestas):
+        self.presupuesto, self.ajustes = p, dict(p.ajustes)
+        self.respuestas, self.avisos, self.campos = list(respuestas), [], []
+
+    def pedir_datos(self, titulo, campos, *, texto=''):
+        contexto.comprobar_datos(campos)
+        self.campos.append(campos)
+        r = self.respuestas.pop(0)
+        return None if r is None else {**{c.clave: c.valor for c in campos}, **r}
+
+    def avisar(self, t): self.avisos.append(t)
+    def guardar_ajustes(self, a): self.ajustes = a
+
+
+def test_argentina_formulario():
+    import json
+    m = _modulo('pais-argentina')
+    ctx = _Ctx(_dos_sc(repartir=True, mat=40.0, sc=_sc(a=30, z=90)),
+               {'sc': [{'insumo': 'YESERO', 'pct': 'x'}]},
+               {'sc': [{'insumo': 'YESERO', 'pct': '1'},
+                       {'insumo': 'YESERO', 'pct': '2'}]},
+               {'sc': [{'insumo': 'YESERO', 'pct': '101'}]},
+               {'sc': [{'insumo': 'YESERO', 'pct': ''},
+                       {'insumo': 'PINTOR', 'pct': '12,5 %'}]})
+    m.configurar(ctx)
+    assert ctx.campos[0][2].valor == [{'insumo': 'YESERO', 'pct': '30'},
+                                      {'insumo': 'PINTOR', 'pct': ''}]
+    assert len(ctx.avisos) == 3 and 'dos veces' in ctx.avisos[1]
+    assert ctx.campos[1][2].valor == [{'insumo': 'YESERO', 'pct': 'x'}]
+    assert json.loads(ctx.ajustes['sc']) == {B: 12.5}
+    # Quitar una fila la devuelve al general; 0 se guarda (no es vacío).
+    ctx = _Ctx(_dos_sc(sc=_sc(a=30, b=5)), {'sc': [{'insumo': 'PINTOR', 'pct': '0'}]})
+    m.configurar(ctx)
+    assert json.loads(ctx.ajustes['sc']) == {B: 0}
+    ctx = _Ctx(_dos_sc(sc=_sc(a=30)), None)
+    m.configurar(ctx)
+    assert ctx.ajustes == {'sc': _sc(a=30)}
+
+
 # ── Chile ────────────────────────────────────────────────────────────────────
 
 def test_chile_redondeo_opcional():

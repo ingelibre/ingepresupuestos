@@ -19,13 +19,20 @@ TEXTOS = {
         "Materiales": "Materials",
         "Materiales y mano de obra": "Materials and labor",
         "Parcial = materiales + mano de obra. La mano de obra incluye los equipos.": "Amount = materials + labor. Labor includes equipment.",
-        "Parte de materiales": "Materials share",
         "Repartir los subcontratos": "Split the subcontracts",
         "Reparto de subcontratos": "Subcontract split",
         "Reparto de subcontratos…": "Subcontract split…",
         "Subcontratos repartidos: {a} materiales y {b} mano de obra.": "Subcontracts split: {a} materials and {b} labor.",
         "Subcontratos y otros": "Subcontracts and other",
-        "Total": "Total"
+        "Total": "Total",
+        "Parte de materiales (general)": "Materials share (general)",
+        "Porcentaje propio de un subcontrato": "A subcontract's own percentage",
+        "Subcontrato": "Subcontract",
+        "% materiales": "% materials",
+        "Vacío = el general": "Empty = the general one",
+        "«{x}» no es un porcentaje de 0 a 100.": "«{x}» is not a percentage from 0 to 100.",
+        "«{x}» está dos veces.": "«{x}» appears twice.",
+        "Subcontratos repartidos con más de un porcentaje de materiales (el resto es mano de obra): {que}.": "Subcontracts split with more than one materials percentage (the rest is labor): {que}."
     },
     "pt_BR": {
         "No altera precios ni totales": "Não altera preços nem totais",
@@ -43,13 +50,20 @@ TEXTOS = {
         "Materiales": "Materiais",
         "Materiales y mano de obra": "Materiais e mão de obra",
         "Parcial = materiales + mano de obra. La mano de obra incluye los equipos.": "Parcial = materiais + mão de obra. A mão de obra inclui os equipamentos.",
-        "Parte de materiales": "Parte de materiais",
         "Repartir los subcontratos": "Dividir os subcontratos",
         "Reparto de subcontratos": "Divisão de subcontratos",
         "Reparto de subcontratos…": "Divisão de subcontratos…",
         "Subcontratos repartidos: {a} materiales y {b} mano de obra.": "Subcontratos divididos: {a} materiais e {b} mão de obra.",
         "Subcontratos y otros": "Subcontratos e outros",
-        "Total": "Total"
+        "Total": "Total",
+        "Parte de materiales (general)": "Parte de materiais (geral)",
+        "Porcentaje propio de un subcontrato": "Percentual próprio de um subcontrato",
+        "Subcontrato": "Subcontrato",
+        "% materiales": "% materiais",
+        "Vacío = el general": "Vazio = o geral",
+        "«{x}» no es un porcentaje de 0 a 100.": "«{x}» não é um percentual de 0 a 100.",
+        "«{x}» está dos veces.": "«{x}» está duas vezes.",
+        "Subcontratos repartidos con más de un porcentaje de materiales (el resto es mano de obra): {que}.": "Subcontratos divididos com mais de um percentual de materiais (o resto é mão de obra): {que}."
     }
 }
 
