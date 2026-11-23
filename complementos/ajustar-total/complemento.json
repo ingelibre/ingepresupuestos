@@ -1,0 +1,12 @@
+{
+  "esquema": 1,
+  "id": "ajustar-total",
+  "nombre": "Ajustar a un total",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #40)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Escala los precios de los tipos de insumo que elijas para llegar a un total. Enseña antes el resultado, cambia solo los precios de este proyecto (nunca la biblioteca) y se deshace de una vez.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/40",
+  "api_version": 2,
+  "codigo": "complemento.py"
+}
