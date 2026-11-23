@@ -1180,7 +1180,7 @@ def igualar_codigos_hermanos(conn, proyecto_id) -> int:
     el texto del código. Los grupos normales no se tocan. No hace commit.
     Devuelve cuántas filas cambió."""
     filas = conn.execute(
-        "SELECT id, item, sub_presupuesto_id AS sub FROM partidas "
+        "SELECT id, item, sub_presupuesto_id AS sub FROM partidas_ppto "
         "WHERE proyecto_id=?", (proyecto_id,)).fetchall()
     anchos: dict = {}        # (sub, códigos del padre como números) → anchos
     def _num(t):

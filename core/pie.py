@@ -136,6 +136,7 @@ def lineas_simples(proyecto, cd: float):
     def _linea(tipo, codigo, nombre, pct, valor):
         return {'tipo': tipo, 'nombre': nombre, 'codigo': codigo, 'pct': pct,
                 'valor': valor, 'mostrar_pct': 1, 'has_items': False,
+                'destacado': False,
                 'pct_real': round(valor / cd * 100, 2)
                 if (cd and tipo != 'subtotal') else 0}
 
