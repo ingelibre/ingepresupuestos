@@ -195,7 +195,7 @@ class SubpartidasTab(QWidget):
         vl.addLayout(hl)
         self.tbl = QTableWidget(0, 5)
         self.tbl.setHorizontalHeaderLabels(
-            [tr("Código"), tr("Descripción"), "Und.", tr("Costo unitario"), tr("Usos")])
+            [tr("Código"), tr("Descripción"), tr("Und."), tr("Costo unitario"), tr("Usos")])
         self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.tbl.verticalHeader().hide()
         self.tbl.setSelectionBehavior(QAbstractItemView.SelectRows)

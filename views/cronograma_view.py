@@ -1880,7 +1880,8 @@ class GanttWidget(QWidget):
         self.tbl = QTableWidget(0, 8)
         self.tbl.setHorizontalHeaderLabels(
             ["id", tr("Ítem"), tr("Descripción"), tr("Días\ncal."), tr("Días\nlab."),
-             tr("Inicio"), tr("Fin"), tr("Pred.")]
+             # «Inicio» suelto es la portada («Home» en inglés): aquí, la fecha.
+             tr("Inicio:").rstrip(":"), tr("Fin"), tr("Pred.")]
         )
         # Tooltip explicativo de las dos columnas de duración.
         for _c, _tip in (
