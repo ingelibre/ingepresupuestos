@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "acero-facil",
+  "nombre": "Acero fácil",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Metra el acero de columnas y vigas escribiendo los estribos como salen en el plano («1@.05, 8@.10, R@.20 c/ext») y las barras longitudinales. Muestra las posiciones, los kg y las varillas por diámetro, y agrega las filas a la planilla de acero de la partida que elijas. No diseña ni verifica la estructura.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "metrados",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Easy steel",
+      "descripcion": "Takes off column and beam steel by writing the stirrups as on the drawing («1@.05, 8@.10, R@.20 c/ext») plus the longitudinal bars. Shows positions, kg and stock bars per diameter, and adds the rows to the steel sheet of the item you choose. It does not design or check the structure."
+    },
+    "pt_BR": {
+      "nombre": "Aço fácil",
+      "descripcion": "Quantifica o aço de pilares e vigas escrevendo os estribos como no projeto («1@.05, 8@.10, R@.20 c/ext») e as barras longitudinais. Mostra as posições, os kg e as barras por diâmetro, e adiciona as linhas à planilha de aço do item escolhido. Não dimensiona nem verifica a estrutura."
+    }
+  }
+}
