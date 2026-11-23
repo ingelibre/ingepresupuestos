@@ -14,6 +14,7 @@ El mismo .spec funciona en las 3 plataformas — PyInstaller maneja los
 formatos por plataforma automáticamente. Solo `console=False` y el icon
 son específicos del SO.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -326,6 +327,11 @@ coll = COLLECT(
 
 # ── macOS .app bundle (solo si compilamos en macOS) ──────────────────────────
 if sys.platform == 'darwin':
+    # La versión del bundle sale de la misma constante que usa la app, para
+    # que Finder ▸ Obtener información no muestre una versión vieja.
+    _m = re.search(r'^CURRENT_VERSION\s*=\s*"([^"]+)"',
+                   (ROOT / 'core' / 'update_manager.py').read_text(encoding='utf-8'), re.M)
+    _version = _m.group(1) if _m else '0.0.0'
     app = BUNDLE(
         coll,
         name='ingepresupuestos.app',
@@ -333,7 +339,9 @@ if sys.platform == 'darwin':
         bundle_identifier='pe.tuxiasumari.ingepresupuestos',
         info_plist={
             'CFBundleDisplayName': 'ingePresupuestos',
-            'CFBundleShortVersionString': '0.5.0',
+            'CFBundleShortVersionString': _version,
+            'CFBundleVersion': _version,
+            'LSBackgroundOnly': False,
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,
         },
