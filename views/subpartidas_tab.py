@@ -275,7 +275,8 @@ class SubpartidasTab(QWidget):
         sid = self.seleccionada()
         if sid is None:
             return tr("Elija una sub-partida del proyecto.")
-        cant = parse_num(self.inp_cant.text())
+        from views.aviso_precios_dialog import moneda_de_proyecto
+        cant = parse_num(self.inp_cant.text(), moneda_de_proyecto(self.proyecto_id))
         if cant <= 0:
             return tr("La cantidad debe ser mayor que cero.")
         conn = get_db()

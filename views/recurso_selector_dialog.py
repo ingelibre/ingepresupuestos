@@ -23,6 +23,7 @@ from core.database import (get_db, _recalcular_pu, _siguiente_codigo_inei,
                            partida_global as _es_partida_global)
 from utils.formatting import parse_num
 from utils.i18n import tr
+from views.aviso_precios_dialog import moneda_de_proyecto
 from views.unidades_dialog import poner_lista
 
 # Precio, cuadrilla y cantidad solo aceptan un número. Sin esto el campo
@@ -69,6 +70,7 @@ class RecursoSelectorDialog(QDialog):
         ).fetchone()
         conn.close()
         self._proyecto_id = prow['proyecto_id'] if prow else None
+        self._moneda = moneda_de_proyecto(self._proyecto_id)
         # Partida global (glb/est/serv): cantidad directa en todos los
         # insumos, la cuadrilla no aplica a ninguno. Se decide UNA vez y la
         # usan tanto el formulario como la grabación, para que no discrepen.
@@ -589,8 +591,8 @@ class RecursoSelectorDialog(QDialog):
             return
 
         try:
-            cuad = parse_num(self.inp_cuad_b.text())
-            cant = parse_num(self.inp_cant_b.text())
+            cuad = parse_num(self.inp_cuad_b.text(), self._moneda)
+            cant = parse_num(self.inp_cant_b.text(), self._moneda)
         except Exception:
             cuad = cant = 0.0
 
@@ -657,7 +659,7 @@ class RecursoSelectorDialog(QDialog):
 
         tipo   = self.cmb_n_tipo.currentData()
         unidad = self.inp_n_unidad.text().strip()
-        precio = parse_num(self.inp_n_precio.text())
+        precio = parse_num(self.inp_n_precio.text(), self._moneda)
         codigo = self.inp_n_codigo.text().strip()
 
         conn = get_db()
@@ -674,8 +676,8 @@ class RecursoSelectorDialog(QDialog):
         conn.commit()
 
         try:
-            cuad = parse_num(self.inp_n_cuad.text())
-            cant = parse_num(self.inp_n_cant.text())
+            cuad = parse_num(self.inp_n_cuad.text(), self._moneda)
+            cant = parse_num(self.inp_n_cant.text(), self._moneda)
         except Exception:
             cuad = cant = 0.0
 
