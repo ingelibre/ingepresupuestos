@@ -12129,9 +12129,24 @@ class _DonutChart(QWidget):
             w_tot = QFontMetrics(f_tot).horizontalAdvance(tr("Total")) + 8
         return max(160, 28 + w_tot + w_cols + 10)
 
+    # Cuerpos de la leyenda, de mayor a menor: se usa el primero con el que
+    # cada entrada cabe en UNA línea (issue #47). Solo si ni el menor alcanza
+    # el monto baja a una segunda línea, al cuerpo normal.
+    _PT_LEYENDA = (8.0, 7.5, 7.0, 6.5)
+
+    def _fuente_leyenda(self, W: int) -> QFont:
+        for pt in self._PT_LEYENDA:
+            f = QFont(); f.setPointSizeF(pt)
+            if not any(dos for *_r, dos in
+                       self._filas_leyenda(W, QFontMetrics(f), pt)):
+                return f
+        f = QFont(); f.setPointSizeF(self._PT_LEYENDA[0])
+        return f
+
     def _alto_necesario(self, W: int) -> int:
-        f_ley = QFont(); f_ley.setPointSize(8)
-        filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley))
+        f_ley = self._fuente_leyenda(max(W, 160))
+        filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley),
+                                    f_ley.pointSizeF())
         ley = sum(self._FILA_2L if dos else self._FILA_1L
                   for *_r, dos in filas) + 10
         if self._moneda is not None:
@@ -12166,7 +12181,7 @@ class _DonutChart(QWidget):
     _FILA_1L, _FILA_2L = 20, 34     # alto de una entrada de la leyenda
     _GAP = 12                       # separación entre columnas
 
-    def _columnas_leyenda(self, fm) -> tuple:
+    def _columnas_leyenda(self, fm, pt: float = 8.0) -> tuple:
         """(ancho de la columna de montos, ancho de la de porcentajes)."""
         textos = self._leyenda_textos()
         w_pct = max([fm.horizontalAdvance(p) for _l, _m, p in textos] or [0])
@@ -12174,16 +12189,16 @@ class _DonutChart(QWidget):
         if self._moneda is not None:
             # El Total se pinta en negrita: medido con la fuente normal, la
             # columna quedaba corta y se comía la «S/» (David Ramos, ACU.docx).
-            f_tot = QFont(); f_tot.setPointSize(8); f_tot.setBold(True)
+            f_tot = QFont(); f_tot.setPointSizeF(pt); f_tot.setBold(True)
             w_amt = max(w_amt, QFontMetrics(f_tot).horizontalAdvance(self._texto_total()))
         return w_amt, w_pct
 
-    def _filas_leyenda(self, W: int, fm) -> list:
+    def _filas_leyenda(self, W: int, fm, pt: float = 8.0) -> list:
         """[(etiqueta, monto, pct, dos_lineas)]: una entrada va en dos líneas
         (monto y porcentaje debajo, en sus columnas) cuando la etiqueta no
         cabe junto a ellas en el ancho `W`. En la laptop de Marco «Mano de
         Obra» salía «Mano de O…» (15 sep 2026)."""
-        w_amt, w_pct = self._columnas_leyenda(fm)
+        w_amt, w_pct = self._columnas_leyenda(fm, pt)
         w_cols = w_pct + ((w_amt + self._GAP) if w_amt else 0)
         out = []
         for label, monto, pct in self._leyenda_textos():
@@ -12216,9 +12231,9 @@ class _DonutChart(QWidget):
 
         # Área del donut: cuadrado centrado en la mitad superior. La leyenda
         # mide según sus filas (una o dos líneas) más la del total.
-        f_ley = QFont(); f_ley.setPointSize(8)
+        f_ley = self._fuente_leyenda(W)
         fm_ley = QFontMetrics(f_ley)
-        filas = self._filas_leyenda(W, fm_ley)
+        filas = self._filas_leyenda(W, fm_ley, f_ley.pointSizeF())
         leyenda_h = sum(self._FILA_2L if dos else self._FILA_1L
                         for _l, _m, _p, dos in filas) + 10
         if self._moneda is not None:
@@ -12267,7 +12282,7 @@ class _DonutChart(QWidget):
         y_ley = 10 + size + 10
         painter.setFont(f_ley)
         fm = fm_ley
-        w_amt, w_pct = self._columnas_leyenda(fm)
+        w_amt, w_pct = self._columnas_leyenda(fm, f_ley.pointSizeF())
         # Columnas, de derecha a izquierda: porcentaje y monto.
         r_pct = QRect(W - 10 - w_pct, 0, w_pct, 18)
         r_amt = QRect(W - 10 - w_pct - self._GAP - w_amt, 0, w_amt, 18)

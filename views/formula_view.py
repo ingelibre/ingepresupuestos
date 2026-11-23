@@ -29,7 +29,7 @@ from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
+    QFileDialog, QMenu, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog,
     QTreeWidget, QTreeWidgetItem,
 )
@@ -998,6 +998,8 @@ class FormulaView(QWidget):
         )
         self.tbl.setItemDelegate(EditorPlenoDelegate(self.tbl))
         self.tbl.itemChanged.connect(self._on_item_changed)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._menu_monomio)
         # SOLO el clic y el teclado cambian de monomio. Nada de
         # `itemSelectionChanged` ni `currentCellChanged` a secas: esas señales
         # también saltan cuando la fila cambia por arrastre o por el foco.
@@ -1648,6 +1650,29 @@ class FormulaView(QWidget):
                 else:
                     it.setForeground(fg_normal)
             it.setToolTip(tip)
+
+    def _menu_monomio(self, pos):
+        """Clic derecho sobre un monomio (issue #46)."""
+        item = self.tbl.itemAt(pos)
+        if item is None:
+            return
+        self._crear_menu_monomio(item.row()).exec(
+            self.tbl.viewport().mapToGlobal(pos))
+
+    def _crear_menu_monomio(self, fila: int) -> QMenu:
+        menu = QMenu(self.tbl)
+        menu.setAttribute(Qt.WA_DeleteOnClose)
+        menu.addAction(tr("Editar símbolo")).triggered.connect(
+            lambda _=False: self._editar_simbolo(fila))
+        return menu
+
+    def _editar_simbolo(self, fila: int):
+        it = self.tbl.item(fila, 1)
+        if it is None:
+            return
+        self._fijar_monomio(fila)
+        self.tbl.setCurrentItem(it)
+        self.tbl.editItem(it)
 
     def _on_item_changed(self, item: QTableWidgetItem):
         row = item.row()

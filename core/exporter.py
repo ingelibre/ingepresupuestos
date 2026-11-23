@@ -256,11 +256,13 @@ def exportar_formula_polinomica(proyecto_id):
 
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
     ws.cell(r, 1, expresion).font      = Font(name='Courier New', bold=True, size=12)
-    ws.cell(r, 1).alignment            = al_l
+    ws.cell(r, 1).alignment            = Alignment(
+        horizontal='left', vertical='center', wrap_text=True)
     ws.cell(r, 1).border               = b_data
     r += 1
 
-    ws.row_dimensions[r - 1].height = 18
+    # A:E suman 98 de ancho: unos 80 caracteres de Courier 12 en negrita.
+    ws.row_dimensions[r - 1].height = 18 * max(1, -(-len(expresion) // 80))
     r += 1  # espacio
 
     # ── Cabecera tabla ───────────────────────────────────────────────────────
@@ -285,7 +287,7 @@ def exportar_formula_polinomica(proyecto_id):
             cell.alignment = al_r if c in (4, 5) else (al_c if c in (1, 3) else al_l)
             if c == 4:
                 cell.number_format = '0.0000'
-    r += 1
+        r += 1      # dentro del bucle: fuera, cada monomio pisaba al anterior
 
     # ── Fila total ───────────────────────────────────────────────────────────
     suma_k   = sum(float(mo['coeficiente'] or 0) for mo in monomios)

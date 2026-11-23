@@ -93,6 +93,7 @@
  "Duplicar": "Duplicate",
  "EDITAR PROYECTO": "EDIT PROJECT",
  "Editar": "Edit",
+ "Editar símbolo": "Edit symbol",
  "Editar usuario": "Edit user",
  "El Costo Directo del proyecto cambiará en {impacto}.\nEsta acción reemplaza el PU guardado de {n} partida(s).\n\n¿Recalcular de todas formas?": "The project's Direct Cost will change by {impacto}.\nThis replaces the stored unit price of {n} item(s).\n\nRecalculate anyway?",
  "El precio unitario de todas las partidas coincide con su análisis.": "Every item's unit price matches its cost analysis.",
