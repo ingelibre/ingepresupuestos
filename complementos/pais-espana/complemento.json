@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "pais-espana",
+  "nombre": "España",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Presupuesto y mediciones con cabecera, capítulos, texto de cada partida, líneas de medición, resumen por capítulos e IVA editable, y condiciones generales con tu texto. Son reportes: no cambian precios ni totales.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "paises",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Spain",
+      "descripcion": "Bill of quantities with header, chapters, item texts, measurement lines, chapter summary and editable VAT, plus general conditions with your own text. Reports only: they do not change prices or totals."
+    },
+    "pt_BR": {
+      "nombre": "Espanha",
+      "descripcion": "Orçamento e medições com cabeçalho, capítulos, texto de cada item, linhas de medição, resumo por capítulos e IVA editável, e condições gerais com seu texto. São relatórios: não alteram preços nem totais."
+    }
+  }
+}
