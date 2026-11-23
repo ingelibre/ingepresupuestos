@@ -57,6 +57,10 @@ v.set_usuario(auth._usuario_actual)
 assert v._puente_mcp.encendido
 
 
+# En Windows, cargar numpy con otro hilo leyendo stdin se cuelga.
+import openpyxl  # noqa: E402,F401
+
+
 def _fin():
     sys.stdin.read()
     QTimer.singleShot(0, app, app.quit)

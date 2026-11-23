@@ -87,6 +87,13 @@ def pedir_a_ingetrazo(parent, fn, *args):
             if not ok:
                 return None
             doc = e.documentos[nombres.index(el)]["document_id"]
+        except ip.IngeTrazoAntiguo:
+            QMessageBox.information(parent, titulo, tr(
+                "Este IngeTrazo no tiene el enlace con IngePresupuestos: "
+                "hace falta una versión posterior a la 0.6.3.2.\n\n"
+                "Mientras tanto puedes exportar el modelo a IFC y traerlo "
+                "con BIM ▸ Modelo BIM y vínculos…"))
+            return None
         except ip.ErrorIngeTrazo as e:
             QMessageBox.warning(parent, titulo, str(e))
             return None

@@ -1692,6 +1692,7 @@
  "No hay nada que imprimir en esta pantalla.": "Não há nada para imprimir nesta tela.",
  "No hay ninguna valorización a la vista.": "Não há nenhuma medição à vista.",
  "No hay ningún IngeTrazo abierto con el puente encendido.\n\nEn IngeTrazo, abre la pestaña IA y pulsa «Iniciar» en Puente de IA (MCP).": "Não há nenhum IngeTrazo aberto com a ponte ligada.\n\nNo IngeTrazo, abra a aba IA e clique em «Iniciar» em Ponte de IA (MCP).",
+ "Este IngeTrazo no tiene el enlace con IngePresupuestos: hace falta una versión posterior a la 0.6.3.2.\n\nMientras tanto puedes exportar el modelo a IFC y traerlo con BIM ▸ Modelo BIM y vínculos…": "Este IngeTrazo não tem o vínculo com o IngePresupuestos: é necessária uma versão posterior à 0.6.3.2.\n\nEnquanto isso, você pode exportar o modelo para IFC e trazê-lo em BIM ▸ Modelo BIM e vínculos…",
  "No hay ningún requerimiento a la vista.": "Não há nenhuma requisição à vista.",
  "No hay partidas marcadas. Marca al menos una.": "Não há serviços marcados. Marque pelo menos um.",
  "No hay planilla cargada para esta partida. Cárgala fila por fila (largo × ancho × alto), o usa el chat para que la IA te sugiera la fórmula geométrica.": "Não há memória de cálculo para este serviço. Preencha linha por linha (comprimento × largura × altura), ou use o chat para que a IA sugira a fórmula geométrica.",

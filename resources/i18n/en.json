@@ -1693,6 +1693,7 @@
  "No hay nada que imprimir en esta pantalla.": "There is nothing to print on this screen.",
  "No hay ninguna valorización a la vista.": "There is no progress billing in view.",
  "No hay ningún IngeTrazo abierto con el puente encendido.\n\nEn IngeTrazo, abre la pestaña IA y pulsa «Iniciar» en Puente de IA (MCP).": "No IngeTrazo is open with the bridge on.\n\nIn IngeTrazo, open the AI tab and press “Start” under AI bridge (MCP).",
+ "Este IngeTrazo no tiene el enlace con IngePresupuestos: hace falta una versión posterior a la 0.6.3.2.\n\nMientras tanto puedes exportar el modelo a IFC y traerlo con BIM ▸ Modelo BIM y vínculos…": "This IngeTrazo does not have the IngePresupuestos link: a version later than 0.6.3.2 is needed.\n\nMeanwhile you can export the model to IFC and bring it in with BIM ▸ BIM model and links…",
  "No hay ningún requerimiento a la vista.": "There is no requisition in view.",
  "No hay partidas marcadas. Marca al menos una.": "No items checked. Check at least one.",
  "No hay planilla cargada para esta partida. Cárgala fila por fila (largo × ancho × alto), o usa el chat para que la IA te sugiera la fórmula geométrica.": "No takeoff sheet loaded for this item. Enter it row by row (length × width × height), or use the chat so the AI suggests the geometric formula.",

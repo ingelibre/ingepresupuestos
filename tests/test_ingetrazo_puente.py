@@ -114,3 +114,25 @@ def test_el_boton_espera_en_un_hilo_y_abre_el_dialogo(reg, monkeypatch):
     monkeypatch.setattr(views, 'bim_dialog', doble, raising=False)
     it.traer_de_ingetrazo(None, 7)
     assert visto == {"pid": 7, "t": TAKE, "hilo": threading.main_thread()}
+
+
+@pytest.mark.parametrize("error", [
+    "ValueError: unknown tool 'get_takeoff'",
+    "TypeError: BridgeTools._tool_select() got an unexpected keyword "
+    "argument 'global_ids'"])
+def test_un_ingetrazo_sin_el_enlace_lo_dice_claro(reg, monkeypatch, error):
+    """Lo que responde la 0.6.3.2, tal cual."""
+    class Con:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def settimeout(self, t): pass
+        def sendall(self, b): pass
+        def makefile(self, m):
+            import io
+            return io.BytesIO((json.dumps(
+                {"id": 1, "ok": False, "error": error}) + "\n").encode())
+    monkeypatch.setattr(ip.socket, "create_connection", lambda *a, **k: Con())
+    h = "get_takeoff" if "tool" in error.split("'")[0] else "select"
+    with pytest.raises(ip.IngeTrazoAntiguo, match="0.6.3.2"):
+        ip._pedir({"instance_id": "i", "host": "127.0.0.1", "port": 1}, h, {},
+                  "i:d1", 1)

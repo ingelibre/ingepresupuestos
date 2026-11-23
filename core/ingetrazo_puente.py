@@ -29,12 +29,23 @@ SIN_INGETRAZO = ("No hay ningún IngeTrazo abierto con el puente encendido. "
                  "En IngeTrazo: pestaña IA ▸ Puente de IA (MCP) ▸ Iniciar.")
 
 
+ANTIGUO = ("Este IngeTrazo no tiene el enlace con IngePresupuestos: "
+           "hace falta una versión posterior a la 0.6.3.2.")
+
+
 class ErrorIngeTrazo(Exception):
     pass
 
 
 class SinIngeTrazo(ErrorIngeTrazo):
     pass
+
+
+class IngeTrazoAntiguo(ErrorIngeTrazo):
+    """El puente contesta, pero sin `get_takeoff` o sin `global_ids`."""
+
+    def __init__(self):
+        super().__init__(ANTIGUO)
 
 
 class VariosDocumentos(ErrorIngeTrazo):
@@ -114,7 +125,11 @@ def _pedir(reg: dict, herramienta: str, args: dict,
     if not isinstance(resp, dict) or resp.get("id") != 1:
         raise ErrorIngeTrazo("respuesta no válida de IngeTrazo")
     if resp.get("ok") is not True:
-        raise ErrorIngeTrazo("IngeTrazo: " + str(resp.get("error") or "error"))
+        error = str(resp.get("error") or "error")
+        if (f"unknown tool {herramienta!r}" in error
+                or "unexpected keyword argument 'global_ids'" in error):
+            raise IngeTrazoAntiguo()
+        raise ErrorIngeTrazo("IngeTrazo: " + error)
     if not isinstance(resp.get("result"), dict):
         raise ErrorIngeTrazo("respuesta no válida de IngeTrazo")
     return resp["result"]
