@@ -60,7 +60,7 @@ from utils import partidas_clipboard as _pclip
 
 # ── Paleta — aliases de tokens centralizados (utils/theme.py) ────────────────
 from utils.theme import C as _C, nivel_fg as _nivel_fg, nivel_bg as _nivel_bg, NIVEL_MAX as _NIVEL_MAX
-from utils.formatting import ITEM_TRAMOS_POR_LINEA
+from utils.formatting import ITEM_TRAMOS_POR_LINEA, separadores as _separadores
 
 BLUE_500  = _C.brand            # naranja marca (legacy name)
 BLUE_700  = _C.brand_hover
@@ -1628,8 +1628,10 @@ class _MetradoDelegate(QStyledItemDelegate):
         return ed
 
     def setEditorData(self, editor, index):
-        text = texto_para_editar(index.data(Qt.DisplayRole) or "",
-                                 self.parent().property("moneda"))
+        moneda = self.parent().property("moneda")
+        text = texto_para_editar(index.data(Qt.DisplayRole) or "", moneda)
+        if not get_decimales_metrado() and _separadores(moneda or '')[1] == ',':
+            text = text.replace('.', '')   # sin decimales, el punto es de miles
         editor.setText(text)
         editor.selectAll()
 
@@ -3994,7 +3996,7 @@ class ProyectoView(QWidget):
 
             def _save_manual():
                 try:
-                    monto = parse_num(inp_monto.text())
+                    monto = parse_num(inp_monto.text(), self._moneda)
                 except Exception:
                     monto = 0.0
                 conn = get_db()
@@ -4086,7 +4088,7 @@ class ProyectoView(QWidget):
                     pp  = row['pct_participacion']
                     cant = row['cantidad']
                     pr  = row['precio']
-                    def _s(v): return f"{v:g}" if v is not None else ''
+                    def _s(v): return f"{v:.15g}" if v is not None else ''
                     # % Participación: vacío ⇒ 100% por defecto (mostrado y usado).
                     pp_eff = pp if pp is not None else 100
                     # Total = Cantidad × (% Participación / 100) × Precio
@@ -4317,7 +4319,7 @@ class ProyectoView(QWidget):
         conn = get_db()
         is_numeric = field in ('pct_participacion', 'cantidad', 'precio')
         if is_numeric:
-            try: num = parse_num(val) if val else None
+            try: num = parse_num(val, self._moneda) if val else None
             except: num = None
             # % Participación: vacío ⇒ 100% por defecto.
             if field == 'pct_participacion' and num is None:
@@ -4338,7 +4340,7 @@ class ProyectoView(QWidget):
             # (evita destruir la tabla y cortar la navegación con teclado)
             def _v(c):
                 it = tbl.item(row, c)
-                try: return parse_num(it.text()) if it and it.text().strip() else None
+                try: return parse_num(it.text(), self._moneda) if it and it.text().strip() else None
                 except: return None
             pp, cant, pr = _v(2), _v(3), _v(4)
             if cant is not None and pr is not None:
@@ -4643,7 +4645,8 @@ class ProyectoView(QWidget):
         conn.close()
 
         def _guardar_fijo(cod, texto):
-            val = parse_num_opt(texto, self._moneda)
+            val = parse_num_opt(texto, self._moneda,
+                                mostrado=not get_decimales_ppto())
             if val is None or val == fijos.get(cod):
                 return
             fijos[cod] = val
@@ -4823,7 +4826,8 @@ class ProyectoView(QWidget):
                     row_hl.addWidget(lbl_p)
                 elif es_fijo:
                     inp_f = _StyledLineEdit(
-                        fmt_doc(fijos[rub['codigo']], get_decimales_ppto(), moneda=self._moneda))
+                        fmt_doc(fijos[rub['codigo']], get_decimales_ppto(),
+                                moneda=self._moneda))
                     inp_f.setFixedWidth(88)
                     inp_f.setAlignment(Qt.AlignRight)
                     inp_f.setToolTip(tr("Monto fijo de la línea"))
@@ -6565,7 +6569,8 @@ class ProyectoView(QWidget):
             partidas = conn.execute(
                 "SELECT DISTINCT ai.partida_id FROM acu_items ai"
                 " JOIN partidas p ON p.id = ai.partida_id"
-                " WHERE ai.recurso_id=? AND p.proyecto_id=?",
+                " WHERE ai.recurso_id=? AND p.proyecto_id=?"
+                " AND ai.sub_partida_id IS NULL",
                 (recurso_id_viejo, self.pid)
             ).fetchall()
             part_ids = [r['partida_id'] for r in partidas]
@@ -6583,7 +6588,8 @@ class ProyectoView(QWidget):
             colisiones = conn.execute(
                 f"SELECT partida_id, id, cuadrilla, cantidad, precio"
                 f" FROM acu_items"
-                f" WHERE recurso_id=? AND partida_id IN ({placeholders})",
+                f" WHERE recurso_id=? AND sub_partida_id IS NULL"
+                f" AND partida_id IN ({placeholders})",
                 (nuevo_id, *part_ids)
             ).fetchall()
             colision_por_part = {c['partida_id']: c for c in colisiones}
@@ -6593,7 +6599,8 @@ class ProyectoView(QWidget):
             for pid_aff in part_ids:
                 viejo = conn.execute(
                     "SELECT id, cuadrilla, cantidad, precio FROM acu_items"
-                    " WHERE recurso_id=? AND partida_id=?",
+                    " WHERE recurso_id=? AND partida_id=?"
+                    " AND sub_partida_id IS NULL",
                     (recurso_id_viejo, pid_aff)
                 ).fetchone()
                 if not viejo:

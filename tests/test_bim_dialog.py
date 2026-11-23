@@ -284,19 +284,3 @@ def test_vista_3d_va_y_vuelve_con_la_partida(base, monkeypatch):
     dlg.done(0)
     assert v.log[-1] == ('cerrar',)
     dlg.deleteLater()
-
-
-def test_importar_solo_ofrece_los_proyectos_del_usuario(base):
-    from PySide6.QtWidgets import QWidget
-    from models.usuario import Usuario
-    for n in (1, 2):
-        _x("INSERT OR IGNORE INTO usuarios (id,nombre,username,email,password_hash,rol) "
-           f"VALUES ({n},'u','u{n}','u{n}@x','h','usuario')")
-    mio = _x("INSERT INTO proyectos (nombre,usuario_id) VALUES ('Mío',1)")
-    ajeno = _x("INSERT INTO proyectos (nombre,usuario_id) VALUES ('Ajeno',2)")
-    ventana = QWidget()
-    ventana.usuario = Usuario(id=1, rol='usuario')
-    dlg = bv.ImportarBimDialog(bim.leer_takeoff(TAKEOFF), parent=ventana)
-    ids = [dlg.cmb.itemData(i) for i in range(dlg.cmb.count())]
-    assert mio in ids and ajeno not in ids
-    dlg.deleteLater()

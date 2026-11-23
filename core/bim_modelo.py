@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -838,9 +839,12 @@ def _editada(r) -> bool:
         if r[k] is not None:
             p, hay = p * r[k], True
     f = r['factor'] if r['factor'] is not None else 1.0
-    esperado = r['valor'] * f
-    tol = 0.0051 * max(1.0, abs(f), abs(r['valor']) if f != 1 else 0) + 1e-9 * abs(esperado)
-    return not hay or abs(p - esperado) > tol
+    v = r['valor']
+    tol = 0.0051 * max(1.0, abs(f)) + 1e-9 * abs(v * f)
+    # El factor pudo quedar a 2 decimales (.155 → .15 o .16): se admiten esos
+    # valores y no una holgura × valor, que tapaba ediciones de verdad.
+    return not hay or all(abs(p - v * x) > tol for x in (
+        f, math.floor(f * 100) / 100, math.ceil(f * 100) / 100))
 
 
 def _descripcion(e: ElementoBim) -> str:
@@ -1124,8 +1128,13 @@ def aplicar(modelo_id: int, modelo_nuevo: ModeloBim, partidas=None, *, nuevos=No
 
 # ── Crear partidas desde el modelo ───────────────────────────────────────────
 
+def _clave_item(item) -> tuple:
+    return tuple(int(t) if t.isdecimal() else t for t in (item or '').split('.'))
+
+
 def _id_por_item(conn, pid) -> dict:
-    return {r['item']: r['id'] for r in conn.execute(
+    # Por números: con más de 99 hermanas «01.99» se guardó como «01.099».
+    return {_clave_item(r['item']): r['id'] for r in conn.execute(
         "SELECT id, item FROM partidas_ppto WHERE proyecto_id=?", (pid,))}
 
 
@@ -1141,7 +1150,7 @@ def crear_proyecto(modelo: ModeloBim, ruta: str = '', propuestas=None) -> int:
         ids = _id_por_item(c, pid)
         for p in props:
             if p['global_ids']:
-                vincular(ids[p['item']], mid, p['global_ids'], 'metrado', conn=c)
+                vincular(ids[_clave_item(p['item'])], mid, p['global_ids'], 'metrado', conn=c)
     return pid
 
 
@@ -1172,6 +1181,8 @@ def anadir_partidas(pid: int, modelo: ModeloBim, ruta: str = '', propuestas=None
             ids.append(part)
             if p['global_ids']:
                 vincular(part, mid, p['global_ids'], 'metrado', conn=c)
+        from core.database import igualar_codigos_hermanos
+        igualar_codigos_hermanos(c, pid)
     return mid, ids
 
 

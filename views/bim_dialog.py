@@ -26,8 +26,10 @@ from core import bim_modelo as bim
 from core.config import puede_editar
 from core.database import get_db, get_decimales_metrado
 from utils.formatting import norm_busqueda, parse_num
+from utils.auth import usuario_actual
 from utils.i18n import N_, tr
 from utils.theme import BTN_PRIMARY_SS, btn_secondary
+from views.aviso_precios_dialog import moneda_de_proyecto
 
 SLATE_700, SLATE_500, SLATE_100 = "#2E3C52", "#485A6C", "#E2E8F0"
 SILVER_100, WHITE, ROJO = "#F8F9FA", "#FFFFFF", "#B71C1C"
@@ -359,7 +361,7 @@ class ImportarBimDialog(_Base):
             c = get_db()
             try:
                 # Los mismos proyectos que muestra el Inicio a este usuario.
-                usuario = getattr(parent.window() if parent else None, 'usuario', None)
+                usuario = usuario_actual()
                 cond, par = '', ()
                 if usuario is not None and not usuario.es_admin:
                     cond, par = " WHERE usuario_id=? OR usuario_id IS NULL", (usuario.id,)
@@ -947,7 +949,7 @@ class ModeloBimDialog(_Base):
     def _vincular(self):
         gids = [e.global_id for e in self.arbol.marcados()]
         args = (self.partida_id, self.modelo_id, gids, self.cmb_medida.currentData(),
-                parse_num(self.ed_factor.text()))
+                parse_num(self.ed_factor.text(), moneda_de_proyecto(self.pid)))
         try:
             try:
                 r = bim.vincular(*args)

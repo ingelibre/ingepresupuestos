@@ -61,7 +61,7 @@ carpeta de datos, `deshacer_ia/`). **Deshacer lo último de la IA** (menú Archi
 o la ventana de conexión) lo devuelve con los mismos identificadores.
 
 Si editaste el proyecto después, avisa: deshacer también perdería lo tuyo. Solo
-continúa si lo confirmas (el asistente, con `force: true`).
+continúa si lo confirmas tú en la app; el asistente no puede forzarlo.
 
 Mientras escribes en una celda, tienes un diálogo abierto o especificaciones
 sin guardar, los cambios del asistente se rechazan con «ocupado». Las lecturas

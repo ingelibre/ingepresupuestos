@@ -201,10 +201,9 @@ HERRAMIENTAS: list[dict] = [
      }, ("project_id",))},
     {"name": "undo_last", "lee": False,
      "description": "Deshace la última escritura hecha por la IA. Si el "
-                    "usuario editó ese proyecto después, se niega; "
-                    "`force: true` pierde también lo que él editó: pregúntale "
-                    "antes.",
-     "inputSchema": _obj({"force": _BOOL})},
+                    "usuario editó ese proyecto después, se niega: "
+                    "en ese caso solo él puede deshacer, desde la app.",
+     "inputSchema": _obj({})},
     # ── Salida ───────────────────────────────────────────────────────────
     {"name": "export_report", "lee": True,
      "description": "Genera un reporte en PDF o Excel en la ruta absoluta "

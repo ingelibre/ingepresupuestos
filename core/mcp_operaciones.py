@@ -614,6 +614,12 @@ class Operaciones:
                     d.update(unit=r['unidad'], quantity=r['metrado'],
                              unit_price=r['precio_unitario'])
                 hechos.append(d)
+            from core.database import igualar_codigos_hermanos
+            if igualar_codigos_hermanos(conn, project_id):
+                for d in hechos:
+                    d['item'] = conn.execute(
+                        "SELECT item FROM partidas WHERE id=?",
+                        (d['item_id'],)).fetchone()[0]
             return {"added": hechos}
         return self._escribir('add_items', project_id, 'presupuesto', cambio)
 
@@ -865,8 +871,8 @@ class Operaciones:
             r = mcp_deshacer.deshacer_ultima(self.pila, forzar=force,
                                              autorizar=autorizar)
         except mcp_deshacer.EditadoDespues as e:
-            err = ErrorMCP(f"{e}. Pregunta al usuario y usa force: true solo si "
-                           "acepta perderlos")
+            err = ErrorMCP(f"{e}. Solo el usuario puede deshacerlo igualmente: "
+                           "en la app, menú Archivo, deshacer lo último de la IA")
             err.editado = True
             raise err from None
         except LookupError as e:
