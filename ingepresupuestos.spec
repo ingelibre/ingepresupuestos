@@ -97,6 +97,9 @@ hiddenimports = [
     # Módulos internos referenciados por import perezoso (dentro de funciones) —
     # PyInstaller normalmente los detecta, pero se listan por seguridad.
     'core.plantillas_estructura',
+    # MCP: se importan dentro de funciones.
+    'core.mcp_stdio', 'core.mcp_operaciones', 'core.ingetrazo_puente',
+    'views.mcp_puente', 'views.mcp_dialog', 'views.ingetrazo_traer',
     # Proveedores IA — se importan dinámicamente según la config del usuario.
     'anthropic',
     'groq',
@@ -248,11 +251,44 @@ exe = EXE(
     icon=icon,
 )
 
+# ── ingepresupuestos-mcp: programa de CONSOLA para los clientes MCP ─────────
+# Hablan por stdin/stdout y un .exe de ventana puede no tenerlos. Solo stdlib
+# y comparte el mismo _internal/. En Linux y macOS basta `ingepresupuestos
+# --mcp`, pero el binario se incluye igual para que el bundle sea uno solo.
+mcp_a = Analysis(
+    ['scripts/ingepresupuestos_mcp.py'],
+    pathex=[str(ROOT)],
+    binaries=[],
+    datas=[],
+    hiddenimports=['core.mcp_stdio'],
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=excludes + ['PySide6', 'numpy'],
+    noarchive=False,
+)
+mcp_pyz = PYZ(mcp_a.pure)
+mcp_exe = EXE(
+    mcp_pyz,
+    mcp_a.scripts,
+    [],
+    exclude_binaries=True,
+    name='ingepresupuestos-mcp',
+    debug=False,
+    strip=False,
+    upx=False,
+    console=True,
+    icon=icon,
+)
+
 coll = COLLECT(
     exe,
+    mcp_exe,
     a.binaries,
     a.zipfiles,
     a.datas,
+    mcp_a.binaries,
+    mcp_a.zipfiles,
+    mcp_a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],
