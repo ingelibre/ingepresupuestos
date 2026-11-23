@@ -37,7 +37,7 @@ from core.config import DB_PATH
 from widgets.num_item import NumItem
 from core.database import (
     get_db, _r2, _rn, _recalcular_pu, calcular_totales,
-    get_acu_hojas, get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
+    get_acu_hojas, get_acu_items, igualar_codigos_hermanos, get_insumos_proyecto, get_insumos_para_partidas,
     _siguiente_codigo_inei,
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
@@ -52,7 +52,8 @@ from core.database import (
     partida_global as _partida_global,
 )
 from models.usuario import Usuario
-from utils.formatting import fmt, fmt_num, parse_num, parse_num_opt
+from utils.formatting import (con_separadores, fmt, fmt_doc, fmt_num, parse_num,
+                              parse_num_opt, texto_para_editar)
 from utils.i18n import tr, N_
 from utils.icons import icon as load_icon, icon_colored
 from utils import partidas_clipboard as _pclip
@@ -911,7 +912,7 @@ class _InputCellDelegate(QStyledItemDelegate):
             return
         if editor.text() == editor.property('texto_inicial'):
             return      # pasar por la celda (Tab, flechas) no es editarla
-        val = parse_num_opt(editor.text())
+        val = parse_num_opt(editor.text(), getattr(self.parent(), '_moneda', None))
         if val is None:
             return
         save_col = self._save_col
@@ -1187,6 +1188,9 @@ class _PresupuestoTree(QTreeWidget):
 
     def _procesar_nivel(self, parent_item, prefijo: str, nivel: int, conn,
                         offset: int = 0):
+        # Más de 99 hermanas → tres dígitos para todas: los reportes ordenan
+        # por el texto del código y «01.100» caía entre «01.10» y «01.11».
+        ancho = max(2, len(str(parent_item.childCount() + offset)))
         for i in range(parent_item.childCount()):
             child = parent_item.child(i)
             pid   = child.data(0, Qt.UserRole)
@@ -1194,7 +1198,7 @@ class _PresupuestoTree(QTreeWidget):
                 continue
 
             seq = (i + 1 + offset) if not prefijo else (i + 1)
-            num_str = f"{seq:02d}"
+            num_str = f"{seq:0{ancho}d}"
             nuevo_item = f"{prefijo}.{num_str}" if prefijo else num_str
 
             # Actualizar BD
@@ -1412,7 +1416,7 @@ class _MetNavDelegate(QStyledItemDelegate):
         txt = index.data() or ''
         # Mostrar número sin separador de miles para editar más fácilmente
         if index.column() > 0:
-            txt = txt.replace(',', '')
+            txt = texto_para_editar(txt, self._pv._moneda)
         editor.setText(txt)
         editor.selectAll()
 
@@ -1495,7 +1499,7 @@ class _AceroNavDelegate(QStyledItemDelegate):
     def setEditorData(self, editor, index):
         txt = index.data() or ''
         if index.column() > 1:
-            txt = txt.replace(',', '')
+            txt = texto_para_editar(txt, self._pv._moneda)
         editor.setText(txt)
         editor.selectAll()
 
@@ -1624,16 +1628,17 @@ class _MetradoDelegate(QStyledItemDelegate):
         return ed
 
     def setEditorData(self, editor, index):
-        text = (index.data(Qt.DisplayRole) or "").replace(',', '').strip()
+        text = texto_para_editar(index.data(Qt.DisplayRole) or "",
+                                 self.parent().property("moneda"))
         editor.setText(text)
         editor.selectAll()
 
     def setModelData(self, editor, model, index):
-        val = parse_num_opt(editor.text())
+        val = parse_num_opt(editor.text(), self.parent().property("moneda"))
         if val is None:
             return
         dec = get_decimales_metrado()
-        model.setData(index, f"{val:,.{dec}f}", Qt.EditRole)
+        model.setData(index, fmt_doc(val, dec, moneda=self.parent().property("moneda")), Qt.EditRole)
 
 
 
@@ -2504,6 +2509,7 @@ class ProyectoView(QWidget):
         self.tree.itemDoubleClicked.connect(self._on_tree_doble_clic)
 
         # Delegate de edición inline para col Metrado
+        self.tree.setProperty('moneda', self._moneda)
         self._metrado_delegate = _MetradoDelegate(self.tree)
         self.tree.setItemDelegateForColumn(3, self._metrado_delegate)
         self._metrado_delegate.navigate.connect(self._navegar_metrado)
@@ -3759,10 +3765,10 @@ class ProyectoView(QWidget):
         all_subs=True usa el CD global del proyecto (todos los subpresupuestos)."""
         # El cálculo es `core.pie.calcular_pie`, el mismo del PDF y el Excel
         # (issue #3: estaba copiado cinco veces y ninguna redondeaba).
-        from core.pie import calcular_pie, nombre_total
+        from core.pie import nombre_total, pie_efectivo
         cd = self._total_proyecto(all_subs=all_subs)
         conn = get_db()
-        lineas, total = calcular_pie(conn, self.pid, cd)
+        lineas, total = pie_efectivo(conn, self.pid, cd)
         conn.close()
         # En mayúsculas como el resto de filas y como lo imprimen PDF, Excel
         # y Word (David Ramos, 16 sep 2026), y en negrita como un subtotal,
@@ -4147,7 +4153,7 @@ class ProyectoView(QWidget):
                         def _txt(col, defv=None):
                             c = tbl.item(r, col)
                             if not c or not c.text().strip(): return defv
-                            return parse_num_opt(c.text())
+                            return parse_num_opt(c.text(), self._moneda)
                         e.update({'unidad': (tbl.item(r,1).text() if tbl.item(r,1) else ''),
                                   'pct_participacion': _txt(2), 'cantidad': _txt(3),
                                   'precio': _txt(4)})
@@ -4198,7 +4204,7 @@ class ProyectoView(QWidget):
                         def _txt(col):
                             c = tbl.item(r, col)
                             if not c or not c.text().strip(): return None
-                            return parse_num_opt(c.text())
+                            return parse_num_opt(c.text(), self._moneda)
                         e.update({'unidad': (tbl.item(r,1).text() if tbl.item(r,1) else ''),
                                   'pct_participacion': _txt(2), 'cantidad': _txt(3),
                                   'precio': _txt(4)})
@@ -4805,7 +4811,7 @@ class ProyectoView(QWidget):
                         QLineEdit.focusInEvent(base, ev)
                     inp_pct.focusInEvent = _sel_pct
                     def _pct_done(idx=i, w=inp_pct):
-                        val = parse_num_opt(w.text())
+                        val = parse_num_opt(w.text(), self._moneda)
                         if val is None:
                             return
                         _save_field(idx, 'pct', val)
@@ -5519,9 +5525,9 @@ class ProyectoView(QWidget):
                 tiene_specs    = bool((row['especificaciones'] or '').strip())
                 tw.setData(1, Qt.UserRole, tiene_specs)      # ✓ en Descripción = specs
                 dec = get_decimales_ppto()
-                tw.setText(3, f"{met:,.{get_decimales_metrado()}f}")
+                tw.setText(3, fmt_doc(met, get_decimales_metrado(), moneda=self._moneda))
                 tw.setData(3, Qt.UserRole, tiene_planilla)   # ✓ en Metrado = planilla
-                tw.setText(4, f"{pu:,.{dec}f}")
+                tw.setText(4, fmt_doc(pu, dec, moneda=self._moneda))
                 self._marcar_precio(tw, pu, row['id'] in con_acu)
                 parcial = parcial_wysiwyg(met, pu, dec)
                 tw.setText(5, fmt_num(parcial, self._moneda, dec))
@@ -5822,9 +5828,11 @@ class ProyectoView(QWidget):
             vals = [
                 it['descripcion'] or '',
                 it['unidad'] or '',
-                self._texto_cuadrilla(tipo, it['unidad'], cuad),
-                f"{cant:.{get_decimales_cant_acu(tipo)}f}",
-                f"{precio:.{dec}f}",
+                con_separadores(self._texto_cuadrilla(tipo, it['unidad'], cuad),
+                                self._moneda),
+                fmt_doc(cant, get_decimales_cant_acu(tipo), moneda=self._moneda,
+                        miles=False),
+                fmt_doc(precio, dec, moneda=self._moneda, miles=False),
                 fmt(it['parcial'] or 0, self._moneda, dec),
             ]
             for c, v in enumerate(vals, start=1):
@@ -6010,7 +6018,8 @@ class ProyectoView(QWidget):
                     f"{tr('Clic derecho → Unificar precio')}"
                 )
 
-            vals = [desc, row['unidad'] or '', f"{cant:.{get_decimales_cant_acu(tipo)}f}",
+            vals = [desc, row['unidad'] or '', fmt_doc(cant, get_decimales_cant_acu(tipo), moneda=self._moneda,
+                        miles=False),
                     fmt(precio, self._moneda, dec), fmt(parcial, self._moneda, dec)]
             nums = {3: cant, 4: precio, 5: parcial}
             for c, v in enumerate(vals, start=1):
@@ -6157,7 +6166,7 @@ class ProyectoView(QWidget):
             ed.hide()
             # Sin cambios no se guarda: el texto inicial es el valor completo,
             # pero guardar «lo mismo» igual recalcularía todo el proyecto.
-            nuevo = parse_num_opt(ed.text()) if ed.text() != texto_inicial else None
+            nuevo = parse_num_opt(ed.text(), self._moneda) if ed.text() != texto_inicial else None
             if nuevo is not None:
                 dec = get_decimales_ppto()
                 # Tomar el Parcial ANTES de tocar el precio: si la tabla
@@ -6668,7 +6677,7 @@ class ProyectoView(QWidget):
                 str(row['largo'] or ''),
                 str(row['ancho'] or ''),
                 str(row['alto'] or ''),
-                f"{(row['parcial'] or 0):,.{dec}f}",
+                fmt_doc(row['parcial'] or 0, dec, moneda=self._moneda),
             ]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
@@ -6683,7 +6692,7 @@ class ProyectoView(QWidget):
                 self.tbl_met.setItem(r, c, it)
             total += float(row['parcial'] or 0)
 
-        self.lbl_met_total.setText(f"{total:,.{dec}f}")
+        self.lbl_met_total.setText(fmt_doc(total, dec, moneda=self._moneda))
         self._met_loading = False
         self._met_dirty   = False   # datos recién cargados, sin cambios
         self._metrado_nueva_fila()   # fila en blanco lista al final
@@ -7459,6 +7468,7 @@ class ProyectoView(QWidget):
             nuevos = _pclip.pegar(conn, self.pid, self._sub_ppto_id,
                                   contexto_item=ctx_item,
                                   contexto_es_titulo=ctx_es_titulo)
+            igualar_codigos_hermanos(conn, self.pid)
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -7708,7 +7718,17 @@ class ProyectoView(QWidget):
             destino.setExpanded(True)
         return True
 
+    def _igualar_codigos(self):
+        """Grupos que acaban de pasar de 99 hermanas (antes de recargar)."""
+        conn = get_db()
+        try:
+            if igualar_codigos_hermanos(conn, self.pid):
+                conn.commit()
+        finally:
+            conn.close()
+
     def _on_partidas_agregadas(self):
+        self._igualar_codigos()
         self.recargar_partidas()
         ancla = self._ancla_insercion
         if ancla:
@@ -7939,7 +7959,7 @@ class ProyectoView(QWidget):
         # El delegate ya dejó el texto formateado ("1,000.00"): parsearlo con
         # parse_num, no tratando la coma como decimal (rompía todo metrado de
         # 4 cifras o más y el valor no llegaba a guardarse).
-        met = parse_num_opt(item.text(3))
+        met = parse_num_opt(item.text(3), self._moneda, mostrado=True)
         if met is None:
             return
         conn = get_db()
@@ -7959,7 +7979,7 @@ class ProyectoView(QWidget):
         # no se guardaban hasta recargar el proyecto.
         self.tree.blockSignals(True)
         try:
-            item.setText(3, f"{met:,.{dec}f}")
+            item.setText(3, fmt_doc(met, dec, moneda=self._moneda))
             item.setText(5, fmt_num(parcial, self._moneda, dec_p))
             # Valor numérico para los subtotales de los títulos padre
             item.setData(5, Qt.UserRole, float(parcial))
@@ -7994,7 +8014,7 @@ class ProyectoView(QWidget):
                     self.tbl_acero.setRowCount(0)
                     self._acero_loading = False
                 if hasattr(self, 'lbl_met_total'):
-                    self.lbl_met_total.setText(f"{0:,.{get_decimales_metrado()}f}")
+                    self.lbl_met_total.setText(fmt_doc(0, get_decimales_metrado(), moneda=self._moneda))
                 self._metrado_nueva_fila()
             self._calcular_totales_titulos(self.tree.invisibleRootItem())
         finally:
@@ -8541,7 +8561,7 @@ class ProyectoView(QWidget):
         met     = p['metrado'] or 0
         dec     = get_decimales_ppto()
         parcial = parcial_wysiwyg(met, pu, dec)
-        tw.setText(4, f"{pu:,.{dec}f}")
+        tw.setText(4, fmt_doc(pu, dec, moneda=self._moneda))
         self._marcar_precio(tw, pu, tiene_acu)
         tw.setText(5, fmt(parcial, self._moneda, dec))
         tw.setData(5, Qt.UserRole, float(parcial))
@@ -8876,7 +8896,7 @@ class ProyectoView(QWidget):
         # aplica» y el reporte estampaba «1.00 glb/día» (pedido de David
         # Ramos, 5 sep 2026). El 0 ya era el centinela que usaba
         # `_tuxia_recalcular_mo`, y todo lo que divide hace `rend or 1`.
-        rend = parse_num(self.inp_rend.text())
+        rend = parse_num(self.inp_rend.text(), self._moneda)
         if rend < 0:
             rend = 0.0
         conn = get_db()
@@ -9016,7 +9036,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = tbl.item(_r, c)
                 if it and it.text().strip():
-                    return parse_num_opt(it.text())
+                    return parse_num_opt(it.text(), self._moneda)
                 return None
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
             llong = _v(6); kgml = _v(8)
@@ -9047,9 +9067,9 @@ class ProyectoView(QWidget):
         self._con_planilla.add(pid)
         tw = self._id_to_item.get(pid)
         if tw:
-            tw.setText(3, f"{total_kg:,.{dec}f}")
+            tw.setText(3, fmt_doc(total_kg, dec, moneda=self._moneda))
             tw.setData(3, Qt.UserRole, True)
-            pu = parse_num(tw.text(4))
+            pu = parse_num(tw.text(4), self._moneda, mostrado=True)
             parcial_tree = parcial_wysiwyg(total_kg, pu, dec)
             tw.setText(5, fmt(parcial_tree, self._moneda, dec))
             tw.setData(5, Qt.UserRole, float(parcial_tree))
@@ -9068,7 +9088,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = tbl.item(_r, c)
                 if it and it.text().strip():
-                    return parse_num_opt(it.text())
+                    return parse_num_opt(it.text(), self._moneda)
                 return None
             result.append({
                 'descripcion':   (tbl.item(r, 1).text() if tbl.item(r, 1) else '').strip(),
@@ -9360,7 +9380,7 @@ class ProyectoView(QWidget):
         def val(c):
             it = tbl.item(r, c)
             if it and it.text().strip():
-                return parse_num_opt(it.text())
+                return parse_num_opt(it.text(), self._moneda)
             return None
 
         dims  = [v for v in (val(3), val(4), val(5), val(6)) if v is not None]
@@ -9375,9 +9395,9 @@ class ProyectoView(QWidget):
         it7 = tbl.item(r, 7)
         it9 = tbl.item(r, 9)
         if it7:
-            it7.setText(f"{parc_m:,.{dec}f}" if dims else '')
+            it7.setText(fmt_doc(parc_m, dec, moneda=self._moneda) if dims else '')
         if it9:
-            it9.setText(f"{parc_kg:,.{dec}f}" if (dims and kgml) else '')
+            it9.setText(fmt_doc(parc_kg, dec, moneda=self._moneda) if (dims and kgml) else '')
         self._acero_loading = False
         self._acero_actualizar_total()
 
@@ -9387,8 +9407,8 @@ class ProyectoView(QWidget):
         for r in range(self.tbl_acero.rowCount()):
             it = self.tbl_acero.item(r, 9)
             if it and it.text().strip():
-                total += parse_num(it.text())
-        self.lbl_met_total.setText(f"{total:,.{dec}f}")
+                total += parse_num(it.text(), self._moneda, mostrado=True)
+        self.lbl_met_total.setText(fmt_doc(total, dec, moneda=self._moneda))
 
     def _acero_guardar_impl(self):
         pid = self._met_panel_pid
@@ -9413,7 +9433,7 @@ class ProyectoView(QWidget):
             def _v(c):
                 it = tbl.item(r, c)
                 if it and it.text().strip():
-                    return parse_num_opt(it.text())
+                    return parse_num_opt(it.text(), self._moneda)
                 return None
 
             n_est = _v(3); n_el = _v(4); n_var = _v(5)
@@ -9442,7 +9462,7 @@ class ProyectoView(QWidget):
                      (total_kg, pid))
         conn.commit()
         conn.close()
-        self.lbl_met_total.setText(f"{total_kg:.3f}")
+        self.lbl_met_total.setText(fmt_doc(total_kg, 3, moneda=self._moneda, miles=False))
         self.recargar_partidas()
 
     # ── Metrados normales ─────────────────────────────────────────────────────
@@ -9457,7 +9477,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = self.tbl_met.item(_r, c)
                 if it and it.text().strip():
-                    return parse_num_opt(it.text())
+                    return parse_num_opt(it.text(), self._moneda)
                 return None
             result.append({
                 'descripcion':  (self.tbl_met.item(r, 0).text()
@@ -9518,7 +9538,7 @@ class ProyectoView(QWidget):
             parc = 1.0
             for d in dims: parc *= d
             parc = _rn(parc, dec) if dims else 0.0
-            it7 = QTableWidgetItem(f"{parc:,.{dec}f}")
+            it7 = QTableWidgetItem(fmt_doc(parc, dec, moneda=self._moneda))
             it7.setFlags(it7.flags() & ~Qt.ItemIsEditable)
             it7.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             it7.setBackground(QColor(SILVER_100))
@@ -9634,7 +9654,7 @@ class ProyectoView(QWidget):
         self.tbl_met.insertRow(at_row)
         self.tbl_met.setRowHeight(at_row, 24)
         for c in range(8):
-            it = QTableWidgetItem("" if c < 7 else f"{0:,.{dec}f}")
+            it = QTableWidgetItem("" if c < 7 else fmt_doc(0, dec, moneda=self._moneda))
             if c == 7:
                 it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                 it.setBackground(QColor(SILVER_100))
@@ -9664,14 +9684,14 @@ class ProyectoView(QWidget):
                     it.setText("")
             itp = self.tbl_met.item(r, 7)
             if itp:
-                itp.setText(f"{0:,.{dec}f}")
+                itp.setText(fmt_doc(0, dec, moneda=self._moneda))
         self._met_loading = False
         total = 0.0
         for rr in range(self.tbl_met.rowCount()):
             it2 = self.tbl_met.item(rr, 7)
             if it2:
-                total += parse_num(it2.text())
-        self.lbl_met_total.setText(f"{total:,.{dec}f}")
+                total += parse_num(it2.text(), self._moneda, mostrado=True)
+        self.lbl_met_total.setText(fmt_doc(total, dec, moneda=self._moneda))
         self._metrado_guardar_silencioso()
 
     def _metrado_guardar(self):
@@ -9690,7 +9710,7 @@ class ProyectoView(QWidget):
         for r in range(self.tbl_met.rowCount()):
             def _val(c):
                 it = self.tbl_met.item(r, c)
-                return parse_num_opt(it.text() if it else '')
+                return parse_num_opt(it.text() if it else '', self._moneda)
 
             desc  = (self.tbl_met.item(r, 0).text() if self.tbl_met.item(r, 0) else "").strip()
             n_est = _val(1); n_el = _val(2)
@@ -9711,7 +9731,7 @@ class ProyectoView(QWidget):
             filas.append((r, r+1, desc, n_est, n_el, area, largo, ancho, alto, parcial))
             it_parc = self.tbl_met.item(r, 7)
             if it_parc:
-                it_parc.setText(f"{parcial:,.{dec}f}")
+                it_parc.setText(fmt_doc(parcial, dec, moneda=self._moneda))
 
         dec   = get_decimales_metrado()
         self._met_guardar_filas(conn, pid, filas)
@@ -9720,7 +9740,7 @@ class ProyectoView(QWidget):
                      (total, pid))
         conn.commit()
         conn.close()
-        self.lbl_met_total.setText(f"{total:,.{dec}f}")
+        self.lbl_met_total.setText(fmt_doc(total, dec, moneda=self._moneda))
         self.recargar_partidas()
 
     def _met_guardar_filas(self, conn, pid, filas):
@@ -9772,7 +9792,7 @@ class ProyectoView(QWidget):
             def _v(c, _r=r):
                 it = self.tbl_met.item(_r, c)
                 if it and it.text().strip():
-                    return parse_num_opt(it.text())
+                    return parse_num_opt(it.text(), self._moneda)
                 return None
             desc  = (self.tbl_met.item(r, 0).text() if self.tbl_met.item(r, 0) else '').strip()
             n_est = _v(1); n_el = _v(2); area = _v(3)
@@ -9805,9 +9825,9 @@ class ProyectoView(QWidget):
         self._con_planilla.add(pid)
         tw = self._id_to_item.get(pid)
         if tw:
-            tw.setText(3, f"{total:,.{dec}f}")
+            tw.setText(3, fmt_doc(total, dec, moneda=self._moneda))
             tw.setData(3, Qt.UserRole, True)   # ✓ planilla
-            pu = parse_num(tw.text(4))
+            pu = parse_num(tw.text(4), self._moneda, mostrado=True)
             parcial_tree = parcial_wysiwyg(total, pu, dec)
             tw.setText(5, fmt(parcial_tree, self._moneda, dec))
             tw.setData(5, Qt.UserRole, float(parcial_tree))
@@ -9834,7 +9854,7 @@ class ProyectoView(QWidget):
             dims = []
             for c in range(1, 7):   # cols 1-6: N°Est, N°Elem, Área, Largo, Ancho, Alto
                 it = self.tbl_met.item(r, c)
-                v = parse_num_opt(it.text() if it else '')
+                v = parse_num_opt(it.text() if it else '', self._moneda)
                 if v is not None:
                     dims.append(v)
             parc = 1.0
@@ -9844,15 +9864,15 @@ class ProyectoView(QWidget):
             it_p = self.tbl_met.item(r, 7)
             if it_p:
                 self._met_loading = True
-                it_p.setText(f"{parc:,.{dec}f}")
+                it_p.setText(fmt_doc(parc, dec, moneda=self._moneda))
                 self._met_loading = False
             # Recalcular total
             total = 0.0
             for rr in range(self.tbl_met.rowCount()):
                 it2 = self.tbl_met.item(rr, 7)
                 if it2:
-                    total += parse_num(it2.text())
-            self.lbl_met_total.setText(f"{total:,.{dec}f}")
+                    total += parse_num(it2.text(), self._moneda, mostrado=True)
+            self.lbl_met_total.setText(fmt_doc(total, dec, moneda=self._moneda))
             # Añadir fila vacía si el usuario llenó la última
             last = self.tbl_met.rowCount() - 1
             if r == last:
@@ -10398,6 +10418,7 @@ class ProyectoView(QWidget):
                                         self._sub_ppto_id,
                                         contexto_item=ctx_item,
                                         contexto_es_titulo=ctx_es_titulo)
+            igualar_codigos_hermanos(conn, self.pid)
             conn.commit()
         except Exception as e:  # noqa: BLE001
             conn.rollback(); conn.close()
@@ -11455,6 +11476,7 @@ class ProyectoView(QWidget):
         """Llamado por MainWindow al volver del formulario de edición."""
         self._proy   = self._cargar_proyecto()
         self._moneda = self._proy.get('moneda', 'Soles')
+        self.tree.setProperty('moneda', self._moneda)
         # Recalcular estado/banderas: un cambio de estado (p.ej. aprobado →
         # elaboración) debe desbloquear la edición y refrescar la pill SIN
         # reconstruir la vista. Antes esto no ocurría y el presupuesto seguía
@@ -12442,9 +12464,24 @@ class _DonutChart(QWidget):
             w_tot = QFontMetrics(f_tot).horizontalAdvance(tr("Total")) + 8
         return max(160, 28 + w_tot + w_cols + 10)
 
+    # Cuerpos de la leyenda, de mayor a menor: se usa el primero con el que
+    # cada entrada cabe en UNA línea (issue #47). Solo si ni el menor alcanza
+    # el monto baja a una segunda línea, al cuerpo normal.
+    _PT_LEYENDA = (8.0, 7.5, 7.0, 6.5)
+
+    def _fuente_leyenda(self, W: int) -> QFont:
+        for pt in self._PT_LEYENDA:
+            f = QFont(); f.setPointSizeF(pt)
+            if not any(dos for *_r, dos in
+                       self._filas_leyenda(W, QFontMetrics(f), pt)):
+                return f
+        f = QFont(); f.setPointSizeF(self._PT_LEYENDA[0])
+        return f
+
     def _alto_necesario(self, W: int) -> int:
-        f_ley = QFont(); f_ley.setPointSize(8)
-        filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley))
+        f_ley = self._fuente_leyenda(max(W, 160))
+        filas = self._filas_leyenda(max(W, 160), QFontMetrics(f_ley),
+                                    f_ley.pointSizeF())
         ley = sum(self._FILA_2L if dos else self._FILA_1L
                   for *_r, dos in filas) + 10
         if self._moneda is not None:
@@ -12479,7 +12516,7 @@ class _DonutChart(QWidget):
     _FILA_1L, _FILA_2L = 20, 34     # alto de una entrada de la leyenda
     _GAP = 12                       # separación entre columnas
 
-    def _columnas_leyenda(self, fm) -> tuple:
+    def _columnas_leyenda(self, fm, pt: float = 8.0) -> tuple:
         """(ancho de la columna de montos, ancho de la de porcentajes)."""
         textos = self._leyenda_textos()
         w_pct = max([fm.horizontalAdvance(p) for _l, _m, p in textos] or [0])
@@ -12487,16 +12524,16 @@ class _DonutChart(QWidget):
         if self._moneda is not None:
             # El Total se pinta en negrita: medido con la fuente normal, la
             # columna quedaba corta y se comía la «S/» (David Ramos, ACU.docx).
-            f_tot = QFont(); f_tot.setPointSize(8); f_tot.setBold(True)
+            f_tot = QFont(); f_tot.setPointSizeF(pt); f_tot.setBold(True)
             w_amt = max(w_amt, QFontMetrics(f_tot).horizontalAdvance(self._texto_total()))
         return w_amt, w_pct
 
-    def _filas_leyenda(self, W: int, fm) -> list:
+    def _filas_leyenda(self, W: int, fm, pt: float = 8.0) -> list:
         """[(etiqueta, monto, pct, dos_lineas)]: una entrada va en dos líneas
         (monto y porcentaje debajo, en sus columnas) cuando la etiqueta no
         cabe junto a ellas en el ancho `W`. En la laptop de Marco «Mano de
         Obra» salía «Mano de O…» (15 sep 2026)."""
-        w_amt, w_pct = self._columnas_leyenda(fm)
+        w_amt, w_pct = self._columnas_leyenda(fm, pt)
         w_cols = w_pct + ((w_amt + self._GAP) if w_amt else 0)
         out = []
         for label, monto, pct in self._leyenda_textos():
@@ -12529,9 +12566,9 @@ class _DonutChart(QWidget):
 
         # Área del donut: cuadrado centrado en la mitad superior. La leyenda
         # mide según sus filas (una o dos líneas) más la del total.
-        f_ley = QFont(); f_ley.setPointSize(8)
+        f_ley = self._fuente_leyenda(W)
         fm_ley = QFontMetrics(f_ley)
-        filas = self._filas_leyenda(W, fm_ley)
+        filas = self._filas_leyenda(W, fm_ley, f_ley.pointSizeF())
         leyenda_h = sum(self._FILA_2L if dos else self._FILA_1L
                         for _l, _m, _p, dos in filas) + 10
         if self._moneda is not None:
@@ -12580,7 +12617,7 @@ class _DonutChart(QWidget):
         y_ley = 10 + size + 10
         painter.setFont(f_ley)
         fm = fm_ley
-        w_amt, w_pct = self._columnas_leyenda(fm)
+        w_amt, w_pct = self._columnas_leyenda(fm, f_ley.pointSizeF())
         # Columnas, de derecha a izquierda: porcentaje y monto.
         r_pct = QRect(W - 10 - w_pct, 0, w_pct, 18)
         r_amt = QRect(W - 10 - w_pct - self._GAP - w_amt, 0, w_amt, 18)

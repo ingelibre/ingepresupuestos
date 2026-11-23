@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from core.database import (get_db, get_decimales_ppto, get_decimales_metrado,
                            _rn, parcial_wysiwyg, partida_usa_acero)
-from utils.formatting import fmt, parse_num, parse_num_opt
+from utils.formatting import fmt, fmt_doc, parse_num, parse_num_opt, separadores
 from utils.i18n import tr, N_
 from utils.icons import icon
 
@@ -430,12 +430,11 @@ class MetradosView(QWidget):
         if idx == 1:
             self._cargar_acero()
 
-    @staticmethod
-    def _nf(v, dec: int) -> str:
+    def _nf(self, v, dec: int) -> str:
         if v is None or v == '':
             return ''
         try:
-            return f"{float(v):,.{dec}f}"
+            return fmt_doc(float(v), dec, moneda=self._proy.get('moneda', ''))
         except (ValueError, TypeError):
             return str(v)
 
@@ -618,9 +617,8 @@ class MetradosView(QWidget):
         return r
 
     # ── Edición de acero ─────────────────────────────────────────────────────
-    @staticmethod
-    def _ac_parse(text) -> float | None:
-        return parse_num_opt(text)
+    def _ac_parse(self, text) -> float | None:
+        return parse_num_opt(text, self._proy.get('moneda', ''))
 
     def _ac_detail_rows_of(self, partida_id: int) -> list[int]:
         return [r for r, (k, pid) in enumerate(zip(self._ac_kind, self._ac_partida))
@@ -759,7 +757,8 @@ class MetradosView(QWidget):
             if k == 'header':
                 it = t.item(r, 9)
                 if it and it.text().strip():
-                    grand += parse_num(it.text())
+                    grand += parse_num(
+                        it.text(), self._proy.get('moneda', ''), mostrado=True)
             elif k == 'total':
                 total_row = r
         if total_row is not None and t.item(total_row, 9):
@@ -953,19 +952,19 @@ class MetradosView(QWidget):
         self._row_kind.append('header')
         self._row_partida.append(p['id'])
 
-    @staticmethod
-    def _fmt_total(total: float) -> str:
+    def _fmt_total(self, total: float) -> str:
         """Formato para la columna Total: vacío si 0, decimales de metrado."""
         if not total:
             return ""
-        return f"{total:,.{get_decimales_metrado()}f}"
+        return fmt_doc(total, get_decimales_metrado(), moneda=self._proy.get('moneda', ''))
 
-    @staticmethod
-    def _fmt2(v) -> str:
+    def _fmt2(self, v) -> str:
         """Valor del metrado: vacío si None/0, decimales de metrado."""
         if v is None or v == 0:
             return ""
-        return f"{float(v):,.{get_decimales_metrado()}f}"
+        return fmt_doc(v, get_decimales_metrado(), moneda=self._proy.get('moneda', ''),
+                       # celdas editables: sin miles no hay punto ambiguo
+                       miles=separadores(self._proy.get('moneda', ''))[1] == '.')
 
     def _add_dim_row(self, n: int, f: dict, partida_id: int):
         tbl = self.tbl
@@ -1036,7 +1035,7 @@ class MetradosView(QWidget):
     # ── Edición estilo Excel ───────────────────────────────────────────────
     def _parse_num(self, txt: str):
         """Devuelve float o None. Acepta coma decimal Y separador de miles."""
-        return parse_num_opt(txt)
+        return parse_num_opt(txt, self._proy.get('moneda', ''))
 
     def _find_header_row(self, partida_id: int) -> int | None:
         for r, (kind, pid) in enumerate(zip(self._row_kind, self._row_partida)):
@@ -1134,7 +1133,8 @@ class MetradosView(QWidget):
             for r2 in self._dim_rows_of(partida_id):
                 it = tbl.item(r2, 9)
                 if it and it.text().strip():
-                    total += parse_num(it.text())
+                    total += parse_num(
+                        it.text(), self._proy.get('moneda', ''), mostrado=True)
             total = _rn(total, dec)
             conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                          (total, partida_id))
@@ -1312,7 +1312,8 @@ class MetradosView(QWidget):
                 for r2 in self._dim_rows_of(pid):
                     it = self.tbl.item(r2, 9)
                     if it and it.text().strip():
-                        total += parse_num(it.text())
+                        total += parse_num(
+                        it.text(), self._proy.get('moneda', ''), mostrado=True)
                 total = _rn(total, dec)
                 conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                              (total, pid))

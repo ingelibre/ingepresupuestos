@@ -3,8 +3,12 @@
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
 # Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Formateo de números y monedas (equivale a fmt()/parseFmt() del JS + _parse_num() de Flask)."""
+import functools as _functools
+import inspect as _inspect
 import re as _re
 import unicodedata as _ud
+from contextlib import contextmanager as _contextmanager
+from contextvars import ContextVar as _ContextVar
 from core.config import moneda_cfg
 
 
@@ -60,9 +64,11 @@ def fmt(valor: float, moneda: str = 'Soles', decimales: int = 2) -> str:
 
 # Agrupación de miles perfecta con coma: 1,000 · 12,500 · 1,234,567
 _RE_MILES_COMA = _re.compile(r'^\d{1,3}(?:,\d{3})+$')
+_RE_MILES_PUNTO = _re.compile(r'^\d{1,3}(\.\d{3})+$')
 
 
-def parse_num(val) -> float:
+def parse_num(val, moneda: 'str | None' = None, *,
+              mostrado: bool = False) -> float:
     """Convierte a float un número escrito por el usuario o formateado por la app.
 
     Acepta '21.36' y '21,36' como decimales, entiende el separador de miles
@@ -74,6 +80,11 @@ def parse_num(val) -> float:
     f"{v:,.2f}", así que todo valor de 4 cifras o más vuelve del widget con
     coma. Tratar esa coma como decimal partía el número (1,000.00 → error) y
     la cantidad se perdía en el cálculo.
+
+    Con `moneda` de coma decimal, la coma es SIEMPRE decimal («12,345» son
+    doce y fracción, no doce mil).  Un punto solo sigue siendo decimal —es el
+    del teclado numérico— salvo en un texto `mostrado` por la app, donde
+    «1.234» es agrupación de miles.
     """
     if val is None or val == '':
         return 0.0
@@ -85,6 +96,17 @@ def parse_num(val) -> float:
     s   = s.replace('-', '')
     if not s:
         return 0.0
+    if moneda and separadores(moneda)[1] == ',':
+        if ',' in s and s.rfind('.') > s.rfind(','):
+            s = s.replace(',', '')      # «1,234.56» pegado de fuera
+        elif ',' in s:
+            s = s.replace('.', '').replace(',', '.')
+        elif s.count('.') > 1 or (mostrado and _RE_MILES_PUNTO.match(s)):
+            s = s.replace('.', '')
+        try:
+            return -float(s) if neg else float(s)
+        except ValueError:
+            return 0.0
     if ',' in s and '.' in s:
         # Con ambos separadores, el ÚLTIMO en aparecer es el decimal
         if s.rfind(',') > s.rfind('.'):
@@ -103,7 +125,8 @@ def parse_num(val) -> float:
         return 0.0
 
 
-def parse_num_opt(val) -> 'float | None':
+def parse_num_opt(val, moneda: 'str | None' = None, *,
+                  mostrado: bool = False) -> 'float | None':
     """Como parse_num, pero devuelve None cuando el texto no contiene número.
 
     Para celdas de planilla donde «vacío» y «cero» significan cosas distintas
@@ -113,7 +136,17 @@ def parse_num_opt(val) -> 'float | None':
     s = str(val).strip()
     if not s or not _re.search(r'\d', s):
         return None
-    return parse_num(s)
+    return parse_num(s, moneda, mostrado=mostrado)
+
+
+def texto_para_editar(txt: str, moneda: 'str | None' = None) -> str:
+    """El número de una celda, sin separador de miles, para abrir su editor."""
+    miles, dec = separadores(moneda or '')
+    if dec == '.':
+        return (txt or '').replace(miles, '').strip()
+    if dec in (txt or '') or len((txt or '').split(miles)) > 2:
+        return txt.replace(miles, '').strip()
+    return (txt or '').strip()       # «1.5» crudo: el punto es decimal
 
 
 def texto_rendimiento(rendimiento, unidad='', *, decimales=2,
@@ -136,7 +169,7 @@ def texto_rendimiento(rendimiento, unidad='', *, decimales=2,
         return ''
     if r <= 0:
         return ''
-    cifra = f"{r:,.{decimales}f}"
+    cifra = fmt_doc(r, decimales)
     u = (unidad or '').strip()
     return f"{cifra} {u}{sufijo}" if u else f"{cifra}{sufijo}"
 
@@ -221,3 +254,188 @@ def partir_item(item, sep: str = "\n", max_tramos: int = ITEM_TRAMOS_POR_LINEA) 
     lineas = [".".join(tramos[i:i + max_tramos])
               for i in range(0, len(tramos), max_tramos)]
     return (("." + sep).join(lineas[:-1]) + "." + sep + lineas[-1]) if len(lineas) > 1 else txt
+
+
+# ── Números de los reportes: los separadores de la moneda del proyecto ───────
+#
+# Los reportes formatean cientos de números sueltos —cantidades, rendimientos,
+# porcentajes— lejos de donde se conoce el proyecto. La moneda se fija una vez
+# al generar el documento (`con_moneda_del_proyecto`) y `fmt_doc` la lee.
+
+_moneda_doc: '_ContextVar[str]' = _ContextVar('moneda_del_documento', default='')
+
+
+@_contextmanager
+def moneda_documento(moneda: str):
+    ficha = _moneda_doc.set(moneda or '')
+    try:
+        yield
+    finally:
+        _moneda_doc.reset(ficha)
+
+
+def separadores(moneda: 'str | None' = None) -> tuple:
+    """(miles, decimal) de `moneda` o, sin ella, la del documento en curso."""
+    m = moneda if moneda is not None else _moneda_doc.get()
+    if not m:
+        return ',', '.'
+    cfg = moneda_cfg(m)
+    return cfg['sep_miles'], cfg['sep_dec']
+
+
+def con_separadores(texto: str, moneda: 'str | None' = None) -> str:
+    """«1,234.56» (formato de Python) → con los separadores de la moneda."""
+    miles, dec = separadores(moneda)
+    if (miles, dec) == (',', '.'):
+        return texto
+    return texto.translate({ord(','): miles, ord('.'): dec})
+
+
+def fmt_doc(v, dec: int = 2, *, moneda: 'str | None' = None,
+            miles: bool = True) -> str:
+    """Número sin símbolo con los separadores de la moneda. En Soles es
+    exactamente `f'{v:,.{dec}f}'` (o sin miles, para los porcentajes)."""
+    n = float(v or 0)
+    return con_separadores(f'{n:,.{dec}f}' if miles else f'{n:.{dec}f}', moneda)
+
+
+def fmt_pct(v, dec: int = 1, *, moneda: 'str | None' = None) -> str:
+    return fmt_doc(v, dec, moneda=moneda, miles=False) + '%'
+
+
+def con_moneda_del_proyecto(fn):
+    """Decorador de los generadores de reportes: fija la moneda del documento
+    a partir de su argumento `proy`, `pid`/`proyecto_id`, `val_id` o `req_id`."""
+    firma = _inspect.signature(fn)
+
+    @_functools.wraps(fn)
+    def envoltura(*a, **k):
+        try:
+            args = firma.bind_partial(*a, **k).arguments
+            moneda = _moneda_de_args(args)
+        except Exception:
+            moneda = None            # sin proyecto a la vista: lo que haya
+        if moneda is None:
+            return fn(*a, **k)
+        with moneda_documento(moneda):
+            return fn(*a, **k)
+    return envoltura
+
+
+def _moneda_de_args(args: dict) -> 'str | None':
+    proy = args.get('proy')
+    if proy is not None:
+        return (proy['moneda'] if 'moneda' in proy.keys() else None) or None
+    for nombre, sql in (
+            ('pid', "SELECT moneda FROM proyectos WHERE id=?"),
+            ('proyecto_id', "SELECT moneda FROM proyectos WHERE id=?"),
+            ('val_id', "SELECT p.moneda FROM proyectos p JOIN valorizaciones v"
+                       " ON v.proyecto_id=p.id WHERE v.id=?"),
+            ('req_id', "SELECT p.moneda FROM proyectos p JOIN requerimientos r"
+                       " ON r.proyecto_id=p.id WHERE r.id=?")):
+        if args.get(nombre) is not None:
+            from core.database import get_db
+            conn = get_db()
+            try:
+                f = conn.execute(sql, (args[nombre],)).fetchone()
+            finally:
+                conn.close()
+            return (f['moneda'] or 'Soles') if f else None
+    return None
+
+
+def siguiente_codigo(prefijo: str, existentes) -> str:
+    """Primer código libre bajo `prefijo` ('' = raíz): «01» → «01.05».
+
+    Los números se comparan como números: si el grupo pasó de 99 hijas y usa
+    tres dígitos («01.001»), «01.01» NO está libre. El ancho sigue al del
+    grupo, dos dígitos como mínimo."""
+    ini = f'{prefijo}.' if prefijo else ''
+    usados, ancho = set(), 2
+    for it in existentes:
+        cola = (it or '')[len(ini):]
+        if (it or '').startswith(ini) and cola.isdecimal():
+            usados.add(int(cola))
+            ancho = max(ancho, len(cola))
+    n = 1
+    while n in usados:
+        n += 1
+    return f'{ini}{n:0{ancho}d}'
+
+
+# ── Montos en letras («Son: … CON 00/100 SOLES») ─────────────────────────────
+
+_UNIDADES = (
+    '', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho',
+    'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince',
+    'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
+    'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco',
+    'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve')
+_DECENAS = ('', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta',
+            'setenta', 'ochenta', 'noventa')
+_CENTENAS = ('', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos',
+             'quinientos', 'seiscientos', 'setecientos', 'ochocientos',
+             'novecientos')
+
+
+def _hasta_999(n: int) -> str:
+    if n == 100:
+        return 'cien'
+    c, r = divmod(n, 100)
+    if r < 30:
+        resto = _UNIDADES[r]
+    else:
+        d, u = divmod(r, 10)
+        resto = _DECENAS[d] + (f' y {_UNIDADES[u]}' if u else '')
+    return f'{_CENTENAS[c]} {resto}'.strip()
+
+
+def _apocope(txt: str) -> str:
+    """Delante de «mil», «millones»…: «veintiuno» → «veintiún», «uno» → «un»."""
+    if txt.endswith('veintiuno'):
+        return txt[:-len('veintiuno')] + 'veintiún'
+    return txt[:-1] if txt.endswith('uno') else txt
+
+
+def entero_a_letras(n: int) -> str:
+    """Entero en letras, sin tope de tamaño. Escala larga, la del español:
+    mil millones = 10⁹, un billón = 10¹²."""
+    if n == 0:
+        return 'cero'
+    if n < 0:
+        return 'menos ' + entero_a_letras(-n)
+    out = []
+    for escala, singular, plural in ((10 ** 12, 'un billón', 'billones'),
+                                     (10 ** 6, 'un millón', 'millones'),
+                                     (1000, 'mil', 'mil')):
+        grupo, n = divmod(n, escala)
+        if grupo == 1:
+            out.append(singular)
+        elif grupo:
+            out.append(f'{_apocope(entero_a_letras(grupo))} {plural}')
+    if n:
+        out.append(_hasta_999(n))
+    return ' '.join(out)
+
+
+def moneda_plural(moneda: str) -> str:
+    """Nombre de la moneda para la línea «Son: … CON 00/100 <MONEDA>»."""
+    return {
+        'Dólares': 'DÓLARES AMERICANOS',
+    }.get(moneda or 'Soles', str(moneda or 'Soles').upper())
+
+
+def monto_en_letras(monto: float, moneda: str = 'Soles') -> str:
+    """'CIENTO OCHENTA Y UN MIL TRESCIENTOS CON 28/100 SOLES'.
+
+    Única para todos los reportes. Parte del texto a dos decimales, el mismo
+    que se imprime en cifras: letras y números no pueden discrepar."""
+    try:
+        texto = f'{float(monto or 0):.2f}'
+    except (TypeError, ValueError):
+        texto = '0.00'
+    neg = texto.startswith('-') and float(texto) != 0
+    entero, centavos = texto.lstrip('-').split('.')
+    letras = entero_a_letras(int(entero)).upper()
+    return (f"{'MENOS ' if neg else ''}{letras} CON {centavos}/100 "
+            f"{moneda_plural(moneda)}")

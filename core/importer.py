@@ -6,7 +6,8 @@ import openpyxl
 import os
 import re
 
-from core.database import get_db, _siguiente_codigo_inei
+from core.database import (
+    get_db, _siguiente_codigo_inei, igualar_codigos_hermanos)
 from utils.formatting import (pad_codigo as _pad_codigo, num_importado,
                               parse_num, parse_num_opt)
 
@@ -1409,6 +1410,8 @@ def guardar_importacion(info: dict, partidas_data: list, acus_data: dict = None,
                  float(precio) if precio is not None else None)
             )
 
+    # Un capítulo de más de 99 partidas llega como «01.100»: mismo ancho.
+    igualar_codigos_hermanos(conn, pid)
     conn.commit()
     conn.close()
     return pid

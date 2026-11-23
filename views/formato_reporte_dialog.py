@@ -136,6 +136,7 @@ class FormatoReporteDialog(QDialog):
         self._seccion("🎨", tr("Color de marca"), self._pagina_color())
         self._seccion("🔤", tr("Colores de títulos"), self._pagina_titulos())
         self._seccion("📄", tr("Página y texto"), self._pagina_pagina())
+        self._seccion("📋", tr("Presupuesto"), self._pagina_presupuesto())
         self._seccion("📝", tr("Encabezado y pie"), self._pagina_encabezado_pie())
         self._seccion("🪧", tr("Franjas de imagen"), self._pagina_franjas())
 
@@ -602,7 +603,8 @@ class FormatoReporteDialog(QDialog):
         self.cmb_escala_texto = QComboBox()
         self.cmb_escala_texto.setCursor(Qt.PointingHandCursor)
         self.cmb_escala_texto.setFixedWidth(220)
-        _rotulos = {100: tr("Normal"), 90: tr("Compacto"), 80: tr("Muy compacto")}
+        _rotulos = {100: tr("Normal"), 90: tr("Compacto"), 80: tr("Muy compacto"),
+                    75: tr("Compacto máximo")}
         for pct in pdf_reports.ESCALAS_TEXTO:
             self.cmb_escala_texto.addItem(
                 f"{_rotulos.get(pct) or tr('Escala')} ({pct} %)", pct)
@@ -689,6 +691,36 @@ class FormatoReporteDialog(QDialog):
         l = QLabel(texto)
         l.setStyleSheet(f"color:{SLATE_500}; font-size:11px;")
         return l
+
+    # ── Sección: Presupuesto (issues #54 y #41) ──
+    def _pagina_presupuesto(self) -> QWidget:
+        pagina, lay = self._pagina_base(
+            tr("Presupuesto"),
+            tr("Qué más imprime el reporte de presupuesto (PDF y Excel)."))
+        lay.addWidget(self._section_title(tr("Columnas del precio unitario")))
+        self.chk_desglose = {}
+        for tipo, rotulo in (('MO', tr("Mano de obra")), ('MAT', tr("Materiales")),
+                             ('EQ', tr("Equipos")), ('SC', tr("Subcontratos"))):
+            chk = QCheckBox(rotulo)
+            chk.setCursor(Qt.PointingHandCursor)
+            self.chk_desglose[tipo] = chk
+            lay.addWidget(chk)
+        lay.addWidget(self._hint(tr(
+            "Cada casilla agrega una columna con la parte del precio unitario "
+            "que es de ese tipo, según el análisis de la partida. El "
+            "«Presupuesto para Cliente» nunca las lleva."
+        )))
+        lay.addWidget(self._section_title(tr("Especificaciones técnicas")))
+        self.chk_ppto_spec = QCheckBox(
+            tr("Imprimir la especificación debajo de cada partida"))
+        self.chk_ppto_spec.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(self.chk_ppto_spec)
+        lay.addWidget(self._hint(tr(
+            "Sale el texto, sin imágenes; el reporte de Especificaciones "
+            "Técnicas las sigue llevando."
+        )))
+        lay.addStretch(1)
+        return pagina
 
     # ── Sección: Encabezado y pie ──
     def _pagina_encabezado_pie(self) -> QWidget:
@@ -947,6 +979,10 @@ class FormatoReporteDialog(QDialog):
             str(f.get('rep_pie_linea_oculta') or '0') != '1')
         self.chk_gantt_leyenda.setChecked(
             str(f.get('rep_gantt_leyenda_oculta') or '0') != '1')
+        _cols = pdf_reports.desglose_ppto(f)
+        for tipo, chk in self.chk_desglose.items():
+            chk.setChecked(tipo in _cols)
+        self.chk_ppto_spec.setChecked(pdf_reports.especificacion_en_ppto(f))
         self._on_pie_toggled(self.chk_pie.isChecked())
         for casilla, clave in ((self.chk_pie_izq, 'rep_pie_izq_oculto'),
                                (self.chk_pie_cen, 'rep_pie_cen_oculto'),
@@ -1107,6 +1143,10 @@ class FormatoReporteDialog(QDialog):
         self._formato['rep_pie_izq_oculto']    = '1' if self.chk_pie_izq.isChecked() else '0'
         self._formato['rep_pie_cen_oculto']    = '1' if self.chk_pie_cen.isChecked() else '0'
         self._formato['rep_pie_der_oculto']    = '1' if self.chk_pie_der.isChecked() else '0'
+        self._formato['rep_ppto_desglose'] = ','.join(
+            t for t, chk in self.chk_desglose.items() if chk.isChecked())
+        self._formato['rep_ppto_especificacion'] = (
+            '1' if self.chk_ppto_spec.isChecked() else '0')
         self._formato['rep_logo_escala']       = str(self.sld_logo.value())
         self._formato['rep_escala_texto']      = str(self.cmb_escala_texto.currentData())
         self._formato.update(self._margenes_actuales())

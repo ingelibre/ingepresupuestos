@@ -17,6 +17,7 @@ abre sin problemas en MS Office, LibreOffice y Google Docs.
 """
 from __future__ import annotations
 from core.paises import etiqueta_tributaria as _etq_trib
+from utils.formatting import con_moneda_del_proyecto, fmt_pct
 from pathlib import Path
 
 from docx import Document
@@ -547,6 +548,61 @@ def _add_footer(doc: Document, proy: dict):
 
 # ── Resumen Ejecutivo ─────────────────────────────────────────────────────
 
+def _guardar_doc(doc, archivo: str) -> None:
+    """Guarda el documento estrechando los montos que no caben en su celda
+    (issue #49): Word los partía en dos renglones. Usa el «ajuste de escala»
+    del carácter; los que caben no se tocan."""
+    from PySide6.QtGui import (QFont, QFontDatabase, QFontMetricsF,
+                               QGuiApplication)
+    from core.exporter import _FONT_B, _FONT_R
+    from core.pdf_reports import _RE_MONTO_CELDA
+    if QGuiApplication.instance() is not None:
+        # Se mide con la fuente del documento, no con la que la sustituya.
+        if 'Inter' not in QFontDatabase.families():
+            for ruta in (_FONT_R, _FONT_B):
+                QFontDatabase.addApplicationFont(ruta)
+        for tabla in doc.tables:
+            for fila in tabla.rows:
+                for celda in fila.cells:
+                    if celda.width is None:
+                        continue
+                    # 0,19 cm de margen de celda por lado (el de Word).
+                    libre = celda.width.pt - 2 * 5.4
+                    for par in celda.paragraphs:
+                        txt = par.text.strip()
+                        # «01.02.03» a la izquierda es un código, no un monto.
+                        if (not _RE_MONTO_CELDA.match(txt)
+                                or (txt[0].isdigit() and par.alignment
+                                    != WD_ALIGN_PARAGRAPH.RIGHT)):
+                            continue
+                        ancho = 0.0
+                        for run in par.runs:
+                            f = QFont('Inter')
+                            # A 10 veces el tamaño: se mide sin redondeo a px.
+                            f.setPixelSize(int((run.font.size.pt if run.font.size
+                                                else 10) * 10))
+                            f.setBold(bool(run.bold))
+                            ancho += QFontMetricsF(f).horizontalAdvance(run.text) / 10
+                        if libre <= 0 or ancho <= libre:
+                            continue
+                        esc = max(50, int(90 * libre / ancho))
+                        for run in par.runs:
+                            w = OxmlElement('w:w')
+                            w.set(qn('w:val'), str(esc))
+                            rpr = run._element.get_or_add_rPr()
+                            # El esquema exige w:w antes de w:kern/w:position/w:sz
+                            sig = next((rpr.find(qn(t)) for t in (
+                                'w:kern', 'w:position', 'w:sz', 'w:szCs',
+                                'w:highlight', 'w:u', 'w:effect', 'w:lang')
+                                if rpr.find(qn(t)) is not None), None)
+                            if sig is not None:
+                                sig.addprevious(w)
+                            else:
+                                rpr.append(w)
+    doc.save(archivo)
+
+
+@con_moneda_del_proyecto
 def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
     """Genera el Resumen Ejecutivo en formato Word (.docx).
 
@@ -608,7 +664,7 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
     pct_cd = (cd / total * 100) if total else 0
     kpis = [
         (nombre_total(proy), f"{sym} {_fmt(total, dec)}", "Todos los conceptos"),
-        ("COSTO DIRECTO",     f"{sym} {_fmt(cd, dec)}",    f"{pct_cd:.1f}% del total"),
+        ("COSTO DIRECTO",     f"{sym} {_fmt(cd, dec)}",    f"{fmt_pct(pct_cd)} del total"),
         ("PARTIDAS",          f"{n_partidas}",             f"{n_titulos} títulos"),
         ("PLAZO DE OBRA",     f"{proy.get('plazo') or 0} d",
                               proy.get('modalidad') or 'Contrata'),
@@ -810,7 +866,7 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
         _set_cell_text(row.cells[1], label, bold=True, size=10)
         _set_cell_text(row.cells[2], f"{sym} {_fmt(val, dec)}",
                        align='right', size=10)
-        _set_cell_text(row.cells[3], f"{pct:.1f}%", align='right',
+        _set_cell_text(row.cells[3], fmt_pct(pct), align='right',
                        size=10, color=_SLATE_500)
         for c in row.cells:
             _cell_border(c, 'bottom', sz=2, color='CBD5E1')
@@ -849,12 +905,12 @@ def generar_word_resumen_ejecutivo(pid: int, archivo: str) -> str:
             _set_cell_text(row.cells[2], p_e.get('descripcion') or '')
             _set_cell_text(row.cells[3], f"{sym} {_fmt(e['total'] or 0, dec)}",
                            align='right')
-            _set_cell_text(row.cells[4], f"{pct:.1f}%", align='right',
+            _set_cell_text(row.cells[4], fmt_pct(pct), align='right',
                            color=_SLATE_500)
             for c in row.cells:
                 _cell_border(c, 'bottom', sz=2, color='CBD5E1')
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1029,6 +1085,7 @@ def _limpiar_html_spec(html: str) -> str:
     return s
 
 
+@con_moneda_del_proyecto
 def generar_word_especificaciones(pid: int, archivo: str) -> str:
     """Genera el reporte de Especificaciones Técnicas en .docx editable."""
     from core.database import get_db, calcular_totales
@@ -1122,7 +1179,7 @@ def generar_word_especificaciones(pid: int, archivo: str) -> str:
             r_p.italic = True
             r_p.font.color.rgb = _SLATE_500
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1141,6 +1198,7 @@ def _set_paragraph_border(para, edge: str, sz: int = 6, color: str = 'CBD5E1'):
     pBdr.append(border)
 
 
+@con_moneda_del_proyecto
 def generar_word_memoria_descriptiva(pid: int, archivo: str) -> str:
     """Genera el reporte de Memoria Descriptiva en .docx editable (mismos
     encabezados/pie y tratamiento de viñetas que Especificaciones Técnicas)."""
@@ -1201,7 +1259,7 @@ def generar_word_memoria_descriptiva(pid: int, archivo: str) -> str:
             p_body.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p_body.paragraph_format.line_spacing = 1.5
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1224,6 +1282,7 @@ def _th(cell, txt, *, align='right'):
     _cell_bg(cell, accent_reportes()[2].lstrip('#'))
 
 
+@con_moneda_del_proyecto
 def generar_word_almacen(pid: int, archivo: str) -> str:
     """Control de materiales (kárdex) en .docx editable."""
     import core.requerimientos as REQ
@@ -1327,10 +1386,11 @@ def generar_word_almacen(pid: int, archivo: str) -> str:
                            color=RGBColor(0x55, 0x55, 0x55))
         _set_table_fixed_layout(ft, [5.6, 5.6, 5.6])
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
+@con_moneda_del_proyecto
 def generar_word_curva_s(pid: int, archivo: str, *, base: str = 'mes_cal',
                          vis: dict = None) -> str:
     """Curva S real (gráfico + tabla por período) en .docx editable (landscape).
@@ -1355,7 +1415,7 @@ def generar_word_curva_s(pid: int, archivo: str, *, base: str = 'mes_cal',
         return _fmt(v, dp) if v is not None else ""
 
     def pc(v):
-        return f"{v:.1f}%" if v is not None else ""
+        return fmt_pct(v) if v is not None else ""
 
     doc = Document(); _aplicar_fuente_global(doc); _aplicar_idioma(doc)
     sec = doc.sections[0]
@@ -1442,10 +1502,11 @@ def generar_word_curva_s(pid: int, archivo: str, *, base: str = 'mes_cal',
     if show_desv:
         wdesc += [2.0]
     _set_table_fixed_layout(tbl, wdesc)
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
+@con_moneda_del_proyecto
 def generar_word_cuaderno(pid: int, parte_ids: list, archivo: str) -> str:
     """Cuaderno de obra (partes diarios seleccionados) en .docx editable."""
     import core.parte_diario as PD
@@ -1524,7 +1585,7 @@ def generar_word_cuaderno(pid: int, parte_ids: list, archivo: str) -> str:
                 p = doc.add_paragraph(); p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.left_indent = Cm(0.5)
                 rr = p.add_run(ln); rr.font.size = Pt(SZ); rr.font.color.rgb = _SLATE_900
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 
@@ -1542,6 +1603,7 @@ def _para_bottom_border(p, color: str = '273445', sz: int = 8):
     pPr.append(pBdr)
 
 
+@con_moneda_del_proyecto
 def generar_word_tdr(req_id: int, archivo: str) -> str:
     """Requerimiento + TDR / Especificaciones Técnicas en .docx editable.
     Misma tipografía/formato que las Especificaciones (fuente proporcional,
@@ -1701,7 +1763,7 @@ def generar_word_tdr(req_id: int, archivo: str) -> str:
             p = _para(None, space_after=4)
             r = p.add_run(blk[1]); r.font.size = Pt(10); r.font.color.rgb = _SLATE_900
 
-    doc.save(archivo)
+    _guardar_doc(doc, archivo)
     return archivo
 
 

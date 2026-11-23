@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 
 from core.database import get_db
+from utils.formatting import siguiente_codigo
 from utils.i18n import tr
 
 BLUE_500   = "#F37329"
@@ -324,26 +325,12 @@ class AgregarTituloDialog(QDialog):
 
         if ctx and es_titulo:
             prefijo = ctx
-            for n in range(1, 1000):
-                candidate = f"{prefijo}.{n:02d}"
-                if candidate not in existing:
-                    return candidate
-
-        elif ctx and not es_titulo:
-            partes = ctx.split('.')
-            for n in range(1, 1000):
-                partes[-1] = f"{n:02d}"
-                candidate  = '.'.join(partes)
-                if candidate not in existing:
-                    return candidate
-
+        elif ctx:
+            # Insertar DESPUÉS de la partida → hermano al mismo nivel
+            prefijo = ctx.rpartition('.')[0]
         else:
-            for n in range(1, 1000):
-                candidate = f"{n:02d}"
-                if candidate not in existing:
-                    return candidate
-
-        return "99"
+            prefijo = ''      # sin títulos → siguiente en la raíz
+        return siguiente_codigo(prefijo, existing)
 
     def _on_tab(self, idx: int):
         self._stack.setCurrentIndex(idx)

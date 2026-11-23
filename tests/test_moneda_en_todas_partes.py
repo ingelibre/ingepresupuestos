@@ -78,8 +78,8 @@ def test_son_en_letras_lleva_la_moneda_del_proyecto():
 
 
 def test_monto_letras_sin_moneda_sigue_en_soles():
-    assert ex._monto_letras(10.5).endswith('CON 50/100 SOLES')
-    assert ex._monto_letras(10.5, 'Dólares').endswith('DÓLARES AMERICANOS')
+    assert ex.monto_en_letras(10.5).endswith('CON 50/100 SOLES')
+    assert ex.monto_en_letras(10.5, 'Dólares').endswith('DÓLARES AMERICANOS')
 
 
 def test_ningun_modulo_importa_moneda_simbolo_de_formatting():

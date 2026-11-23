@@ -9,6 +9,8 @@ Estado en memoria de sesión (módulo singleton). No se persiste a BD.
 
 from typing import Optional
 
+from utils.formatting import siguiente_codigo
+
 
 # ── Estado global del clipboard ────────────────────────────────────────────────
 
@@ -329,30 +331,19 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
     if contexto_item and contexto_es_titulo:
         prefijo = contexto_item
         nivel_base = prefijo.count('.') + 2
-        counter = [0]
         def _next_item():
-            counter[0] += 1
-            for n in range(counter[0], 10000):
-                candidate = f"{prefijo}.{n:02d}"
-                if candidate not in existing:
-                    existing.add(candidate)
-                    counter[0] = n
-                    return candidate
-            return f"{prefijo}.99"
+            candidate = siguiente_codigo(prefijo, existing)
+            existing.add(candidate)
+            return candidate
     elif contexto_item and not contexto_es_titulo:
         partes = contexto_item.split('.')
         nivel_base = len(partes)
-        counter = [0]
+        prefijo = '.'.join(partes[:-1])
+
         def _next_item():
-            counter[0] += 1
-            for n in range(counter[0], 10000):
-                partes[-1] = f"{n:02d}"
-                candidate = '.'.join(partes)
-                if candidate not in existing:
-                    existing.add(candidate)
-                    counter[0] = n
-                    return candidate
-            return '.'.join(partes[:-1] + ['99'])
+            candidate = siguiente_codigo(prefijo, existing)
+            existing.add(candidate)
+            return candidate
     else:
         nivel_base = 1
         next_root = _siguiente_root(conn, pid_destino, sub_ppto_id)

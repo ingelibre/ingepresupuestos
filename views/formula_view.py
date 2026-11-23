@@ -23,12 +23,13 @@ de monomios quedaba en 70 px, fila y media visible.
 """
 from __future__ import annotations
 
+from shiboken6 import isValid
 from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent
 from PySide6.QtGui import QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFileDialog, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
+    QFileDialog, QMenu, QMessageBox, QSizePolicy, QSpinBox, QComboBox, QSplitter,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog,
     QTreeWidget, QTreeWidgetItem,
 )
@@ -43,7 +44,7 @@ from core.formula_polinomica import (
     incidencias_por_iu,
 )
 from core.indices_inei import listar_areas
-from utils.formatting import fmt, parse_num
+from utils.formatting import fmt, fmt_doc, parse_num
 from views._catalogo_base import EditorPlenoDelegate
 from utils.i18n import tr, N_
 from utils.icons import icon
@@ -391,7 +392,7 @@ class DesgloseIUDialog(QDialog):
         for ins in des['insumos']:
             it = QTreeWidgetItem([
                 ins['descripcion'], ins['unidad'] or '',
-                f"{ins['cantidad']:,.2f}", fmt(ins['monto'], moneda),
+                fmt_doc(ins['cantidad'], 2, moneda=moneda), fmt(ins['monto'], moneda),
                 f"{ins['monto'] / total * 100:.2f}%",
             ])
             f_b = QFont(); f_b.setBold(True)
@@ -405,7 +406,7 @@ class DesgloseIUDialog(QDialog):
             for p in ins['partidas']:
                 hijo = QTreeWidgetItem([
                     f"{p['item']}  {p['descripcion']}", p['unidad'] or '',
-                    f"{p['cantidad']:,.2f}", fmt(p['monto'], moneda),
+                    fmt_doc(p['cantidad'], 2, moneda=moneda), fmt(p['monto'], moneda),
                     f"{p['monto'] / total * 100:.2f}%",
                 ])
                 for c in (2, 3, 4):
@@ -918,6 +919,10 @@ class FormulaView(QWidget):
         Acá se cortan además los movimientos de mouse CON botón pulsado sobre
         la tabla, para que ni siquiera la fila resaltada se arrastre.
         """
+        # Al destruirse la vista, Qt puede haber borrado ya la tabla y seguir
+        # mandando eventos: usarla lanzaría dentro del filtro.
+        if not isValid(self.tbl):
+            return False
         if obj is self.tbl.viewport():
             if (ev.type() == QEvent.MouseMove
                     and ev.buttons() != Qt.NoButton):
@@ -927,7 +932,7 @@ class FormulaView(QWidget):
             # se conoce después de que la tabla procese la tecla.
             if ev.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End,
                             Qt.Key_PageUp, Qt.Key_PageDown):
-                QTimer.singleShot(0, self._fijar_monomio_actual)
+                QTimer.singleShot(0, lambda: self._fijar_monomio_actual() if isValid(self) else None)
         return super().eventFilter(obj, ev)
 
     def _fijar_monomio_actual(self):
@@ -948,7 +953,7 @@ class FormulaView(QWidget):
         selección legítima. Al correr después, `_monomio_activo` ya está puesto
         y no hay nada que restaurar.
         """
-        QTimer.singleShot(0, self._restaurar_seleccion)
+        QTimer.singleShot(0, lambda: self._restaurar_seleccion() if isValid(self) else None)
 
     def _restaurar_seleccion(self):
         activo = self._monomio_activo
@@ -993,6 +998,8 @@ class FormulaView(QWidget):
         )
         self.tbl.setItemDelegate(EditorPlenoDelegate(self.tbl))
         self.tbl.itemChanged.connect(self._on_item_changed)
+        self.tbl.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl.customContextMenuRequested.connect(self._menu_monomio)
         # SOLO el clic y el teclado cambian de monomio. Nada de
         # `itemSelectionChanged` ni `currentCellChanged` a secas: esas señales
         # también saltan cuando la fila cambia por arrastre o por el foco.
@@ -1643,6 +1650,29 @@ class FormulaView(QWidget):
                 else:
                     it.setForeground(fg_normal)
             it.setToolTip(tip)
+
+    def _menu_monomio(self, pos):
+        """Clic derecho sobre un monomio (issue #46)."""
+        item = self.tbl.itemAt(pos)
+        if item is None:
+            return
+        self._crear_menu_monomio(item.row()).exec(
+            self.tbl.viewport().mapToGlobal(pos))
+
+    def _crear_menu_monomio(self, fila: int) -> QMenu:
+        menu = QMenu(self.tbl)
+        menu.setAttribute(Qt.WA_DeleteOnClose)
+        menu.addAction(tr("Editar símbolo")).triggered.connect(
+            lambda _=False: self._editar_simbolo(fila))
+        return menu
+
+    def _editar_simbolo(self, fila: int):
+        it = self.tbl.item(fila, 1)
+        if it is None:
+            return
+        self._fijar_monomio(fila)
+        self.tbl.setCurrentItem(it)
+        self.tbl.editItem(it)
 
     def _on_item_changed(self, item: QTableWidgetItem):
         row = item.row()

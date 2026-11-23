@@ -20,6 +20,7 @@ Uso global recomendado (una sola vez al iniciar la app):
 from PySide6.QtWidgets import QLabel, QApplication, QWidget
 from PySide6.QtCore import QObject, QEvent, QTimer, Qt, QPoint
 from PySide6.QtGui import QCursor, QColor, QPalette
+from shiboken6 import isValid
 
 
 # ── Ventana del tooltip ───────────────────────────────────────────────────────
@@ -31,9 +32,22 @@ class _TipWindow(QLabel):
 
     @classmethod
     def get(cls) -> "_TipWindow":
-        if cls._inst is None:
+        if cls._inst is None or not isValid(cls._inst):
             cls._inst = cls()
         return cls._inst
+
+    @classmethod
+    def ocultar(cls) -> None:
+        """Esconde el tooltip si existe; nunca lo crea ni lo da por vivo.
+
+        Se llama desde filtros de eventos, también mientras la aplicación se
+        cierra: ahí Qt ya borró la ventana del tooltip aunque Python conserve
+        la referencia, y usarla lanzaba RuntimeError dentro del filtro. Con
+        ese error pendiente fallaban en cadena los demás filtros globales,
+        cada uno envolviendo el mensaje del anterior."""
+        tip = cls._inst
+        if tip is not None and isValid(tip) and tip.isVisible():
+            tip.hide()
 
     def __init__(self):
         super().__init__(None)
@@ -142,8 +156,9 @@ class _TooltipFilter(QObject):
             QEvent.Type.KeyPress,
             QEvent.Type.Hide,
         ):
-            self._show_timer.stop()
-            _TipWindow.get().hide()
+            if isValid(self._show_timer):
+                self._show_timer.stop()
+            _TipWindow.ocultar()
         return False
 
     def _mostrar(self):
@@ -199,9 +214,7 @@ class _GlobalTooltipFilter(QObject):
                  QEvent.Type.Wheel,
                  QEvent.Type.FocusOut,
                  QEvent.Type.Hide):
-            tip = _TipWindow.get()
-            if tip.isVisible():
-                tip.hide()
+            _TipWindow.ocultar()
         return False
 
 

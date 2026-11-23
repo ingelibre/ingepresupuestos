@@ -11,6 +11,7 @@ import json as _json
 from datetime import datetime, timedelta
 
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
     QScrollArea, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QComboBox, QSpinBox, QGraphicsView, QGraphicsScene,
@@ -20,13 +21,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QButtonGroup, QStyledItemDelegate, QStyle,
     QStyleOptionViewItem, QInputDialog, QSlider,
 )
-from PySide6.QtCore import Qt, QTimer, QRect, QRectF, QPointF, QSize, QMarginsF, Signal
+from PySide6.QtCore import Qt, QEvent, QTimer, QRect, QRectF, QPointF, QSize, QMarginsF, Signal
 from PySide6.QtGui import (
     QFontMetrics, QFontMetricsF,
     QFont, QColor, QBrush, QPen, QPainter, QPolygonF, QPainterPath, QPageLayout,
     QPainterPathStroker, QTransform, QLinearGradient,
 )
 from PySide6.QtPrintSupport import QPrinter
+from shiboken6 import isValid
 
 from core.database import (
     get_db, calcular_totales, parcial_wysiwyg, get_decimales_ppto,
@@ -47,7 +49,7 @@ from core.pdf_reports import (
     _rect_logo,
     _oculto as _oculto_rep,
 )
-from utils.formatting import fmt, parse_num, ITEM_TRAMOS_POR_LINEA
+from utils.formatting import fmt, fmt_doc, parse_num, ITEM_TRAMOS_POR_LINEA
 from utils.i18n import N_, tr
 from utils.icons import qss_icon_url
 from utils.theme import nivel_fg as _nivel_fg
@@ -94,6 +96,12 @@ def _re_simbolos_moneda() -> str:
     from core.config import monedas
     sims = {m['simbolo'] for m in monedas().values()} | {'S/.', 'Bs', '$'}
     return '|'.join(_re.escape(x) for x in sorted(sims, key=len, reverse=True))
+
+
+def _luego(widget, fn):
+    """`fn` en la próxima vuelta del bucle de eventos, si `widget` sigue vivo:
+    el proyecto puede cerrarse antes y el dibujo usaría tablas ya borradas."""
+    QTimer.singleShot(0, lambda: fn() if isValid(widget) else None)
 
 
 class CronogramaView(QWidget):
@@ -2095,7 +2103,7 @@ class GanttWidget(QWidget):
             # Diferido para que el splitter ya haya dado ancho a la tabla y la
             # columna Descripción (Stretch) tenga su ancho real al congelarla.
             from PySide6.QtCore import QTimer as _QT
-            _QT.singleShot(0, self._init_columns_resizable)
+            _luego(self, self._init_columns_resizable)
 
     def _init_columns_resizable(self):
         """Pasa Descripción de Stretch a Interactive conservando su ancho, y
@@ -2474,7 +2482,7 @@ class GanttWidget(QWidget):
         # Diferimos 1 frame para que el viewport ya tenga ancho real.
         if self._fit_pendiente:
             self._fit_pendiente = False
-            QTimer.singleShot(0, self._zoom_fit)
+            _luego(self, self._zoom_fit)
 
     def _llenar_tabla(self):
         from core.cronograma import contar_laborables, formatear_pred_es
@@ -7366,7 +7374,37 @@ class _PeriodosMixin:
         return f"\n{tr(mes) if traducir else mes} {anio}"
 
 
-class ValorizadoWidget(_PeriodosMixin, QWidget):
+class _EscGlobalMixin:
+    """ESC deselecciona la columna del período, con un filtro en QApplication.
+
+    El filtro solo vive mientras el widget está a la vista: cada proyecto que
+    se abría dejaba dos filtros para siempre, y Qt los llama con CADA evento
+    de la aplicación."""
+
+    def showEvent(self, event):
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)   # si ya estaba, Qt no lo duplica
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().hideEvent(event)
+
+    def eventFilter(self, obj, event):
+        # ESC en cualquier sub-widget → deseleccionar todo
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            fw = QApplication.focusWidget()
+            # Solo actuar si el foco está en este widget o uno de sus hijos
+            if fw is not None and (fw is self or self.isAncestorOf(fw)):
+                self._clear_column_selection()
+                return True
+        return super().eventFilter(obj, event)
+
+
+class ValorizadoWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
     """Tabla con distribución valorizada por semanas/meses con totales,
     % por período, acumulados, %-distribución por partida y resaltado del
     período actual."""
@@ -7562,12 +7600,10 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
         # incluso al cambiar de fila.
         self.tbl_r.cellClicked.connect(self._on_cell_clicked_clear_col)
         self.tbl_l.cellClicked.connect(self._on_cell_clicked_clear_col)
-        # ESC deselecciona — instalamos eventFilter a nivel de QApplication
-        # para capturar la tecla con seguridad. El QShortcut y eventFilter
-        # locales no eran suficientes (QAbstractItemView y/o QSplitter
-        # consumían el evento antes).
-        from PySide6.QtWidgets import QApplication
-        QApplication.instance().installEventFilter(self)
+        # ESC deselecciona — eventFilter a nivel de QApplication (ver
+        # _EscGlobalMixin). El QShortcut y eventFilter locales no eran
+        # suficientes (QAbstractItemView y/o QSplitter consumían el evento
+        # antes).
         self._col_selected = None
 
         # Alias por compatibilidad (en caso de referencias externas)
@@ -7661,18 +7697,6 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
         self.tbl_rf.clearSelection()
         self._col_selected = None
 
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-        from PySide6.QtWidgets import QApplication
-        # ESC en cualquier sub-widget de Valorizado → deseleccionar todo
-        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
-            fw = QApplication.focusWidget()
-            # Solo actuar si el foco está en este widget o uno de sus hijos
-            if fw is not None and (fw is self or self.isAncestorOf(fw)):
-                self._clear_column_selection()
-                return True
-        return super().eventFilter(obj, event)
-
     def _apply_period_widths(self):
         """Ajusta el ancho de las columnas de período según el viewport:
         - Si caben holgadamente → cada una toma viewport_w / n (sin scroll).
@@ -7696,7 +7720,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
         super().resizeEvent(event)
         # Reajustar anchos de períodos al redimensionar la ventana / splitter
         if hasattr(self, '_last_n_periods'):
-            QTimer.singleShot(0, self._apply_period_widths)
+            _luego(self, self._apply_period_widths)
 
     def _project_start(self):
         """Devuelve datetime para el día 1 del proyecto (usa fecha_inicio,
@@ -7902,7 +7926,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
         th_r.sectionResized.connect(
             lambda i, _o, n: self.tbl_rf.setColumnWidth(i, n))
         # Aplicar anchos dinámicos (deferred — viewport puede no estar listo)
-        QTimer.singleShot(0, self._apply_period_widths)
+        _luego(self, self._apply_period_widths)
 
         totales_per = [0.0] * n_periods
         total_general = 0.0
@@ -8005,7 +8029,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
             # Cantidad (= metrado): número sin símbolo de moneda, con los
             # decimales de metrado configurados y coma como separador de miles
             _dm = get_decimales_metrado()
-            cant_txt = (f"{metrado_v:,.{_dm}f}") if metrado_v else ''
+            cant_txt = (fmt_doc(metrado_v, _dm, moneda=moneda)) if metrado_v else ''
             cells_left = [
                 (p['item'] or '',           Qt.AlignLeft  | Qt.AlignVCenter),
                 (p['descripcion'] or '',     Qt.AlignLeft  | Qt.AlignVCenter),
@@ -8034,7 +8058,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
                 mval = weekly_met[i] if i < len(weekly_met) else 0.0
                 vval = weekly[i] if i < len(weekly) else 0.0
                 # Metrado (sub-col 2i)
-                itm = QTableWidgetItem(f"{mval:,.2f}" if mval > 0 else '')
+                itm = QTableWidgetItem(fmt_doc(mval, 2, moneda=moneda) if mval > 0 else '')
                 itm.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 itm.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if mval > 0:
@@ -8162,7 +8186,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
 
         for tbl_ in (self.tbl_l, self.tbl_r, self.tbl_lf, self.tbl_rf):
             tbl_.setUpdatesEnabled(True)
-        QTimer.singleShot(0, self._apply_period_widths)
+        _luego(self, self._apply_period_widths)
         # Auto-fit alturas del panel izquierdo (descripción puede wrap a 2-3
         # líneas) y replicar al panel derecho para mantener alineación de filas.
         self.tbl_l.resizeRowsToContents()
@@ -8664,7 +8688,7 @@ class ValorizadoWidget(_PeriodosMixin, QWidget):
             if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
-            return parse_num(s)
+            return parse_num(s, self._cv._moneda, mostrado=True)
 
         # Acceso a las partidas para detectar títulos por índice (las filas
         # del QTableWidget mantienen el mismo orden que `_cv._partidas`).
@@ -9376,12 +9400,12 @@ class CurvaSWidget(_PeriodosMixin, QWidget):
         super().resizeEvent(event)
         # Redibujar la curva para que llene el ancho/alto disponible.
         if getattr(self, '_last_data', None):
-            QTimer.singleShot(0, self._dibujar_chart)
+            _luego(self, self._dibujar_chart)
 
     def showEvent(self, event):
         super().showEvent(event)
         if getattr(self, '_last_data', None):
-            QTimer.singleShot(0, self._dibujar_chart)
+            _luego(self, self._dibujar_chart)
 
     def _dibujar_chart(self, traducir: bool = True):
         """Pinta la curva S en self.scene usando _last_data.
@@ -10867,7 +10891,7 @@ class _PeriodGroupHeader(QHeaderView):
         painter.drawLine(0, h - 1, self.viewport().width(), h - 1)
 
 
-class InsumosWidget(_PeriodosMixin, QWidget):
+class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
     """Cronograma de Adquisición de Insumos — espejo visual del Valorizado.
     Columnas izq (frozen): Tipo · Código · Descripción · Und · Precio · % Total.
     Columnas der (scroll): [períodos] · Total. Footer sticky con TOTAL ·
@@ -11016,10 +11040,6 @@ class InsumosWidget(_PeriodosMixin, QWidget):
         self.tbl_r.cellClicked.connect(self._on_cell_clicked_clear_col)
         self.tbl_l.cellClicked.connect(self._on_cell_clicked_clear_col)
 
-        # ESC global
-        from PySide6.QtWidgets import QApplication
-        QApplication.instance().installEventFilter(self)
-
         self.split.addWidget(left_fr); self.split.addWidget(right_fr)
         self.split.setStretchFactor(0, 0); self.split.setStretchFactor(1, 1)
         self.split.setSizes([50 + 80 + 240 + 40 + 90 + 60, 800])
@@ -11034,16 +11054,6 @@ class InsumosWidget(_PeriodosMixin, QWidget):
             self.tbl_rf.horizontalScrollBar().setValue)
 
     # ─── Eventos comunes ──────────────────────────────────────────────────
-
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-        from PySide6.QtWidgets import QApplication
-        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
-            fw = QApplication.focusWidget()
-            if fw is not None and (fw is self or self.isAncestorOf(fw)):
-                self._clear_column_selection()
-                return True
-        return super().eventFilter(obj, event)
 
     def _clear_column_selection(self):
         for tbl_ in (self.tbl_l, self.tbl_r, self.tbl_rf):
@@ -11129,7 +11139,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._last_n_periods:
-            QTimer.singleShot(0, self._apply_period_widths)
+            _luego(self, self._apply_period_widths)
 
     # ─── Carga de datos ───────────────────────────────────────────────────
 
@@ -11299,7 +11309,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
             pass
         th_r.sectionResized.connect(
             lambda i, _o, n: self.tbl_rf.setColumnWidth(i, n))
-        QTimer.singleShot(0, self._apply_period_widths)
+        _luego(self, self._apply_period_widths)
 
         alt_bg = QColor("#F1F4F9")
         totales_per = [0.0] * n_periods
@@ -11365,7 +11375,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
 
             cost_total = sum(rec['weekly'])
             qty_total  = sum(rec.get('weekly_qty', []))
-            cant_txt = f"{qty_total:,.2f}" if qty_total > 0 else ''
+            cant_txt = fmt_doc(qty_total, 2, moneda=moneda) if qty_total > 0 else ''
             cells_left = [
                 (rec['tipo'],                  Qt.AlignCenter),
                 (rec['codigo'],                Qt.AlignLeft  | Qt.AlignVCenter),
@@ -11390,7 +11400,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
                 qv = wq[i] if i < len(wq) else 0.0
                 vv = rec['weekly'][i] if i < len(rec['weekly']) else 0.0
                 # Cantidad (sub-col 2i)
-                itq = QTableWidgetItem(f"{qv:,.2f}" if qv > 0 else '')
+                itq = QTableWidgetItem(fmt_doc(qv, 2, moneda=moneda) if qv > 0 else '')
                 itq.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 itq.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if qv > 0:
@@ -11494,7 +11504,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
 
         for t_ in (self.tbl_l, self.tbl_r, self.tbl_lf, self.tbl_rf):
             t_.setUpdatesEnabled(True)
-        QTimer.singleShot(0, self._apply_period_widths)
+        _luego(self, self._apply_period_widths)
         # Resize por contenido en el panel izquierdo, luego forzar altura
         # consistente para las filas de subtítulo (resizeRowsToContents puede
         # darles altura distinta a causa del setSpan) y replicar al derecho.
@@ -11949,7 +11959,7 @@ class InsumosWidget(_PeriodosMixin, QWidget):
             if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
-            return parse_num(s)
+            return parse_num(s, self._cv._moneda, mostrado=True)
 
         def _alto_desc(texto: str) -> float:
             """Alto de fila (pts) para que la Descripción mergeada C+D con

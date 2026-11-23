@@ -737,7 +737,13 @@ class ModeloBimDialog(_Base):
             self.visor.seleccion_cambiada.connect(self._elegido_en_3d)
             self.visor.cargado.connect(self._cargar_vinculos)
             self._sp.addWidget(self.visor)
-            self._sp.setSizes([360, 360, 560])
+            self._sp.setSizes([340, 320, 520])
+            self._sp.setStretchFactor(2, 1)
+            for i in range(3):
+                self._sp.setCollapsible(i, False)
+            for i in (0, 1):
+                self._sp.widget(i).setMinimumWidth(300)
+            self.resize(max(self.width(), 1320), self.height())
         self.visor.show()
         self._abrir_3d()
 

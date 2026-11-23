@@ -351,7 +351,7 @@ class Operaciones:
 
     def totals(self, project_id: int):
         from core.database import calcular_totales, get_db
-        from core.pie import calcular_pie
+        from core.pie import pie_efectivo
         conn = get_db()
         try:
             p = self._proyecto(conn, project_id)
@@ -360,7 +360,7 @@ class Operaciones:
         items, t = calcular_totales(project_id)
         conn = get_db()
         try:
-            lineas, _total = calcular_pie(conn, project_id, t['cd'])
+            lineas, _total = pie_efectivo(conn, project_id, t['cd'])
         finally:
             conn.close()
         if lineas is None:

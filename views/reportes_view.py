@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from shiboken6 import isValid
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QPoint, QSettings, QTimer
 from PySide6.QtCore import QPointF, QRectF, QMimeData
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QPainter, QPen, QPixmap
@@ -1463,6 +1464,10 @@ class ReportesView(QWidget):
         - Mid-click + drag → pan (manito) — clásico de visores PDF.
         """
         from PySide6.QtCore import QEvent
+        # Al destruirse la vista, Qt puede haber borrado ya el visor y seguir
+        # mandando eventos: usarla lanzaría dentro del filtro.
+        if not isValid(self._pdf_view):
+            return False
         if obj is not self._pdf_view.viewport():
             return super().eventFilter(obj, event)
 

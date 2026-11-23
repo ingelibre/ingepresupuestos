@@ -613,10 +613,10 @@ def totales_detalle(proyecto_id: int) -> str:
 
     # El desglose sale de `core.pie.calcular_pie`, el mismo cálculo que la
     # pestaña Pie y los reportes (issue #3).
-    from core.pie import calcular_pie, nombre_total
+    from core.pie import pie_efectivo, nombre_total
     from core.config import moneda_cfg
     conn = get_db()
-    pie, _ = calcular_pie(conn, proyecto_id, cd)
+    pie, _ = pie_efectivo(conn, proyecto_id, cd)
     proy = conn.execute("SELECT moneda FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     conn.close()
     S = moneda_cfg((proy and proy['moneda']) or 'Soles')['simbolo']

@@ -8,10 +8,13 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import WorksheetProperties, PageSetupProperties
 from openpyxl.worksheet.page import PageMargins
 import os
+import re
 import io
 from core.database import (get_db, calcular_totales, get_acu_items, get_decimales_metrado,
                            get_decimales_cant_acu, cuadrilla_reporte, ORDEN_ACU_SQL)
-from utils.formatting import ITEM_TRAMOS_POR_LINEA, fmt as _fmt_moneda
+from utils.formatting import (
+    ITEM_TRAMOS_POR_LINEA, con_moneda_del_proyecto, fmt as _fmt_moneda, fmt_doc,
+    fmt_pct, monto_en_letras, separadores)
 
 # Fuente Inter (variable) empaquetada con la app — un solo .ttf que
 # contiene todos los pesos y variantes (italic en su propio archivo).
@@ -144,49 +147,42 @@ def _escribir_pie(ws, r, pie, n_cols=None):
             cell.alignment = Alignment(horizontal='center')
 
 
-# ─── Monto en letras (español) ────────────────────────────────────────────────
+# ─── Guardado común ───────────────────────────────────────────────────────────
 
-_UNIDADES = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
-             'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE',
-             'DIECIOCHO', 'DIECINUEVE']
-_DECENAS  = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA',
-             'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA']
-_CENTENAS = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS',
-             'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS']
+# (miles, decimal) → idioma de Excel con esos separadores: español, francés
+# de Canadá y alemán de Suiza.
+_IDIOMA_SEPARADORES = {('.', ','): '[$-0C0A]', (' ', ','): '[$-0C0C]',
+                       ("'", '.'): '[$-0807]'}
 
 
-def _n2l(n):
-    if n == 0:
-        return 'CERO'
-    if n < 0:
-        return 'MENOS ' + _n2l(-n)
-    p = []
-    if n >= 1_000_000:
-        m = n // 1_000_000; n %= 1_000_000
-        p.append('UN MILLÓN' if m == 1 else _n2l(m) + ' MILLONES')
-    if n >= 1_000:
-        k = n // 1_000; n %= 1_000
-        p.append('MIL' if k == 1 else _n2l(k) + ' MIL')
-    if n >= 100:
-        c = n // 100; n %= 100
-        p.append('CIEN' if (c == 1 and n == 0) else _CENTENAS[c])
-    if n >= 20:
-        d, u = n // 10, n % 10
-        p.append(_DECENAS[d] if u == 0 else _DECENAS[d] + ' Y ' + _UNIDADES[u])
-    elif n > 0:
-        p.append(_UNIDADES[n])
-    return ' '.join(p)
-
-
-def _monto_letras(monto, moneda='Soles'):
-    from core.pdf_reports import _moneda_plural
-    try:
-        monto   = round(float(monto), 2)
-        entero  = int(monto)
-        cts     = round((monto - entero) * 100)
-        return f"{_n2l(entero)} CON {cts:02d}/100 {_moneda_plural(moneda)}"
-    except Exception:
-        return ''
+def _guardar_libro(wb, buf):
+    """Guarda el libro ensanchando las columnas donde un número no cabría
+    (Excel lo muestra como «#####»; issue #49, montos en pesos). Una columna
+    donde todo cabe conserva su ancho."""
+    # Los formatos van fijados a inglés (0409): Calc respeta ese idioma y
+    # mostraba «1,234.56» en cualquier moneda. Se cambia por uno con los
+    # separadores del proyecto; las celdas siguen siendo números.
+    idioma = _IDIOMA_SEPARADORES.get(separadores())
+    for ws in wb.worksheets:
+        combinadas = {(m.min_row, m.min_col) for m in ws.merged_cells.ranges
+                      if m.max_col > m.min_col}
+        for fila in ws.iter_rows():
+            for c in fila:
+                if idioma and '[$-0409]' in (c.number_format or ''):
+                    c.number_format = c.number_format.replace('[$-0409]', idioma)
+                if (not isinstance(c.value, (int, float))
+                        or '#,##0' not in (c.number_format or '')
+                        or (c.row, c.column) in combinadas):
+                    continue
+                m = re.search(r'#,##0\.(0+)', c.number_format)
+                texto = f"{c.value:,.{len(m.group(1)) if m else 0}f}"
+                # Ancho en caracteres de la fuente normal (11 pt).
+                pide = (len(texto) * (c.font.sz or 11) / 11
+                        * (1.12 if c.font.b else 1.0)) + 1.0
+                dim = ws.column_dimensions[get_column_letter(c.column)]
+                if pide > (dim.width or 8.43):
+                    dim.width = round(pide, 1)
+    wb.save(buf)
 
 
 # ─── Cálculo dinámico de rubros del pie ───────────────────────────────────────
@@ -201,6 +197,7 @@ def _calcular_rubros_pie(conn, proyecto_id, cd):
 
 # ─── EXCEL: Fórmula Polinómica ────────────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_formula_polinomica(proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
@@ -252,18 +249,20 @@ def exportar_formula_polinomica(proyecto_id):
         for mo in monomios:
             k   = float(mo['coeficiente'] or 0)
             sim = mo['simbolo'] or '?'
-            partes.append(f"{k:.4f}·({sim}r/{sim}o)")
+            partes.append(f"{fmt_doc(k, 4)}·({sim}r/{sim}o)")
         expresion = "K = " + " + ".join(partes)
     else:
         expresion = "K = (sin monomios)"
 
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
     ws.cell(r, 1, expresion).font      = Font(name='Courier New', bold=True, size=12)
-    ws.cell(r, 1).alignment            = al_l
+    ws.cell(r, 1).alignment            = Alignment(
+        horizontal='left', vertical='center', wrap_text=True)
     ws.cell(r, 1).border               = b_data
     r += 1
 
-    ws.row_dimensions[r - 1].height = 18
+    # A:E suman 98 de ancho: unos 80 caracteres de Courier 12 en negrita.
+    ws.row_dimensions[r - 1].height = 18 * max(1, -(-len(expresion) // 80))
     r += 1  # espacio
 
     # ── Cabecera tabla ───────────────────────────────────────────────────────
@@ -280,7 +279,7 @@ def exportar_formula_polinomica(proyecto_id):
         k   = float(mo['coeficiente'] or 0)
         pct = k * 100
         vals = [mo['simbolo'] or '', mo['descripcion'] or '',
-                mo['indice_inei'] or '', k, f"{pct:.2f}%"]
+                mo['indice_inei'] or '', k, fmt_pct(pct, 2)]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v)
             cell.font      = Font(name='Inter', size=11)
@@ -288,7 +287,7 @@ def exportar_formula_polinomica(proyecto_id):
             cell.alignment = al_r if c in (4, 5) else (al_c if c in (1, 3) else al_l)
             if c == 4:
                 cell.number_format = '0.0000'
-    r += 1
+        r += 1      # dentro del bucle: fuera, cada monomio pisaba al anterior
 
     # ── Fila total ───────────────────────────────────────────────────────────
     suma_k   = sum(float(mo['coeficiente'] or 0) for mo in monomios)
@@ -303,7 +302,7 @@ def exportar_formula_polinomica(proyecto_id):
     ws.cell(r, 4).number_format      = '0.0000'
     ws.cell(r, 4).alignment          = al_r
     ws.cell(r, 4).border             = b_tot
-    ws.cell(r, 5, f"{suma_pct:.2f}%").font = Font(name='Inter', bold=True, size=11)
+    ws.cell(r, 5, fmt_pct(suma_pct, 2)).font = Font(name='Inter', bold=True, size=11)
     ws.cell(r, 5).alignment          = al_r
     ws.cell(r, 5).border             = b_tot
 
@@ -369,7 +368,7 @@ def exportar_formula_polinomica(proyecto_id):
     ws.column_dimensions['E'].width = 18
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -721,6 +720,7 @@ def _xlsx_encabezado(ws, proyecto, titulo, n_cols):
 
 # ─── EXCEL: Presupuesto ───────────────────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_presupuesto(proyecto_id):
     """Export Excel del reporte de Presupuesto — espejo visual del PDF.
 
@@ -795,7 +795,19 @@ def exportar_presupuesto(proyecto_id):
     # "Presupuesto" no alinea con el nombre del proyecto. En cada fila de
     # datos B+C se mergean → el usuario sigue viendo 1 columna Descripción).
     # Tripartite resultante: Left=A+B=28 · Center=C+D=39 · Right=E+F+G=42.
-    N = 7  # Ítem · Desc1 · Desc2 · Und · Metrado · Precio Unit. · Parcial
+    # Columnas del PU por tipo (issue #54) y especificación bajo la partida
+    # (issue #41): las mismas opciones del PDF, apagadas por defecto.
+    from core.pdf_reports import (
+        DESGLOSE_PU, desglose_ppto, desglose_pu_partidas,
+        especificacion_en_parrafos, especificacion_en_ppto, get_formato)
+    _formato = get_formato()
+    cols_pu = desglose_ppto(_formato)
+    pu_tipo = desglose_pu_partidas(items) if cols_pu else {}
+    con_spec = especificacion_en_ppto(_formato)
+
+    # Ítem · Desc1 · Desc2 · Und · Metrado · [PU por tipo] · Precio · Parcial
+    N = 7 + len(cols_pu)
+    C_PU, C_PAR = N - 1, N
     # Ítem: se ajusta al código más largo del proyecto, hasta cinco tramos
     # («01.02.02.03.06», 14 caracteres) — con 10 fijo «01.02.02.03» ya se
     # cortaba. Lo que gana A lo pierde B, así la descripción (B+C) no cambia
@@ -809,8 +821,10 @@ def exportar_presupuesto(proyecto_id):
                                            # que el centro del header respire)
     ws.column_dimensions['D'].width = 7    # Und
     ws.column_dimensions['E'].width = 12   # Metrado
-    ws.column_dimensions['F'].width = 14   # Precio Unit.
-    ws.column_dimensions['G'].width = 16   # Parcial
+    for k in range(len(cols_pu)):
+        ws.column_dimensions[get_column_letter(6 + k)].width = 11
+    ws.column_dimensions[get_column_letter(C_PU)].width = 14   # Precio Unit.
+    ws.column_dimensions[get_column_letter(C_PAR)].width = 16  # Parcial
 
     # Helper para mergear Descripción (cols 2+3) en una fila dada.
     def _merge_descripcion(row_idx: int):
@@ -850,8 +864,11 @@ def exportar_presupuesto(proyecto_id):
         (2, 'Descripción',  'left'),    # merge con col 3
         (4, 'Und',          'center'),
         (5, 'Cantidad',     'right'),
-        (6, 'Precio',       'right'),
-        (7, 'Parcial',      'right'),
+    ] + [
+        (6 + k, dict(DESGLOSE_PU)[t], 'right') for k, t in enumerate(cols_pu)
+    ] + [
+        (C_PU, 'Precio',    'right'),
+        (C_PAR, 'Parcial',  'right'),
     ]
     # PRE-aplicar fill a TODAS las cols (incluye col 3 que será MergedCell).
     for col_ in range(1, N + 1):
@@ -937,12 +954,12 @@ def exportar_presupuesto(proyecto_id):
             if idx > 0:
                 ws.row_dimensions[r].height = 10
                 r += 1
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=C_PU)
             c_s = ws.cell(r, 1, _nom_sub)
             c_s.font = _font_sub
             c_s.alignment = Alignment(horizontal='left', vertical='center',
                                       wrap_text=True)
-            c_sv = ws.cell(r, 7, _cd_sub)
+            c_sv = ws.cell(r, C_PAR, _cd_sub)
             c_sv.font = _font_sub
             c_sv.number_format = fmt_money
             c_sv.alignment = Alignment(horizontal='right', vertical='center')
@@ -959,39 +976,39 @@ def exportar_presupuesto(proyecto_id):
             # N1: uppercase + underline + slate-900 bold — SIN bordes.
             # Descripción merge cols 2-6 (B-F: cubre Desc1+Desc2+Und+Met+Precio),
             # monto en col 7 (G).
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(1)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc.upper()); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(22, _alto_fila(desc, 75 - _cpl_menos))
 
         elif es_titulo and nivel == 2:
             # N2 rojo — solo color, SIN bordes (igual que el PDF visible)
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(2)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(20, _alto_fila(desc, 65 - _cpl_menos))
 
         elif es_titulo:
             # N3, N4, N5+ — solo color de texto, SIN bordes
-            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=6)
+            ws.merge_cells(start_row=r, start_column=_c_desc, end_row=r, end_column=C_PU)
             f = _font_titulo(nivel)
             ws.cell(r, 1, p['item']).font = f
             ws.cell(r, 1).alignment = Alignment(horizontal='left', vertical='center')
             c_d = ws.cell(r, _c_desc, desc); c_d.font = f
             c_d.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=_ind_desc)
-            c_v = ws.cell(r, 7, total); c_v.font = f
+            c_v = ws.cell(r, C_PAR, total); c_v.font = f
             c_v.number_format = fmt_money
             c_v.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = max(18, _alto_fila(desc, 60 - _cpl_menos))
@@ -1025,11 +1042,17 @@ def exportar_presupuesto(proyecto_id):
             c_met.number_format = fmt_met
             c_met.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_met)
-            c_pu = ws.cell(r, 6, p['precio_unitario']); c_pu.font = fh
+            val_pu = pu_tipo.get(p.get('id')) or {}
+            for k, t in enumerate(cols_pu):
+                c_t = ws.cell(r, 6 + k, val_pu.get(t) or None); c_t.font = fh
+                c_t.number_format = fmt_money
+                c_t.alignment = Alignment(horizontal='right', vertical='top')
+                celdas_fila.append(c_t)
+            c_pu = ws.cell(r, C_PU, p['precio_unitario']); c_pu.font = fh
             c_pu.number_format = fmt_money
             c_pu.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_pu)
-            c_to = ws.cell(r, 7, total); c_to.font = fh
+            c_to = ws.cell(r, C_PAR, total); c_to.font = fh
             c_to.number_format = fmt_money
             c_to.alignment = Alignment(horizontal='right', vertical='top')
             celdas_fila.append(c_to)
@@ -1045,6 +1068,17 @@ def exportar_presupuesto(proyecto_id):
             ws.row_dimensions[r].height = max(18, _alto_fila(desc, 42 - _cpl_menos))
 
         r += 1
+        if con_spec:
+            for parrafo in especificacion_en_parrafos(p.get('especificaciones')):
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=N)
+                c_e = ws.cell(r, 2, parrafo)
+                c_e.font = Font(name='Inter', size=9, color=C_SLATE_700)
+                c_e.alignment = Alignment(horizontal='left', vertical='top',
+                                          wrap_text=True, indent=_depth + 1)
+                c_e.data_type = 's'
+                ws.row_dimensions[r].height = _alto_fila(
+                    parrafo, 95 + 11 * len(cols_pu) - 3 * _depth)
+                r += 1
         prev_titulo = es_titulo
         prev_nivel  = nivel
 
@@ -1067,11 +1101,11 @@ def exportar_presupuesto(proyecto_id):
         else:
             bold, size, color = False, 10, C_SLATE_700
         # Label cols 2-6 right (Desc1+Desc2+Und+Met+Precio), valor en col 7.
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=C_PU)
         c_l = ws.cell(r, 2, label)
         c_l.font = Font(name='Inter', bold=bold, size=size, color=color)
         c_l.alignment = Alignment(horizontal='right', vertical='center')
-        c_v = ws.cell(r, 7, val)
+        c_v = ws.cell(r, C_PAR, val)
         c_v.font = Font(name='Inter', bold=bold, size=size, color=color)
         c_v.number_format = fmt_money
         c_v.alignment = Alignment(horizontal='right', vertical='center')
@@ -1087,7 +1121,7 @@ def exportar_presupuesto(proyecto_id):
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
     for c in range(1, N + 1):
         ws.cell(r, c).border = Border()
-    c_son = ws.cell(r, 1, f"Son: {_monto_letras(monto_total, proyecto['moneda'])}.")
+    c_son = ws.cell(r, 1, f"Son: {monto_en_letras(monto_total, proyecto['moneda'])}.")
     c_son.font = Font(name='Inter', italic=True, size=10, color=C_SLATE_700)
     c_son.alignment = Alignment(horizontal='right', vertical='center', wrap_text=True)
     ws.row_dimensions[r].height = 22
@@ -1098,13 +1132,14 @@ def exportar_presupuesto(proyecto_id):
                        proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
 
 # ─── EXCEL: ACUs ──────────────────────────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_acus(proyecto_id):
     """Export Excel del reporte ACU — espejo visual del PDF.
 
@@ -1415,13 +1450,14 @@ def exportar_acus(proyecto_id):
     _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 3), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
 
 # ─── EXCEL: Listado de insumos ────────────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_insumos(proyecto_id, por_sub: bool = False):
     """Export Excel del reporte Insumos — espejo visual del PDF `_html_insumos`.
 
@@ -1691,7 +1727,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
             c_s.number_format = fmt_money
             c_s.alignment = Alignment(horizontal='right', vertical='center')
             # % en col 7
-            c_p = ws.cell(r, 7, f"{pct:.1f}%")
+            c_p = ws.cell(r, 7, fmt_pct(pct))
             c_p.font = Font(name='Inter', size=10, color=C_SLATE_500)
             c_p.alignment = Alignment(horizontal='right', vertical='center')
             ws.row_dimensions[r].height = 16
@@ -1706,7 +1742,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
         c_tv.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
         c_tv.number_format = fmt_money
         c_tv.alignment = Alignment(horizontal='right', vertical='center')
-        c_tp = ws.cell(r, 7, "100.0%")
+        c_tp = ws.cell(r, 7, fmt_pct(100))
         c_tp.font = Font(name='Inter', bold=True, size=11, color=C_SLATE_900)
         c_tp.alignment = Alignment(horizontal='right', vertical='center')
         ws.row_dimensions[r].height = 20
@@ -1715,7 +1751,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
         _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 4), n_cols=N, proyecto=proyecto)
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -1883,7 +1919,7 @@ def _hoja_metrados(wb, proyecto_id):
             TextBlock(f_reg,  'Unidad: '),
             TextBlock(f_bold, unidad),
             TextBlock(f_reg,  '   ·   Metrado total: '),
-            TextBlock(f_bold, f'{metrado_total:,.{_dm}f}'),
+            TextBlock(f_bold, fmt_doc(metrado_total, _dm)),
         )
         for col_ in range(1, N + 1):
             ws.cell(r, col_).fill = card_fill
@@ -2051,7 +2087,7 @@ def _hoja_acero_metrados(wb, proyecto_id):
         # Línea 2: meta (Unidad · Metrado total) en italic slate-500
         unidad = partida['unidad'] or 'kg'
         meta = (f"Unidad: {unidad}   ·   "
-                f"Metrado total: {detalles_tot:,.3f} kg")
+                f"Metrado total: {fmt_doc(detalles_tot, 3)} kg")
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
         c_meta = ws.cell(r, 1, meta)
         c_meta.font = Font(name='Inter', italic=True, size=9, color='64748B')
@@ -2188,7 +2224,8 @@ def _hoja_gastos_generales(wb, proyecto_id):
     proyecto  = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     _, totales = calcular_totales(proyecto_id)
     cd        = totales['cd']
-    rubros_pie, total_final = _calcular_rubros_pie(conn, proyecto_id, cd)
+    from core.pie import pie_efectivo
+    rubros_pie, total_final = pie_efectivo(conn, proyecto_id, cd)
 
     ws = wb.create_sheet("Pie de Presupuesto")
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -2342,6 +2379,7 @@ def _hoja_gastos_generales(wb, proyecto_id):
     _setup_impresion(ws, n_filas_encabezado=filas_enc, n_cols=N, proyecto=proyecto)
 
 
+@con_moneda_del_proyecto
 def exportar_valorizacion(val_id):
     """Export Excel de una valorización (Base·Anterior·Actual·Acumulado·Saldo por
     partida, subtotales de título y fila TOTAL). Devuelve un buffer BytesIO."""
@@ -2384,7 +2422,7 @@ def exportar_valorizacion(val_id):
     sub = []
     if val.get('periodo_desde') or val.get('periodo_hasta'):
         sub.append(f"Período: {_fch(val['periodo_desde'])} al {_fch(val['periodo_hasta'])}")
-    sub.append(f"Avance físico acumulado: {resumen.get('pct_fisico', 0):.2f}%")
+    sub.append(f"Avance físico acumulado: {fmt_pct(resumen.get('pct_fisico', 0), 2)}")
     scell = ws.cell(r, 1, "   ·   ".join(sub))
     scell.font = Font(name='Inter', size=10, color=C_SLATE_700, italic=True)
     scell.alignment = Alignment(horizontal='center')
@@ -2508,33 +2546,36 @@ def exportar_valorizacion(val_id):
     # Inmovilizar las filas del encabezado (quedan fijas al hacer scroll).
     ws.freeze_panes = ws.cell(row=data_start, column=1)
     _setup_impresion(ws, n_filas_encabezado=_filas_hdr(ws, 8), n_cols=N, proyecto=proyecto)
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    buf = io.BytesIO(); _guardar_libro(wb, buf); buf.seek(0)
     return buf
 
 
+@con_moneda_del_proyecto
 def exportar_metrados(proyecto_id):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     _hoja_metrados(wb, proyecto_id)
     _hoja_acero_metrados(wb, proyecto_id)  # solo crea hoja si hay datos de acero
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
 
+@con_moneda_del_proyecto
 def exportar_gastos_generales(proyecto_id):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     _hoja_gastos_generales(wb, proyecto_id)
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
 
 # ─── EXCEL: Reporte Completo (6 hojas) ────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_reporte_completo(proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
@@ -2626,7 +2667,7 @@ def exportar_reporte_completo(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     ws_p.merge_cells(start_row=r + 1, start_column=1, end_row=r + 1, end_column=N)
-    ws_p.cell(r + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_p.cell(r + 1, 1, f"Son :   {monto_en_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     _escribir_pie(ws_p, r + 2, pie)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'], [10, 42, 6, 7, 10, 12, 12, 12, 14]):
         ws_p.column_dimensions[col].width = w
@@ -2823,7 +2864,7 @@ def exportar_reporte_completo(proyecto_id):
             _fila_i(lb, v)
 
     ws_i.merge_cells(start_row=ri + 1, start_column=1, end_row=ri + 1, end_column=Ni)
-    ws_i.cell(ri + 1, 1, f"Son :   {_monto_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
+    ws_i.cell(ri + 1, 1, f"Son :   {monto_en_letras(monto_final, proyecto['moneda'])}").font = Font(name='Inter',bold=True, italic=True, size=11)
     for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], [14, 36, 6, 8, 12, 12, 12, 6]):
         ws_i.column_dimensions[col].width = w
     _setup_impresion(ws_i, n_filas_encabezado=_filas_hdr(ws_i, 8))
@@ -2849,7 +2890,7 @@ def exportar_reporte_completo(proyecto_id):
         pass
 
     buf = io.BytesIO()
-    wb.save(buf)
+    _guardar_libro(wb, buf)
     buf.seek(0)
     return buf
 
@@ -2889,6 +2930,7 @@ def _make_page_canvas():
 
 # ─── PDF: Reporte Completo ────────────────────────────────────────────────────
 
+@con_moneda_del_proyecto
 def exportar_pdf(proyecto_id):
     """Genera PDF completo del expediente técnico, estilo PowerCost limpio."""
     from reportlab.lib.pagesizes import A4
@@ -2965,12 +3007,12 @@ def exportar_pdf(proyecto_id):
         spaceBefore=4)
 
     def _fmt(v, dec=2):
-        try:    return f"{float(v or 0):,.{dec}f}"
+        try:    return fmt_doc(v, dec)
         except: return '0.00'
 
     def _fmt_cuadrilla(tipo, unidad, cuadrilla):
         v = cuadrilla_reporte(tipo, unidad, cuadrilla)
-        return '' if v is None else f"{v:,.4f}"
+        return '' if v is None else fmt_doc(v, 4)
 
     def _encabezado(titulo_seccion):
         nombre   = proyecto['nombre']          or ''
@@ -3099,7 +3141,7 @@ def exportar_pdf(proyecto_id):
 
     monto_final = totales['total'] if rubros_pie is None else total_final
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {monto_en_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 2. ANÁLISIS DE COSTOS UNITARIOS
@@ -3311,7 +3353,7 @@ def exportar_pdf(proyecto_id):
     story.append(t_ti)
 
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph(f"<b>Son :</b>   {_monto_letras(monto_final, proyecto['moneda'])}", st_letras))
+    story.append(Paragraph(f"<b>Son :</b>   {monto_en_letras(monto_final, proyecto['moneda'])}", st_letras))
 
     # ══════════════════════════════════════════════════════════════════════════
     # 4. PLANILLA DE SUSTENTO DE METRADOS
@@ -3348,7 +3390,7 @@ def exportar_pdf(proyecto_id):
                 (p['id'],)
             ).fetchall()
 
-            total_txt = f"{(p['metrado'] or 0):.2f}  {p['unidad'] or ''}"
+            total_txt = f"{fmt_doc(p['metrado'], miles=False)}  {p['unidad'] or ''}"
             met_data = []
             met_data.append([
                 f"Partida  {p['item']}  —  {p['descripcion']}",

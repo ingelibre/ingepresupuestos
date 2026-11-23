@@ -23,17 +23,12 @@ def siguiente_item(conn, pid: int, contexto: str | None,
     `contexto`, o raíz. Se mira el proyecto entero, no el sub-presupuesto."""
     existing = {r[0] for r in conn.execute(
         "SELECT item FROM partidas_ppto WHERE proyecto_id=?", (pid,))}
+    from utils.formatting import siguiente_codigo
     if contexto and es_titulo:
-        prefijo = contexto + '.'
-    elif contexto and '.' in contexto:
-        prefijo = contexto.rsplit('.', 1)[0] + '.'
+        prefijo = contexto
     else:
-        prefijo = ''
-    for n in range(1, 1000):
-        codigo = f"{prefijo}{n:02d}"
-        if codigo not in existing:
-            return codigo
-    return "99"
+        prefijo = (contexto or '').rpartition('.')[0]
+    return siguiente_codigo(prefijo, existing)
 
 
 def insertar_titulo(conn, pid: int, item: str, descripcion: str,

@@ -1174,6 +1174,39 @@ def set_config(clave, valor):
     conn.commit()
     conn.close()
 
+def igualar_codigos_hermanos(conn, proyecto_id) -> int:
+    """Pone el mismo ancho a los códigos hermanos de los grupos que pasan de
+    99 («01.99» y «01.100» → «01.099» y «01.100»): todo el programa ordena por
+    el texto del código. Los grupos normales no se tocan. No hace commit.
+    Devuelve cuántas filas cambió."""
+    filas = conn.execute(
+        "SELECT id, item, sub_presupuesto_id AS sub FROM partidas "
+        "WHERE proyecto_id=?", (proyecto_id,)).fetchall()
+    anchos: dict = {}        # (sub, códigos del padre como números) → anchos
+    def _num(t):
+        return int(t) if t.isdecimal() else t
+    for f in filas:
+        tramos = (f['item'] or '').split('.')
+        if tramos[-1].isdecimal():
+            anchos.setdefault((f['sub'], tuple(map(_num, tramos[:-1]))),
+                              set()).add(len(tramos[-1]))
+    largos = {k: max(v) for k, v in anchos.items() if len(v) > 1 and max(v) > 2}
+    if not largos:
+        return 0
+    cambios = 0
+    for f in filas:
+        tramos = (f['item'] or '').split('.')
+        nums = tuple(map(_num, tramos))
+        nuevo = '.'.join(
+            t.zfill(largos[(f['sub'], nums[:i])])
+            if t.isdecimal() and (f['sub'], nums[:i]) in largos else t
+            for i, t in enumerate(tramos))
+        if nuevo != f['item']:
+            conn.execute("UPDATE partidas SET item=? WHERE id=?", (nuevo, f['id']))
+            cambios += 1
+    return cambios
+
+
 def calcular_totales(proyecto_id):
     conn = get_db()
     partidas = conn.execute(
@@ -1232,12 +1265,11 @@ def calcular_totales(proyecto_id):
         subtotal = subs[-1] if subs else cd + gf + utilidad
     else:
         # Fallback: fórmula simple desde campos del proyecto
-        n = _DECIMALES_PPTO
-        gf = _rn(cd * (proyecto['gf_pct'] or 0) / 100, n)
-        utilidad = _rn(cd * (proyecto['utilidad_pct'] or 0) / 100, n)
-        subtotal = _rn(cd + gf + utilidad, n)
-        igv = _rn(subtotal * (proyecto['igv_pct'] or 0) / 100, n)
-        total_obra = _rn(subtotal + igv, n)
+        from core.pie import lineas_simples
+        simples, total_obra = lineas_simples(proyecto, cd)
+        val = {l['codigo']: l['valor'] for l in simples}
+        gf, utilidad = val.get('GG', 0.0), val.get('UTIL', 0.0)
+        subtotal, igv = val['SUB'], val.get('IGV', 0.0)
 
     conn2.close()
     return items_con_total, {

@@ -121,6 +121,51 @@ def nombre_total(proy, defecto: str = 'PRESUPUESTO TOTAL') -> str:
     return propio.upper() if defecto.isupper() else propio
 
 
+def lineas_simples(proyecto, cd: float):
+    """Pie de un proyecto que nunca abrió su pestaña «Pie»: gastos generales y
+    utilidad sobre el CD, e impuesto sobre el subtotal, con los porcentajes
+    del proyecto. Mismo retorno que `calcular_pie` (nunca None)."""
+    from core.database import _rn, get_decimales_ppto
+    from core.paises import impuesto
+    dec = get_decimales_ppto()
+    cd = _rn(cd or 0, dec)
+
+    def _pct(campo):
+        return (proyecto[campo] if campo in proyecto.keys() else 0) or 0
+
+    def _linea(tipo, codigo, nombre, pct, valor):
+        return {'tipo': tipo, 'nombre': nombre, 'codigo': codigo, 'pct': pct,
+                'valor': valor, 'mostrar_pct': 1, 'has_items': False,
+                'pct_real': round(valor / cd * 100, 2)
+                if (cd and tipo != 'subtotal') else 0}
+
+    gf = _rn(cd * _pct('gf_pct') / 100, dec)
+    util = _rn(cd * _pct('utilidad_pct') / 100, dec)
+    sub = _rn(cd + gf + util, dec)
+    igv = _rn(sub * _pct('igv_pct') / 100, dec)
+    lineas = [
+        _linea('pct_cd', 'GG', 'Gastos Generales', _pct('gf_pct'), gf),
+        _linea('pct_cd', 'UTIL', 'Utilidad', _pct('utilidad_pct'), util),
+        _linea('subtotal', 'SUB', 'Sub Total', 0, sub),
+        _linea('pct_sub', CODIGO_IMPUESTO, impuesto()[0], _pct('igv_pct'), igv),
+    ]
+    return [l for l in lineas if l['valor'] or l['tipo'] == 'subtotal'], _rn(sub + igv, dec)
+
+
+def pie_efectivo(conn, proyecto_id: int, cd: float):
+    """El pie que se IMPRIME: el configurado o, si el proyecto nunca lo
+    configuró, el simple. Con `calcular_pie` a secas ese proyecto imprimía el
+    costo directo como PRESUPUESTO TOTAL mientras el KPI y el monto en letras
+    (`calcular_totales`) llevaban gastos, utilidad e impuesto."""
+    lineas, total = calcular_pie(conn, proyecto_id, cd)
+    if lineas is None:
+        proy = conn.execute("SELECT * FROM proyectos WHERE id=?",
+                            (proyecto_id,)).fetchone()
+        if proy is not None:
+            return lineas_simples(proy, cd)
+    return lineas, total
+
+
 def etiqueta(linea: dict, *, mayus: bool = False) -> str:
     """Nombre de la línea con su porcentaje, como lo imprimen los reportes:
     «IVA (19%)». En un `rubro` el % mostrado es el REAL sobre el CD (el monto
@@ -129,7 +174,8 @@ def etiqueta(linea: dict, *, mayus: bool = False) -> str:
     if not linea.get('mostrar_pct') or linea['tipo'] == 'subtotal':
         return nombre
     pct = linea['pct'] if linea['tipo'] in TIPOS_PCT else linea.get('pct_real')
-    return f"{nombre} ({pct:g}%)" if pct else nombre
+    from utils.formatting import con_separadores
+    return f"{nombre} ({con_separadores(f'{pct:g}')}%)" if pct else nombre
 
 
 def es_impuesto(linea: dict) -> bool:
