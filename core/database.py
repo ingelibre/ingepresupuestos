@@ -704,6 +704,8 @@ def init_db():
     ''')
     from core.bim_modelo import TABLAS_SQL as _bim_sql
     conn.executescript(_bim_sql)
+    from core.titulos import TABLA_SQL as _titulos_sql
+    conn.executescript(_titulos_sql)
     conn.commit()
     # Migración: agregar columnas nuevas si no existen (SQLite no soporta IF NOT EXISTS en ALTER)
     for col, ddl in [
@@ -1344,6 +1346,14 @@ def base_overhead(unidad) -> str:
         if marca in u:
             return base
     return 'MO'
+
+
+def es_herramienta_pct(tipo, unidad) -> bool:
+    """¿Es la línea de herramientas manuales, un % de la mano de obra?
+    (issue #42). La unidad manda; un % clasificado como mano de obra (leyes
+    sociales) no es herramienta."""
+    u = (unidad or '').strip()
+    return u.startswith('%') and tipo != 'MO' and base_overhead(u) == 'MO'
 
 
 def _pu_desde_items(items) -> float:

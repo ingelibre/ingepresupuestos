@@ -36,7 +36,7 @@ from PySide6.QtGui import (
 )
 
 from core.database import (
-    calcular_totales, cuadrilla_reporte, get_acu_items, get_config, get_db,
+    calcular_totales, cuadrilla_reporte, es_herramienta_pct, get_acu_items, get_config, get_db,
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu, get_insumos_proyecto,
     get_insumos_para_partidas, set_config, _orden_mo, _rn,
 )
@@ -90,6 +90,10 @@ FORMATO_CLAVES = {
     # debajo de cada partida (issue #41).
     'rep_ppto_desglose': '',
     'rep_ppto_especificacion': '0',
+    # Herramientas manuales (% de la mano de obra): '1' = imprimir solo su
+    # monto, sin unidad, porcentaje ni precio, en ACU, insumos y
+    # adquisiciones (issue #42). Ningún cálculo cambia.
+    'rep_herr_solo_monto': '0',
     # Márgenes del papel en milímetros. Los valores por defecto son los que
     # el PDF tuvo siempre (0.6″ laterales, 0.7″ abajo, 0.6″ arriba sin
     # encabezado): con ellos sale idéntico. El superior mueve juntos el
@@ -889,6 +893,11 @@ def especificacion_en_ppto(formato: dict | None = None) -> bool:
     return str(f.get('rep_ppto_especificacion') or '0') == '1'
 
 
+def herramientas_solo_monto(formato: dict | None = None) -> bool:
+    f = formato if formato is not None else get_formato()
+    return str(f.get('rep_herr_solo_monto') or '0') == '1'
+
+
 def desglose_pu_partidas(items: list) -> dict:
     """{id de partida: {'MO': …, 'MAT': …, 'EQ': …, 'SC': …}}: cuánto del
     precio unitario es de cada tipo, del ACU. Una partida sin ACU no figura.
@@ -1203,6 +1212,7 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
     conn = get_db()
 
     parts = ['<h2>Análisis de Costos Unitarios</h2>']
+    solo_monto = herramientas_solo_monto()
 
     # Los análisis de las sub-partidas usadas van al final (issue #23).
     from core.subpartidas import usadas_en
@@ -1275,14 +1285,15 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
                 pill_cls = {'MO': 'pill-mo', 'MAT': 'pill-mat',
                             'EQ': 'pill-eq', 'SC': 'pill-sc'}.get(tipo, 'pill-mat')
                 cls = "alt" if (j % 2) else ""
+                oculta = solo_monto and es_herramienta_pct(tipo, it.get('unidad'))
                 rows.append(
                     f'<tr class="{cls}">'
                     f'<td><span class="pill {pill_cls}">{escape(tipo)}</span></td>'
                     f'<td>{escape(it.get("descripcion") or "")}</td>'
-                    f'<td class="c">{escape(it.get("unidad") or "")}</td>'
-                    f'<td class="r">{_fmt_cuadrilla(it)}</td>'
-                    f'<td class="r">{_fmt(it.get("cantidad"), get_decimales_cant_acu(tipo))}</td>'
-                    f'<td class="r">{_fmt(it.get("precio"), dec)}</td>'
+                    f'<td class="c">{"" if oculta else escape(it.get("unidad") or "")}</td>'
+                    f'<td class="r">{"" if oculta else _fmt_cuadrilla(it)}</td>'
+                    f'<td class="r">{"" if oculta else _fmt(it.get("cantidad"), get_decimales_cant_acu(tipo))}</td>'
+                    f'<td class="r">{"" if oculta else _fmt(it.get("precio"), dec)}</td>'
                     f'<td class="r">{_fmt(it.get("parcial"), dec)}</td>'
                     f'</tr>'
                 )
@@ -2504,6 +2515,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
         (pid,)
     ).fetchall()
 
+    solo_monto = herramientas_solo_monto()
     insumos = {}
     cache_sub: dict = {}
     for p_row in partidas_db:
@@ -2735,12 +2747,13 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             # Cantidad y Precio = TOTALES del insumo en el proyecto.
             qty_proj = sum(d.get('periodos_qty', []))
             cant_txt = fmt_doc(qty_proj) if qty_proj > 0 else ""
+            oculta = solo_monto and es_herramienta_pct(d['tipo'], d['unidad'])
             rows.append(
                 f'<tr>'
                 f'{_td(escape(d["tipo"]), bg=row_bg, align="center")}'
                 f'{_td(escape(d["codigo"]), bg=row_bg)}'
                 f'{_td(escape(d["descripcion"]), bg=row_bg)}'
-                f'{_td(escape(d["unidad"]), bg=row_bg, align="center")}'
+                f'{_td("" if oculta else escape(d["unidad"]), bg=row_bg, align="center")}'
                 f'{_td(cant_txt, bg=row_bg, align="right")}'
                 f'{_td(_fmt(d["monto_total"], dec) if d["monto_total"] else "", bg=row_bg, align="right")}'
                 f'{SEP_MED}'
@@ -3269,6 +3282,7 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
     for t, lst in por_tipo.items():
         subtotal_tipo[t] = sum((x.get('parcial_total') or 0) for x in lst)
     total_general = sum(subtotal_tipo.values())
+    solo_monto = herramientas_solo_monto()
 
     # ── Detalle: UNA tabla única con barras suaves por tipo
     #    (mismas columnas alineadas entre MO/MAT/EQ/SC + diferenciación sutil
@@ -3309,13 +3323,14 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
 
         for j, r in enumerate(lst):
             cls = "alt" if (j % 2) else ""
+            oculta = solo_monto and es_herramienta_pct(t, r.get('unidad'))
             all_rows.append(
                 f'<tr class="{cls}">'
                 f'<td>{escape(r.get("codigo") or "")}</td>'
                 f'<td>{escape(r.get("descripcion") or "")}</td>'
-                f'<td class="c">{escape(r.get("unidad") or "")}</td>'
-                f'<td class="r">{_fmt(r.get("cantidad_total"), 4)}</td>'
-                f'<td class="r">{_fmt(r.get("precio"), dec)}</td>'
+                f'<td class="c">{"" if oculta else escape(r.get("unidad") or "")}</td>'
+                f'<td class="r">{"" if oculta else _fmt(r.get("cantidad_total"), 4)}</td>'
+                f'<td class="r">{"" if oculta else _fmt(r.get("precio"), dec)}</td>'
                 f'<td class="r">{_fmt(r.get("parcial_total"), dec)}</td>'
                 f'</tr>'
             )
