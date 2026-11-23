@@ -156,6 +156,18 @@ def test_espana_iva_sobre_el_pie_sin_su_impuesto():
     assert r[2:] == (750.95, 157.7, 908.65)
 
 
+def test_la_planilla_de_acero_multiplica_sus_tres_cantidades(obra, admin):
+    conn = d.get_db()
+    conn.execute("INSERT INTO acero_detalle (partida_id, descripcion, diametro, "
+                 "n_estructuras, n_elementos, n_veces, longitud, kg_ml, parcial) "
+                 "VALUES (?,'VIGA','1/2\"',2,3,4,5,0.994,119.28)", (obra[2],))
+    conn.commit()
+    conn.close()
+    x = contexto.presupuesto(obra[0], admin).hojas()[0]
+    assert x.mediciones == (api.LineaMetrado('VIGA 1/2\"', 24, 5, None, None, 119.28,
+                                             kg_m=0.994),)
+
+
 # ── ajustar-total por grupo ──────────────────────────────────────────────────
 
 @pytest.fixture

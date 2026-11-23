@@ -172,7 +172,7 @@ def _planillas(conn, pid) -> dict:
             "WHERE p.proyecto_id=? ORDER BY m.partida_id, m.orden, m.id", (pid,)):
         d = " ".join(x for x in (r['descripcion'], r['diametro']) if x)
         out.setdefault(r['partida_id'], []).append(api.LineaMetrado(
-            d, veces(r['n_veces'], r['n_elementos']), r['longitud'], None, None,
+            d, veces(r['n_estructuras'], r['n_elementos'], r['n_veces']), r['longitud'], None, None,
             r['parcial'] or 0.0, kg_m=r['kg_ml']))
     return out
 
