@@ -302,6 +302,8 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
         map_part[d['id']] = cur.lastrowid
 
     # ── 4. ACU_ITEMS (siempre; mismo recurso_id) ──────────────────────────
+    map_metrado = {}
+
     def copy_part_dep(tabla):
         cs = [c for c in cols_of(tabla) if c not in ('id', 'partida_id')]
         ph = ','.join('?' * len(cs))
@@ -310,9 +312,11 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
                                   (old_part,)).fetchall():
                 d = dict(r)
                 try:
-                    conn.execute(
+                    cur = conn.execute(
                         f"INSERT INTO {tabla} ({','.join(cs)},partida_id) "
                         f"VALUES ({ph},?)", [d[c] for c in cs] + [new_part])
+                    if tabla == 'metrados_detalle':
+                        map_metrado[d['id']] = cur.lastrowid
                 except sqlite3.IntegrityError:
                     pass   # p.ej. cronograma_partidas UNIQUE(partida_id)
 
@@ -335,6 +339,8 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
     if 'metrados' in opts:
         copy_part_dep('metrados_detalle')
         copy_part_dep('acero_detalle')
+        from core.bim_modelo import copiar_proyecto
+        copiar_proyecto(conn, pid, new_pid, map_part, map_metrado)
     if 'specs' in opts:
         copy_part_dep('spec_imagenes')
     if 'cronograma' in opts:

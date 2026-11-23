@@ -57,6 +57,9 @@ def _serializar_partida(conn, part_id: int) -> dict:
         (part_id,)
     ).fetchall()]
 
+    from core.bim_modelo import serializar_vinculos
+    out['bim_vinculos'] = serializar_vinculos(conn, part_id)
+
     # Acero (tabla opcional)
     try:
         out['acero_detalle'] = [dict(r) for r in conn.execute(
@@ -336,6 +339,7 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
             existing.add(base)
             return base
 
+    modelos_bim: dict = {}      # modelo de origen → modelo en el destino
     for subarbol in _CLIPBOARD['subarboles']:
         if not subarbol:
             continue
@@ -403,8 +407,9 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
                 )
 
             # Metrados detalle
+            filas_met: dict[int, int] = {}
             for m in p.get('metrados_detalle') or []:
-                conn.execute(
+                cur_m = conn.execute(
                     "INSERT INTO metrados_detalle"
                     " (partida_id, orden, descripcion, n_estructuras,"
                     "  n_elementos, largo, ancho, alto, parcial, area)"
@@ -414,6 +419,11 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
                      m.get('largo'), m.get('ancho'), m.get('alto'),
                      m.get('parcial'), m.get('area'))
                 )
+                filas_met[m.get('id')] = cur_m.lastrowid
+            if p.get('bim_vinculos'):
+                from core.bim_modelo import pegar_vinculos
+                pegar_vinculos(conn, pid_destino, new_pid, p['bim_vinculos'],
+                               filas_met, modelos_bim)
 
             # Acero detalle
             for a in p.get('acero_detalle') or []:

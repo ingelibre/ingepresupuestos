@@ -6543,6 +6543,8 @@ class ProyectoView(QWidget):
             ]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
+                if c == 0:   # id de la fila: los vínculos BIM cuelgan de él
+                    it.setData(Qt.UserRole, row['id'])
                 if c == 7:   # parcial — no editable
                     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -9406,8 +9408,7 @@ class ProyectoView(QWidget):
             self.cargar_acero(pid)   # compacta blancos intercalados
             return
         conn = get_db()
-        conn.execute("DELETE FROM metrados_detalle WHERE partida_id=?",
-                     (pid,))
+        filas = []
         total = 0.0
         for r in range(self.tbl_met.rowCount()):
             def _val(c):
@@ -9430,18 +9431,13 @@ class ProyectoView(QWidget):
             parcial = _rn(parcial, dec) if dims else 0.0
             total += parcial
 
-            conn.execute(
-                """INSERT INTO metrados_detalle
-                   (partida_id, orden, descripcion, n_estructuras, n_elementos,
-                    area, largo, ancho, alto, parcial)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (pid, r+1, desc, n_est, n_el, area, largo, ancho, alto, parcial)
-            )
+            filas.append((r, r+1, desc, n_est, n_el, area, largo, ancho, alto, parcial))
             it_parc = self.tbl_met.item(r, 7)
             if it_parc:
                 it_parc.setText(f"{parcial:,.{dec}f}")
 
         dec   = get_decimales_metrado()
+        self._met_guardar_filas(conn, pid, filas)
         total = _rn(total, dec)
         conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                      (total, pid))
@@ -9449,6 +9445,20 @@ class ProyectoView(QWidget):
         conn.close()
         self.lbl_met_total.setText(f"{total:,.{dec}f}")
         self.recargar_partidas()
+
+    def _met_guardar_filas(self, conn, pid, filas):
+        """Guarda la planilla conservando el id de cada fila, que se lleva en
+        la celda de descripción. `filas`: (fila de la tabla, orden, …)."""
+        from core.database import guardar_filas_metrado
+        tbl = self.tbl_met
+        ids = guardar_filas_metrado(conn, pid, [
+            (tbl.item(r, 0).data(Qt.UserRole) if tbl.item(r, 0) else None, *v)
+            for r, *v in filas])
+        antes = tbl.blockSignals(True)
+        for (r, *_v), fid in zip(filas, ids):
+            if tbl.item(r, 0):
+                tbl.item(r, 0).setData(Qt.UserRole, fid)
+        tbl.blockSignals(antes)
 
     def _met_tiene_datos(self) -> bool:
         """True si la tabla de metrados normales tiene al menos una fila con datos reales."""
@@ -9479,8 +9489,7 @@ class ProyectoView(QWidget):
         # Exclusividad mutua: borrar acero solo cuando hay datos reales de metrados
         conn.execute("DELETE FROM acero_detalle WHERE partida_id=?",
                      (pid,))
-        conn.execute("DELETE FROM metrados_detalle WHERE partida_id=?",
-                     (pid,))
+        filas = []
         total = 0.0
         for r in range(self.tbl_met.rowCount()):
             def _v(c, _r=r):
@@ -9498,13 +9507,8 @@ class ProyectoView(QWidget):
             for d in dims: parcial *= d
             parcial = _rn(parcial, dec) if dims else 0.0
             total  += parcial
-            conn.execute(
-                """INSERT INTO metrados_detalle
-                   (partida_id, orden, descripcion, n_estructuras, n_elementos,
-                    area, largo, ancho, alto, parcial)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (pid, r+1, desc, n_est, n_el, area, largo, ancho, alto, parcial)
-            )
+            filas.append((r, r+1, desc, n_est, n_el, area, largo, ancho, alto, parcial))
+        self._met_guardar_filas(conn, pid, filas)
         total = _rn(total, dec)
         conn.execute("UPDATE partidas SET metrado=? WHERE id=?",
                      (total, pid))
