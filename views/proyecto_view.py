@@ -623,7 +623,7 @@ class _AcuBarrasWidget(QWidget):
 
             # Label
             painter.setPen(QColor(color))
-            painter.setFont(QFont('', 9, QFont.Bold))
+            painter.setFont(QFont('Inter', 9, QFont.Bold))
             painter.drawText(8, cy - 6, lbl_w - 8, 16,
                              Qt.AlignLeft | Qt.AlignVCenter, tr(label))
 
@@ -641,7 +641,7 @@ class _AcuBarrasWidget(QWidget):
 
             # Porcentaje
             painter.setPen(QColor(color))
-            painter.setFont(QFont('', 9, QFont.Bold))
+            painter.setFont(QFont('Inter', 9, QFont.Bold))
             painter.drawText(bar_x + bar_w + 6, cy - 6, pct_w, 16,
                              Qt.AlignRight | Qt.AlignVCenter, f"{pct:.1f}%")
 
@@ -697,7 +697,7 @@ class _AcuBadgeDelegate(QStyledItemDelegate):
         painter.setBrush(QColor(bg_hex))
         painter.drawRoundedRect(pill, 4, 4)
         painter.setPen(QColor(fg_hex))
-        painter.setFont(QFont('', 8, QFont.Bold))
+        painter.setFont(QFont('Inter', 8, QFont.Bold))
         painter.drawText(pill, Qt.AlignCenter, texto)
         painter.restore()
 
@@ -5797,7 +5797,7 @@ class ProyectoView(QWidget):
                 hdr = QTableWidgetItem(tr(sec_label))
                 hdr.setBackground(QColor(sec_bg))
                 hdr.setForeground(QColor(sec_fg))
-                hdr.setFont(QFont("", 9, QFont.Bold))
+                hdr.setFont(QFont('Inter', 9, QFont.Bold))
                 hdr.setFlags(Qt.ItemIsEnabled)
                 self.tbl_acu.setItem(r, 0, hdr)
                 self.tbl_acu.setSpan(r, 0, 1, len(COLS_ACU))
@@ -5818,7 +5818,7 @@ class ProyectoView(QWidget):
             badge.setBackground(QColor(b_bg))
             badge.setForeground(QColor(b_fg))
             badge.setTextAlignment(Qt.AlignCenter)
-            badge.setFont(QFont("", 8, QFont.Bold))
+            badge.setFont(QFont('Inter', 8, QFont.Bold))
             badge.setFlags(badge.flags() & ~Qt.ItemIsEditable)
             self.tbl_acu.setItem(r, 0, badge)
 

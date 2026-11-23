@@ -62,6 +62,8 @@ def app(tmp_path_factory):
     datos.mkdir(parents=True)
     shutil.copy(SEED, datos / 'presupuestos.db')
     env = dict(os.environ, XDG_DATA_HOME=str(base / 'xdg'),
+               APPDATA=str(base / 'xdg'),            # Windows ignora XDG_*
+               INGEPRESUPUESTOS_PRUEBA=str(base),
                XDG_CONFIG_HOME=str(base / 'cfg'),
                INGEPRESUPUESTOS_MCP_REGISTRO=str(base / 'reg'),
                QT_QPA_PLATFORM='offscreen')

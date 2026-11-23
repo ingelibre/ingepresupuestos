@@ -11,7 +11,28 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
+from pathlib import Path                                    # noqa: E402
+
+from PySide6 import QtCore                                  # noqa: E402
 from PySide6.QtCore import QTimer                          # noqa: E402
+
+# Escribe un usuario y la api_key: fuera de la carpeta temporal, ni arranca
+# (en macOS la carpeta de datos no se puede redirigir).
+_BASE = Path(os.environ['INGEPRESUPUESTOS_PRUEBA']).resolve()
+from core.config import USER_DATA_DIR                      # noqa: E402
+if _BASE not in Path(USER_DATA_DIR).resolve().parents:
+    sys.exit(f'datos sin aislar: {USER_DATA_DIR}')
+
+
+class _QSettings(QtCore.QSettings):
+    """A un .ini temporal: en Windows el de verdad es el registro."""
+
+    def __init__(self, org, app):
+        super().__init__(str(_BASE / f'{org}-{app}.ini'),
+                         QtCore.QSettings.Format.IniFormat)
+
+
+QtCore.QSettings = _QSettings
 from PySide6.QtWidgets import QApplication                 # noqa: E402
 
 app = QApplication([])

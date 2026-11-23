@@ -444,7 +444,7 @@ class RecursoSelectorDialog(QDialog):
             it_cod = QTableWidgetItem(row['codigo'] or '')
             it_cod.setBackground(bg_light)
             it_cod.setForeground(QColor('#495057'))
-            it_cod.setFont(QFont('', 9))
+            it_cod.setFont(QFont('Inter', 9))
             self.tbl.setItem(r, 1, it_cod)
 
             # Col 2: descripción
@@ -454,7 +454,7 @@ class RecursoSelectorDialog(QDialog):
             it_desc.setBackground(bg_light)
             if es_usado:
                 it_desc.setForeground(QColor('#0F5132'))
-                it_desc.setFont(QFont('', 10, QFont.Bold))
+                it_desc.setFont(QFont('Inter', 10, QFont.Bold))
                 it_desc.setToolTip(tr("Ya usado en este proyecto — reutilízalo para no duplicar"))
             self.tbl.setItem(r, 2, it_desc)
 
@@ -463,7 +463,7 @@ class RecursoSelectorDialog(QDialog):
             it_tipo.setBackground(bg)
             it_tipo.setForeground(QColor(_TIPO_FG.get(tipo_r, '#333')))
             it_tipo.setTextAlignment(Qt.AlignCenter)
-            it_tipo.setFont(QFont('', 9, QFont.Bold))
+            it_tipo.setFont(QFont('Inter', 9, QFont.Bold))
             self.tbl.setItem(r, 3, it_tipo)
 
             # Col 4: unidad
