@@ -3,8 +3,12 @@
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
 # Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
 """Formateo de números y monedas (equivale a fmt()/parseFmt() del JS + _parse_num() de Flask)."""
+import functools as _functools
+import inspect as _inspect
 import re as _re
 import unicodedata as _ud
+from contextlib import contextmanager as _contextmanager
+from contextvars import ContextVar as _ContextVar
 from core.config import moneda_cfg
 
 
@@ -136,7 +140,7 @@ def texto_rendimiento(rendimiento, unidad='', *, decimales=2,
         return ''
     if r <= 0:
         return ''
-    cifra = f"{r:,.{decimales}f}"
+    cifra = fmt_doc(r, decimales)
     u = (unidad or '').strip()
     return f"{cifra} {u}{sufijo}" if u else f"{cifra}{sufijo}"
 
@@ -221,6 +225,94 @@ def partir_item(item, sep: str = "\n", max_tramos: int = ITEM_TRAMOS_POR_LINEA) 
     lineas = [".".join(tramos[i:i + max_tramos])
               for i in range(0, len(tramos), max_tramos)]
     return (("." + sep).join(lineas[:-1]) + "." + sep + lineas[-1]) if len(lineas) > 1 else txt
+
+
+# ── Números de los reportes: los separadores de la moneda del proyecto ───────
+#
+# Los reportes formatean cientos de números sueltos —cantidades, rendimientos,
+# porcentajes— lejos de donde se conoce el proyecto. La moneda se fija una vez
+# al generar el documento (`con_moneda_del_proyecto`) y `fmt_doc` la lee.
+
+_moneda_doc: '_ContextVar[str]' = _ContextVar('moneda_del_documento', default='')
+
+
+@_contextmanager
+def moneda_documento(moneda: str):
+    ficha = _moneda_doc.set(moneda or '')
+    try:
+        yield
+    finally:
+        _moneda_doc.reset(ficha)
+
+
+def separadores(moneda: 'str | None' = None) -> tuple:
+    """(miles, decimal) de `moneda` o, sin ella, la del documento en curso."""
+    m = moneda if moneda is not None else _moneda_doc.get()
+    if not m:
+        return ',', '.'
+    cfg = moneda_cfg(m)
+    return cfg['sep_miles'], cfg['sep_dec']
+
+
+def con_separadores(texto: str, moneda: 'str | None' = None) -> str:
+    """«1,234.56» (formato de Python) → con los separadores de la moneda."""
+    miles, dec = separadores(moneda)
+    if (miles, dec) == (',', '.'):
+        return texto
+    return texto.translate({ord(','): miles, ord('.'): dec})
+
+
+def fmt_doc(v, dec: int = 2, *, moneda: 'str | None' = None,
+            miles: bool = True) -> str:
+    """Número sin símbolo con los separadores de la moneda. En Soles es
+    exactamente `f'{v:,.{dec}f}'` (o sin miles, para los porcentajes)."""
+    n = float(v or 0)
+    return con_separadores(f'{n:,.{dec}f}' if miles else f'{n:.{dec}f}', moneda)
+
+
+def fmt_pct(v, dec: int = 1, *, moneda: 'str | None' = None) -> str:
+    return fmt_doc(v, dec, moneda=moneda, miles=False) + '%'
+
+
+def con_moneda_del_proyecto(fn):
+    """Decorador de los generadores de reportes: fija la moneda del documento
+    a partir de su argumento `proy`, `pid`/`proyecto_id`, `val_id` o `req_id`."""
+    firma = _inspect.signature(fn)
+
+    @_functools.wraps(fn)
+    def envoltura(*a, **k):
+        try:
+            args = firma.bind_partial(*a, **k).arguments
+            moneda = _moneda_de_args(args)
+        except Exception:
+            moneda = None            # sin proyecto a la vista: lo que haya
+        if moneda is None:
+            return fn(*a, **k)
+        with moneda_documento(moneda):
+            return fn(*a, **k)
+    return envoltura
+
+
+def _moneda_de_args(args: dict) -> 'str | None':
+    proy = args.get('proy')
+    if proy is not None:
+        return (proy['moneda'] if 'moneda' in proy.keys() else None) or None
+    for nombre, sql in (
+            ('pid', "SELECT moneda FROM proyectos WHERE id=?"),
+            ('proyecto_id', "SELECT moneda FROM proyectos WHERE id=?"),
+            ('val_id', "SELECT p.moneda FROM proyectos p JOIN valorizaciones v"
+                       " ON v.proyecto_id=p.id WHERE v.id=?"),
+            ('req_id', "SELECT p.moneda FROM proyectos p JOIN requerimientos r"
+                       " ON r.proyecto_id=p.id WHERE r.id=?")):
+        if args.get(nombre) is not None:
+            from core.database import get_db
+            conn = get_db()
+            try:
+                f = conn.execute(sql, (args[nombre],)).fetchone()
+            finally:
+                conn.close()
+            return (f['moneda'] or 'Soles') if f else None
+    return None
 
 
 def siguiente_codigo(prefijo: str, existentes) -> str:

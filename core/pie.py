@@ -154,7 +154,8 @@ def etiqueta(linea: dict, *, mayus: bool = False) -> str:
     if not linea.get('mostrar_pct') or linea['tipo'] == 'subtotal':
         return nombre
     pct = linea['pct'] if linea['tipo'] in TIPOS_PCT else linea.get('pct_real')
-    return f"{nombre} ({pct:g}%)" if pct else nombre
+    from utils.formatting import con_separadores
+    return f"{nombre} ({con_separadores(f'{pct:g}')}%)" if pct else nombre
 
 
 def es_impuesto(linea: dict) -> bool:

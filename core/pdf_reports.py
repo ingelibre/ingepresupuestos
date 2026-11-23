@@ -41,7 +41,9 @@ from core.database import (
     get_insumos_para_partidas, set_config, _orden_mo, _rn,
 )
 from core.paises import etiqueta_tributaria
-from utils.formatting import (fecha_dmy as _dmy, fmt as _fmt_money, ITEM_TRAMOS_POR_LINEA,
+from utils.formatting import (con_moneda_del_proyecto, con_separadores,
+                             fecha_dmy as _dmy, fmt as _fmt_money, fmt_doc,
+                             fmt_pct, ITEM_TRAMOS_POR_LINEA,
                              moneda_plural, monto_en_letras, texto_rendimiento)
 
 # ── Configuración de formato (editable por el usuario) ───────────────────────
@@ -442,19 +444,19 @@ SC_COLOR  = "#7A36B1"   # morado (Sub-contratos / Servicios)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _fmt(v, dec=2) -> str:
-    """Formatea número con separador de miles, sin símbolo de moneda."""
+    """Número con los separadores de la moneda del documento, sin símbolo."""
     try:
         n = float(v or 0)
     except (TypeError, ValueError):
-        return "0.00"
-    return f"{n:,.{dec}f}"
+        return fmt_doc(0)
+    return fmt_doc(n, dec)
 
 
 def _fmt_cuadrilla(it: dict) -> str:
     """Cuadrilla de una fila de ACU: número a 4 decimales o vacío si esa fila
     no lleva cuadrilla (ver `core.database.cuadrilla_reporte`)."""
     v = cuadrilla_reporte(it.get('tipo'), it.get('unidad'), it.get('cuadrilla'))
-    return "" if v is None else f"{v:,.4f}"
+    return "" if v is None else fmt_doc(v, 4)
 
 
 def _proyecto_info(pid: int) -> dict:
@@ -763,6 +765,7 @@ def _base_css(formato: dict | None = None) -> str:
 # Generadores HTML por tipo de reporte
 # ══════════════════════════════════════════════════════════════════════════════
 
+@con_moneda_del_proyecto
 def _html_meta_proyecto(proy: dict) -> str:
     """Tabla de información del proyecto (cliente, ubicación, fechas, moneda)."""
     rows = [
@@ -864,6 +867,7 @@ def _cabecera_item_desc(w_fijo: int, css_celda: str = '') -> str:
     )
 
 
+@con_moneda_del_proyecto
 def _html_presupuesto(pid: int, proy: dict, items: list, totales: dict, *,
                      incluir_meta=True, todo_costo=False,
                      extracto=False) -> str:
@@ -1098,6 +1102,7 @@ _ACU_TIPO_COLOR = {'MO': MO_COLOR, 'MAT': MAT_COLOR,
                    'EQ': EQ_COLOR, 'SC': SC_COLOR}
 
 
+@con_moneda_del_proyecto
 def _html_acus(pid: int, proy: dict, items: list) -> str:
     o, od, _os = _brand_colors()
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
@@ -1240,6 +1245,7 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_metrados(pid: int, proy: dict, items: list) -> str:
     o, od, _os = _brand_colors()
     """Hoja de metrados — detalle por partida con metrados_detalle / acero_detalle."""
@@ -1494,6 +1500,7 @@ def strip_titulo_memoria(memo: str) -> str:
     return memo
 
 
+@con_moneda_del_proyecto
 def _html_memoria_descriptiva(pid: int, proy: dict) -> str:
     """Memoria descriptiva del proyecto — un documento HTML procesado con el
     mismo estilo (viñetas/justificado) que las especificaciones técnicas."""
@@ -1606,6 +1613,7 @@ def chunks_especificaciones(pid: int, proy: dict, items: list) -> list[str]:
     return chunks
 
 
+@con_moneda_del_proyecto
 def _html_especificaciones(pid: int, proy: dict, items: list) -> str:
     """Hoja de especificaciones técnicas — bloques HTML por partida.
     Versión single-blob (usada por reporte 'completo'; el reporte
@@ -1749,6 +1757,7 @@ def _cargar_cronograma_data(pid: int) -> tuple[dict, dict, dict]:
     return {r['partida_id']: dict(r) for r in rows}
 
 
+@con_moneda_del_proyecto
 def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
                                  escala: str = 'semana',
                                  paper: str = 'A4',
@@ -2102,7 +2111,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
 
             row_bg = "#FBFCFD" if (rp['idx'] % 2) else "white"
             cells_p = ''.join(
-                _td(f"{rp['distrib_met'][k]:,.2f}" if rp['distrib_met'][k] > 0 else "",
+                _td(fmt_doc(rp['distrib_met'][k]) if rp['distrib_met'][k] > 0 else "",
                      bg=row_bg, align='right')
                 + _td(_fmt(rp['distrib'][k], dec) if rp['distrib'][k] > 0 else "",
                        bg=row_bg, align='right')
@@ -2114,7 +2123,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             und_v     = p.get('unidad') or p.get('und') or ''
             # Precio Total de la partida = precio unitario × metrado (= parcial).
             precio_total = rp['parcial'] or 0
-            cant_txt  = (f"{metrado_v:,.2f}") if metrado_v else ''
+            cant_txt  = fmt_doc(metrado_v) if metrado_v else ''
             pu_txt    = _fmt(pu_v, dec) if pu_v else ''
             total_fila = sum(rp['distrib'][k] for k in range(k_start, k_end))
             _depth = max(0, (p.get('item') or '').count('.') - _min_dots)
@@ -2155,11 +2164,11 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
             if pct:
                 cells = ''.join(
                     f'<td style="{css_met}"></td>'
-                    f'<td style="{css_val}">{vals[k]:.1f}%</td>'
+                    f'<td style="{css_val}">{fmt_pct(vals[k])}</td>'
                     f'{_sp(k)}'
                     for k in range(k_start, k_end)
                 )
-                tot_txt = f"{total_val:.1f}%"
+                tot_txt = fmt_pct(total_val)
             else:
                 cells = ''.join(
                     f'<td style="{css_met}"></td>'
@@ -2222,6 +2231,7 @@ def _html_cronograma_valorizado(pid: int, proy: dict, items: list, *,
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
                               escala: str = 'semana') -> str:
     """Curva S — avance acumulado en % a lo largo del tiempo."""
@@ -2276,7 +2286,7 @@ def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
             f'<td class="c">{label[0]}{i+1}</td>'
             f'<td class="r">{_fmt(v, dec)}</td>'
             f'<td class="r">{_fmt(acum2, dec)}</td>'
-            f'<td class="r">{pct:.2f}%</td>'
+            f'<td class="r">{fmt_pct(pct, 2)}</td>'
             f'</tr>'
         )
 
@@ -2299,6 +2309,7 @@ def _html_cronograma_curva_s(pid: int, proy: dict, items: list, *,
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_cronograma_adquisiciones(pid: int, proy: dict, items: list, *,
                                     escala: str = 'semana',
                                     paper: str = 'A4',
@@ -2313,6 +2324,7 @@ def _html_cronograma_adquisiciones(pid: int, proy: dict, items: list, *,
         periodos_por_pagina=periodos_por_pagina, show_fechas=show_fechas)
 
 
+@con_moneda_del_proyecto
 def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
                                        escala: str = 'semana',
                                        paper: str = 'A4',
@@ -2605,7 +2617,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             row_bg = "#FBFCFD" if (ri % 2) else "white"
             dq = d.get('periodos_qty', [0.0] * n_periods)
             cells_p = ''.join(
-                _td(f"{dq[k]:,.2f}" if dq[k] > 0 else "", bg=row_bg, align='right')
+                _td(fmt_doc(dq[k]) if dq[k] > 0 else "", bg=row_bg, align='right')
                 + _td(_fmt(d['periodos'][k], dec) if d['periodos'][k] > 0 else "",
                        bg=row_bg, align='right')
                 + (SEP_MED if k == k_end - 1 else SEP_THIN)
@@ -2614,7 +2626,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             total_fila = sum(d['periodos'][k] for k in range(k_start, k_end))
             # Cantidad y Precio = TOTALES del insumo en el proyecto.
             qty_proj = sum(d.get('periodos_qty', []))
-            cant_txt = f"{qty_proj:,.2f}" if qty_proj > 0 else ""
+            cant_txt = fmt_doc(qty_proj) if qty_proj > 0 else ""
             rows.append(
                 f'<tr>'
                 f'{_td(escape(d["tipo"]), bg=row_bg, align="center")}'
@@ -2650,11 +2662,11 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
             if pct:
                 cells = ''.join(
                     f'<td style="{css_qty}"></td>'
-                    f'<td style="{css_val}">{vals[k]:.1f}%</td>'
+                    f'<td style="{css_val}">{fmt_pct(vals[k])}</td>'
                     f'{_sp(k)}'
                     for k in range(k_start, k_end)
                 )
-                tot_txt = f"{total_val:.1f}%"
+                tot_txt = fmt_pct(total_val)
             else:
                 cells = ''.join(
                     f'<td style="{css_qty}"></td>'
@@ -2716,6 +2728,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_cronograma_adquisiciones_legacy(pid: int, proy: dict, items: list, *,
                                           escala: str = 'semana') -> str:
     """Versión anterior (preservada por si rompe algo). NO usar — espejada
@@ -2875,6 +2888,7 @@ def _html_cronograma_adquisiciones_legacy(pid: int, proy: dict, items: list, *,
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_cronograma(pid: int, proy: dict, items: list) -> str:
     """Cronograma de obra — tabla con duración/inicio/fin/predecesoras + Gantt simple."""
     o, od, _os = _brand_colors()
@@ -3077,6 +3091,7 @@ def _html_cronograma(pid: int, proy: dict, items: list) -> str:
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_insumos(pid: int, proy: dict, por_sub: bool = False) -> str:
     """Relación de insumos del proyecto.
 
@@ -3121,6 +3136,7 @@ def _html_insumos(pid: int, proy: dict, por_sub: bool = False) -> str:
             + _html_insumos_bloque(pid, proy, insumos))
 
 
+@con_moneda_del_proyecto
 def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
     """Cuerpo del reporte de insumos para un conjunto ya resuelto de
     recursos (todo el proyecto o los de un sub-presupuesto)."""
@@ -3235,7 +3251,7 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
             f'<tr>'
             f'<td><span class="pill {pill_cls}">{t}</span> &nbsp;{escape(label)}</td>'
             f'<td class="r" style="font-weight:600">{sym} {_fmt(v, dec)}</td>'
-            f'<td class="r">{pct:.1f}%</td>'
+            f'<td class="r">{fmt_pct(pct)}</td>'
             f'</tr>'
         )
     parts.append(
@@ -3255,7 +3271,7 @@ def _html_insumos_bloque(pid: int, proy: dict, insumos: list) -> str:
         f'{sym} {_fmt(total_general, dec)}</td>'
         f'<td class="r" style="font-weight:700;'
         f' border-top:1.5pt solid {SLATE_700};border-bottom:1.5pt solid {SLATE_700}">'
-        f'100.0%</td></tr>'
+        f'{fmt_pct(100)}</td></tr>'
         '</tbody></table>'
     )
     return "\n".join(parts)
@@ -3415,6 +3431,7 @@ def _todo_costo_factor_pie(pid: int, cd: float):
     return (factor, pie_rows)
 
 
+@con_moneda_del_proyecto
 def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
     """Desagregado de Gastos Generales — espeja la hoja Excel
     `_hoja_gastos_generales`: planilla por rubro con su detalle
@@ -3451,7 +3468,7 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
         gf  = totales.get('gf', 0) or 0
         pct = (gf / cd * 100) if cd else 0
         parts.append(_fila_resumen(
-            f'GASTOS GENERALES ({pct:g}%)' if pct else 'GASTOS GENERALES',
+            f'GASTOS GENERALES ({con_separadores(f"{pct:g}")}%)' if pct else 'GASTOS GENERALES',
             gf, bold=True))
         conn.close()
         return ''.join(parts)
@@ -3546,11 +3563,11 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
         mp  = rub.get('mostrar_pct', 1)
         if tipo in ('pct_cd', 'pct_sub', 'pct_util'):
             pct = rub.get('pct') or 0
-            label = f'{rub["nombre"].upper()} ({pct:g}%)' if (mp and pct) else rub['nombre'].upper()
+            label = f'{rub["nombre"].upper()} ({con_separadores(f"{pct:g}")}%)' if (mp and pct) else rub['nombre'].upper()
             parts.append(_fila_resumen(label, rub['valor']))
         elif tipo == 'rubro':            # rubro sin ítems → % real sobre CD
             pct = rub.get('pct_real') or 0
-            label = f'{rub["nombre"].upper()} ({pct:g}%)' if (mp and pct) else rub['nombre'].upper()
+            label = f'{rub["nombre"].upper()} ({con_separadores(f"{pct:g}")}%)' if (mp and pct) else rub['nombre'].upper()
             parts.append(_fila_resumen(label, rub['valor'], bold=True))
         else:                            # subtotal
             parts.append(_fila_resumen(rub['nombre'].upper(), rub['valor'], bold=True))
@@ -3560,6 +3577,7 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
     return ''.join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) -> str:
     o, od, _os = _brand_colors()
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
@@ -3590,7 +3608,7 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
     kpis = [
         ('Presupuesto Total', f'{sym} {_fmt(totales["total"], dec)}', 'Todos los conceptos'),
         ('Costo Directo',     f'{sym} {_fmt(totales["cd"], dec)}',
-         f'{(totales["cd"]/totales["total"]*100 if totales["total"] else 0):.1f}% del total'),
+         f'{fmt_pct(totales["cd"]/totales["total"]*100 if totales["total"] else 0)} del total'),
         ('Partidas',          f'{n_partidas}',  f'{n_titulos} títulos'),
         ('Plazo de Obra',     f'{proy.get("plazo") or 0} d',  proy.get('modalidad') or 'Contrata'),
     ]
@@ -3756,7 +3774,7 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
             f'<td bgcolor="{SLATE_100}">&nbsp;</td></tr></table>'
             f'</td>'
             f'<td align="right" valign="middle" style="padding:5pt 4pt;font-variant-numeric:tabular-nums"><b>{sym} {_fmt(v, dec)}</b></td>'
-            f'<td align="right" valign="middle" width="60" style="padding:5pt 4pt">{pct:.1f}%</td>'
+            f'<td align="right" valign="middle" width="60" style="padding:5pt 4pt">{fmt_pct(pct)}</td>'
             f'</tr>'
         )
     parts.append(
@@ -3790,7 +3808,7 @@ def _html_resumen_ejecutivo(pid: int, proy: dict, items: list, totales: dict) ->
                 f'<td>{escape(p.get("item") or "")}</td>'
                 f'<td>{escape(p.get("descripcion") or "")}</td>'
                 f'<td class="r">{sym} {_fmt(e["total"], dec)}</td>'
-                f'<td class="r">{pct:.1f}%</td>'
+                f'<td class="r">{fmt_pct(pct)}</td>'
                 f'</tr>'
             )
         parts.append(
@@ -4743,6 +4761,7 @@ def _section_divider(n: int, nombre: str, descripcion: str = '',
     )
 
 
+@con_moneda_del_proyecto
 def _html_formula_polinomica(pid: int, proy: dict) -> str:
     """Fórmula polinómica: expresión K + tabla de monomios (símbolo,
     descripción, índice INEI, coeficiente, % participación) + total.
@@ -4760,7 +4779,7 @@ def _html_formula_polinomica(pid: int, proy: dict) -> str:
         for mo in monomios:
             k = float(mo['coeficiente'] or 0)
             sim = (mo['simbolo'] or '?')
-            partes.append(f"{k:.4f}·({sim}r/{sim}o)")
+            partes.append(f"{fmt_doc(k, 4)}·({sim}r/{sim}o)")
         expresion = "K = " + " + ".join(partes)
     else:
         expresion = "K = (sin monomios)"
@@ -4776,16 +4795,16 @@ def _html_formula_polinomica(pid: int, proy: dict) -> str:
             f'<td class="c" style="font-weight:700">{escape(mo["simbolo"] or "")}</td>'
             f'<td>{escape(mo["descripcion"] or "")}</td>'
             f'<td class="c">{escape(mo["indice_inei"] or "—")}</td>'
-            f'<td class="r">{k:.4f}</td>'
-            f'<td class="r">{k * 100:.2f}%</td>'
+            f'<td class="r">{fmt_doc(k, 4)}</td>'
+            f'<td class="r">{fmt_pct(k * 100, 2)}</td>'
             f'</tr>'
         )
     _tot = f'font-weight:700;border-top:1.5pt solid {SLATE_900}'
     filas += (
         f'<tr>'
         f'<td colspan="3" class="r" style="{_tot}">TOTAL</td>'
-        f'<td class="r" style="{_tot}">{suma_k:.4f}</td>'
-        f'<td class="r" style="{_tot}">{suma_k * 100:.2f}%</td>'
+        f'<td class="r" style="{_tot}">{fmt_doc(suma_k, 4)}</td>'
+        f'<td class="r" style="{_tot}">{fmt_pct(suma_k * 100, 2)}</td>'
         f'</tr>'
     )
 
@@ -4806,6 +4825,7 @@ def _html_formula_polinomica(pid: int, proy: dict) -> str:
     )
 
 
+@con_moneda_del_proyecto
 def _html_composicion_monomios(pid: int, monomios) -> str:
     """Cuadro de agrupamiento: qué índices unificados forman cada monomio.
 
@@ -4839,8 +4859,8 @@ def _html_composicion_monomios(pid: int, monomios) -> str:
                 f'<tr{alt}>'
                 f'<td class="c">{escape(c["codigo"])}</td>'
                 f'<td>{escape(c["nombre"])}</td>'
-                f'<td class="r">{c["monto"] / monto_mono * 100:.2f}%</td>'
-                f'<td class="r">{c["monto"] / cd * 100:.2f}%</td>'
+                f'<td class="r">{fmt_pct(c["monto"] / monto_mono * 100, 2)}</td>'
+                f'<td class="r">{fmt_pct(c["monto"] / cd * 100, 2)}</td>'
                 f'</tr>'
             )
         bloques += (
@@ -4914,6 +4934,7 @@ def filtrar_items_por_pids(items: list, solo_pids) -> list:
             for i, e in enumerate(items) if i in conservar]
 
 
+@con_moneda_del_proyecto
 def _build_html_for(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict]:
     """Devuelve (titulo, body_html, proy) para el tipo de reporte solicitado.
 
@@ -5090,6 +5111,7 @@ def _build_html_for(tipo: str, pid: int, solo_pids=None) -> tuple[str, str, dict
     raise ValueError(f"Tipo de reporte desconocido: {tipo}")
 
 
+@con_moneda_del_proyecto
 def _especificaciones_chunked(pid: int, with_cover: bool,
                                   paper: str = 'A4', orient: str = 'portrait',
                                   solo_pids=None):
@@ -5113,6 +5135,7 @@ def _especificaciones_chunked(pid: int, with_cover: bool,
     return renderer, title_html, chunks
 
 
+@con_moneda_del_proyecto
 def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
                   paper: str = 'A4', orient: str = 'portrait',
                   solo_pids=None) -> io.BytesIO:
@@ -5134,6 +5157,7 @@ def generar_pdf(tipo: str, pid: int, *, with_cover: bool = True,
     return renderer.render_to_buffer(body)
 
 
+@con_moneda_del_proyecto
 def generar_pdf_archivo(tipo: str, pid: int, out_path: str, *,
                           with_cover: bool = True,
                           paper: str = 'A4', orient: str = 'portrait',
@@ -5227,6 +5251,7 @@ def _anexar_fichas_especificaciones(pid: int, out_path: str,
 # ── Control de Obra · reporte de Valorización (generado DESDE la vista, no en
 #    el Centro de Reportes — es por período, no del expediente) ───────────────
 
+@con_moneda_del_proyecto
 def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str:
     """Cuerpo HTML de la valorización: tabla Base · Anterior · Actual ·
     Acumulado · Saldo por partida, con subtotales de título y fila TOTAL.
@@ -5265,7 +5290,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
     if val.get('periodo_desde') or val.get('periodo_hasta'):
         sub.append(f'Período: {escape(_fch(val["periodo_desde"]))} '
                    f'al {escape(_fch(val["periodo_hasta"]))}')
-    sub.append(f'Avance físico acumulado: <b>{resumen.get("pct_fisico", 0):.2f}%</b>')
+    sub.append(f'Avance físico acumulado: <b>{fmt_pct(resumen.get("pct_fisico", 0), 2)}</b>')
     parts.append(f'<p align="center" style="text-align:center;color:{SLATE_700};'
                  f'font-size:10pt">{" &nbsp;·&nbsp; ".join(sub)}</p>')
 
@@ -5293,7 +5318,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
         base = f.get('base_val') or 0
 
         def _pct(v):   # % del valor sobre la base contractual (como la pantalla)
-            return f'{(v or 0) / base * 100 if base else 0:.2f}%'
+            return fmt_pct((v or 0) / base * 100 if base else 0, 2)
 
         if grp == 'base':
             return {'metr': m(f['base_metr']), 'pu': d(f['precio_unitario']),
@@ -5306,7 +5331,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
                     'pct': _pct(f['act_val'])}[fld]
         if grp == 'acu':
             return {'metr': m(f['acu_metr']), 'val': d(f['acu_val']),
-                    'pct': f'{f["pct"]:.2f}%'}[fld]
+                    'pct': fmt_pct(f["pct"], 2)}[fld]
         return {'metr': m(f['sal_metr']), 'val': d(f['sal_val']),
                 'pct': _pct(f['sal_val'])}[fld]
 
@@ -5409,6 +5434,7 @@ def _html_valorizacion(val: dict, proy: dict, filas: list, resumen: dict) -> str
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def _html_kardex_material(pid: int, f: dict, dm: int, colors) -> str:
     """Una hoja de KÁRDEX DE ALMACÉN para un material: cabecera Material/Unidad +
     tabla Fecha · Entradas · Salidas · Saldos · Observaciones (saldo corrido)."""
@@ -5456,6 +5482,7 @@ def _html_firmas_almacen(colors) -> str:
             + cel.format('ALMACENERO DE OBRA') + '</tr></table>')
 
 
+@con_moneda_del_proyecto
 def _html_almacen(proy: dict, filas: list, pid: int = None) -> str:
     """Cuerpo HTML del kárdex de materiales: RESUMEN (por insumo, Pedido ·
     Ingresado · Consumido · Stock · Por llegar) + una hoja de KÁRDEX por material
@@ -5527,6 +5554,7 @@ def _html_almacen(proy: dict, filas: list, pid: int = None) -> str:
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def generar_almacen_pdf(pid: int, out_path: str, *, paper: str = 'A4'):
     """PDF del kárdex de materiales (control de almacén) del proyecto."""
     import core.requerimientos as _req
@@ -5558,6 +5586,7 @@ def _fecha_larga_es(iso: str) -> str:
     return str(iso or '')
 
 
+@con_moneda_del_proyecto
 def _html_cuaderno(proy: dict, pid: int, parte_ids: list) -> str:
     """Cuerpo HTML del cuaderno de obra: un asiento por día (mano de obra,
     actividades, materiales/equipos/servicios, observaciones)."""
@@ -5643,6 +5672,7 @@ def _cant(v):
     return str(int(round(v))) if abs(v - round(v)) < 1e-9 else _fmt(v, 2)
 
 
+@con_moneda_del_proyecto
 def generar_cuaderno_pdf(pid: int, parte_ids: list, out_path: str, *,
                          paper: str = 'A4'):
     """PDF del cuaderno de obra para los días (partes) indicados."""
@@ -5745,6 +5775,7 @@ def _png_curva_s_real_b64(d: dict, *, width: int = 720, height: int = 300,
     return base64.b64encode(ba.data()).decode('ascii')
 
 
+@con_moneda_del_proyecto
 def _html_curva_s(proy: dict, d: dict, *, vis: dict = None) -> str:
     """Cuerpo HTML de la Curva S real: gráfico (PNG) + tabla por período con
     Programado · Reprogramado · Real (Monto·%Ejec·%Acum) y Desviación.
@@ -5759,7 +5790,7 @@ def _html_curva_s(proy: dict, d: dict, *, vis: dict = None) -> str:
         return _fmt(v, dp) if v is not None else ""
 
     def pc(v):
-        return f"{v:.1f}%" if v is not None else ""
+        return fmt_pct(v) if v is not None else ""
 
     img_b64 = _png_curva_s_real_b64(d, vis=vis)
     parts = ['<h2 align="center" style="text-align:center">'
@@ -5842,6 +5873,7 @@ def _html_curva_s(proy: dict, d: dict, *, vis: dict = None) -> str:
     return "\n".join(parts)
 
 
+@con_moneda_del_proyecto
 def generar_curva_s_pdf(pid: int, out_path: str, *, base: str = 'mes_cal',
                         paper: str = 'A4', vis: dict = None):
     """PDF de la Curva S real (gráfico + tabla comparativa) del proyecto."""
@@ -5854,6 +5886,7 @@ def generar_curva_s_pdf(pid: int, out_path: str, *, base: str = 'mes_cal',
     renderer.render_to_file(body, out_path)
 
 
+@con_moneda_del_proyecto
 def generar_valorizacion_pdf(val_id: int, out_path: str, *, paper: str = 'A4'):
     """Genera el PDF de una valorización (landscape) y lo guarda en disco."""
     import core.valorizacion as _val
@@ -6167,6 +6200,7 @@ def _html_tdr_encabezado(datos: dict) -> str:
     return ''.join(out)
 
 
+@con_moneda_del_proyecto
 def generar_tdr_pdf(out_path: str, req_id: int):
     """PDF del Requerimiento + TDR / EE.TT.: encabezado armado por la app (con los
     datos guardados del diálogo) + el cuerpo generado por la IA/editado, con el
@@ -6219,6 +6253,7 @@ def generar_tdr_pdf(out_path: str, req_id: int):
             pass  # sin anexos antes que sin reporte
 
 
+@con_moneda_del_proyecto
 def generar_pdf_seccion_archivo(seccion: str, num: int, pid: int,
                                   out_path: str, *,
                                   with_cover: bool = False,
