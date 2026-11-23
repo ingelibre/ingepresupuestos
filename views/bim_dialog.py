@@ -85,6 +85,9 @@ def _nota(texto='', color=SLATE_500) -> QLabel:
     return lb
 
 
+_CHECK = (Path(__file__).resolve().parent.parent / "resources" / "icons" / "check.svg").as_posix()
+
+
 def _arbol(cabeceras, ancho0=300) -> QTreeWidget:
     t = QTreeWidget()
     t.setHeaderLabels(cabeceras)
@@ -93,7 +96,11 @@ def _arbol(cabeceras, ancho0=300) -> QTreeWidget:
     t.setStyleSheet(f"QTreeWidget {{ background:{WHITE}; border:1px solid {SLATE_100};"
                     f" border-radius:6px; font-size:11px; }}"
                     f"QHeaderView::section {{ background:{SILVER_100}; color:{SLATE_700};"
-                    f" font-weight:700; font-size:10px; border:none; padding:4px; }}")
+                    f" font-weight:700; font-size:10px; border:none; padding:4px; }}"
+                    f"QTreeView::indicator {{ width:13px; height:13px; border:1px solid {SLATE_500};"
+                    f" border-radius:3px; background:white; }}"
+                    f"QTreeView::indicator:checked {{ image:url({_CHECK}); background:{SLATE_700}; }}"
+                    f"QTreeView::indicator:indeterminate {{ background:{SLATE_100}; }}")
     t.header().setStretchLastSection(True)
     t.setColumnWidth(0, ancho0)
     return t
@@ -744,14 +751,15 @@ class ModeloBimDialog(_Base):
             self.visor = BimVisor(self)
             self.visor.seleccion_cambiada.connect(self._elegido_en_3d)
             self.visor.cargado.connect(self._cargar_vinculos)
+            self.visor.ocultar_arbol()      # el diálogo ya tiene el suyo
             self._sp.addWidget(self.visor)
-            self._sp.setSizes([340, 320, 520])
+            self._sp.setSizes([290, 510, 560])
             self._sp.setStretchFactor(2, 1)
             for i in range(3):
                 self._sp.setCollapsible(i, False)
             for i in (0, 1):
-                self._sp.widget(i).setMinimumWidth(300)
-            self.resize(max(self.width(), 1320), self.height())
+                self._sp.widget(i).setMinimumWidth((290, 510)[i])
+            self.resize(max(self.width(), 1380), self.height())
         self.visor.show()
         self._abrir_3d()
 

@@ -242,6 +242,9 @@ class _VisorDoble:
             def resaltar(self, ids, encuadrar=False):
                 self.resaltado = list(ids)
 
+            def ocultar_arbol(self):
+                pass
+
             def cerrar(self):
                 self.log.append(('cerrar',))
         return V(parent)

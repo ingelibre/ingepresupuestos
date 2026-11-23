@@ -157,6 +157,10 @@ class BimVisor(QWidget):
         if encuadrar and self._sel:
             self.encuadrar()
 
+    def ocultar_arbol(self):
+        """Sin el árbol propio, para quien ya muestra otro al lado."""
+        self._split.widget(0).hide()
+
     def seleccion(self) -> list[str]:
         if self._geo is None:
             return []
