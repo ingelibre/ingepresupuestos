@@ -248,7 +248,8 @@ Listas de textos que se suman a las del programa; y los
 
 Solo `from ingepresupuestos import api`. Lo demás (`core`, `views`, la base de
 datos) cambia sin aviso, y `--validar-complemento` lo señala. `api.API_VERSION`
-es 1: sube al **añadir** algo.
+es 2: sube al **añadir** algo. Lo hecho para la 1 sigue valiendo sin cambios; si
+usas algo marcado como **API 2**, declara `"api_version": 2`.
 
 `registrar(app)` es obligatoria:
 
@@ -274,6 +275,11 @@ costo_directo total`, y `hojas()` (sin títulos).
 - `InsumoTotal`: `recurso_id codigo descripcion tipo unidad precio cantidad parcial`
 - `Moneda`: `nombre simbolo miles decimal`, `numero(v, dec)`, `formato(v, dec)`
 - `api.redondear(v, dec)`: el redondeo comercial del programa
+- **API 2**: `Presupuesto.ajustes` (lo que tu complemento guardó en el proyecto),
+  `decimales_metrado`, `modalidad`, `nombre_total` e `importe(partida, precio)`
+  (metrado × precio con el redondeo del programa); `Partida.acu_abierto` (el ACU
+  con las sub-partidas abiertas en sus insumos; mismo total); `LineaPie.etiqueta`
+  («IVA (19%)»); `api.idioma()` (`es`, `en` o `pt_BR`)
 
 **`Documento(titulo, bloques, horizontal=False)`** — bloques: `Titulo(texto,
 nivel)`, `Parrafo(texto, negrita, alinear)`, `Campos([(etiqueta, valor)])`,
@@ -291,11 +297,47 @@ paquete), `indice(clave)`, `avisar(texto)`, `preguntar(texto)`,
 | `editar.fijar_metrado(partida_id, cantidad)` | `reemplazar_planilla=True` si tiene planilla |
 | `editar.fijar_precio(recurso_id, precio)` | solo en este proyecto |
 | `editar.renombrar(partida_id, texto)` | |
+| `editar.fijar_precios({recurso_id: precio})` | API 2: varios, en un solo paso de deshacer |
+| `editar.simular_precios({recurso_id: precio})` | API 2: los `Totales(costo_directo, total)` que saldrían; no guarda |
 
 Cada llamada es una transacción: si falla no queda nada, y entra en
 **Deshacer**. Respeta los permisos del usuario y los proyectos aprobados. Con un
 importador no hace falta: basta devolver las partidas, y el programa pide
 confirmación.
+
+**Pedir datos y recordarlos (API 2).** `ctx.pedir_datos(titulo, [Dato…], texto="")`
+muestra un formulario y devuelve `{clave: valor}`, o `None` si se cancela.
+`Dato(clave, titulo, tipo, valor, minimo, maximo, decimales, opciones, sufijo,
+ayuda)`; `tipo` es `numero`, `entero`, `texto`, `opcion` o `si_no`.
+`ctx.guardar_ajustes({…})` guarda textos, números y sí/no (hasta 10 KB) **en el
+proyecto**: viajan con el `.db`, se deshacen y solo los ve tu complemento, en
+`ctx.ajustes` y `p.ajustes`. Compruébalos al leerlos: el `.db` pudo hacerlo otro.
+
+```python
+from ingepresupuestos import api
+
+
+def registrar(app):
+    app.accion("tasa", "Configurar la tasa…", configurar)
+    app.reporte("costo", "Costo con recargo", reporte)
+
+
+def configurar(ctx):
+    r = ctx.pedir_datos("Recargo", [api.Dato(
+        "tasa", "Recargo", valor=ctx.ajustes.get("tasa", 0.0), maximo=100,
+        sufijo="%")])
+    if r is not None:
+        ctx.guardar_ajustes(r)
+
+
+def reporte(p):
+    tasa = p.ajustes.get("tasa", 0.0)
+    if not isinstance(tasa, (int, float)) or not 0 <= tasa <= 100:
+        tasa = 0.0
+    v = api.redondear(p.costo_directo * (1 + tasa / 100), p.decimales)
+    return api.Documento("Costo con recargo", [
+        api.Campos([(f"Con {tasa} %", p.moneda.formato(v, p.decimales))])])
+```
 
 Para un error que el usuario entienda: `raise api.ErrorComplemento("texto")`.
 Cualquier otro se muestra con la línea del complemento donde ocurrió.

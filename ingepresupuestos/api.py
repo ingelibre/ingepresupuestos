@@ -27,9 +27,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Callable, Sequence
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Sequence
 
-API_VERSION = 1
+API_VERSION = 2
 
 
 class ErrorComplemento(Exception):
@@ -40,6 +41,15 @@ def redondear(valor: float, decimales: int = 2) -> float:
     """Redondeo comercial (0,5 hacia arriba), el mismo del programa."""
     q = Decimal(10) ** -decimales
     return float(Decimal(f'{float(valor or 0):.10f}').quantize(q, ROUND_HALF_UP))
+
+
+def idioma() -> str:
+    """El de la interfaz: 'es', 'en' o 'pt_BR'. (API 2)"""
+    try:
+        from utils.i18n import idioma_actual
+        return idioma_actual() or 'es'
+    except Exception:  # noqa: BLE001 — fuera del programa (pruebas)
+        return 'es'
 
 
 # ── Datos del presupuesto (solo lectura, ya calculados) ──────────────────────
@@ -93,6 +103,13 @@ class Partida:
     rendimiento: float           # 0 = no aplica
     sub_presupuesto: str
     acu: tuple[Insumo, ...] = ()
+    abierto: tuple[Insumo, ...] | None = None
+
+    @property
+    def acu_abierto(self) -> tuple[Insumo, ...]:
+        """El ACU con las sub-partidas abiertas en sus insumos: mismo total.
+        (API 2)"""
+        return self.acu if self.abierto is None else self.abierto
 
 
 @dataclass(frozen=True)
@@ -103,6 +120,7 @@ class LineaPie:
     pct: float
     valor: float
     es_impuesto: bool
+    etiqueta: str = ''           # «IVA (19%)», como la imprime el programa (API 2)
 
 
 @dataclass(frozen=True)
@@ -135,6 +153,17 @@ class Presupuesto:
     insumos: tuple[InsumoTotal, ...]
     costo_directo: float
     total: float
+    #: Lo que ESTE complemento guardó en el proyecto (`ctx.guardar_ajustes`).
+    #: Puede venir de un .db ajeno: compruébalo antes de usarlo. (API 2)
+    ajustes: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    decimales_metrado: int = 2      # (API 2)
+    modalidad: str = ''             # (API 2)
+    nombre_total: str = ''          # el que puso el usuario, o vacío (API 2)
+
+    def importe(self, partida: Partida, precio_unitario: float) -> float:
+        """Metrado × precio, con el mismo redondeo que el programa. (API 2)"""
+        return redondear(redondear(partida.metrado, self.decimales_metrado)
+                         * precio_unitario, self.decimales)
 
     def hojas(self) -> list[Partida]:
         """Solo las partidas (sin títulos)."""
@@ -216,6 +245,29 @@ class Aviso:
     texto: str
     nivel: str = 'aviso'         # aviso | error
     partida_id: int | None = None
+
+
+@dataclass(frozen=True)
+class Dato:
+    """Un campo de `ctx.pedir_datos`. (API 2)
+
+    tipo: numero | entero | texto | opcion | si_no"""
+    clave: str
+    titulo: str
+    tipo: str = 'numero'
+    valor: Any = None
+    minimo: float = 0.0
+    maximo: float = 1e12
+    decimales: int = 2
+    opciones: Sequence[str] = ()
+    sufijo: str = ''
+    ayuda: str = ''
+
+
+@dataclass(frozen=True)
+class Totales:
+    costo_directo: float
+    total: float
 
 
 # ── Lo que el complemento recibe en `registrar(app)` ─────────────────────────
@@ -302,6 +354,14 @@ class Editor:
         """El precio de un insumo EN ESTE PROYECTO (no en el catálogo)."""
         raise NotImplementedError
 
+    def fijar_precios(self, precios: Mapping[int, float]) -> None:
+        """{recurso_id: precio} EN ESTE PROYECTO, en un solo paso. (API 2)"""
+        raise NotImplementedError
+
+    def simular_precios(self, precios: Mapping[int, float]) -> Totales:
+        """Los totales que saldrían de `fijar_precios`, sin guardar. (API 2)"""
+        raise NotImplementedError
+
     def renombrar(self, partida_id: int, descripcion: str) -> None:
         raise NotImplementedError
 
@@ -332,6 +392,22 @@ class Contexto:
     def preguntar(self, texto: str) -> bool:
         raise NotImplementedError
 
+    def pedir_datos(self, titulo: str, campos: Sequence[Dato], *,
+                    texto: str = '') -> dict | None:
+        """Un formulario. {clave: valor} ya comprobado, o None si el usuario
+        cancela. (API 2)"""
+        raise NotImplementedError
+
+    @property
+    def ajustes(self) -> Mapping[str, Any]:
+        """Lo guardado por este complemento en este proyecto. (API 2)"""
+        raise NotImplementedError
+
+    def guardar_ajustes(self, ajustes: Mapping[str, Any]) -> None:
+        """Reemplaza los ajustes: textos, números y sí/no, hasta 10 KB. Se
+        guardan con el proyecto y se pueden deshacer. (API 2)"""
+        raise NotImplementedError
+
     def pedir_archivo(self, extensiones: Sequence[str] = ()) -> str | None:
         """Ruta de un archivo que elige el usuario, o None."""
         raise NotImplementedError
@@ -339,7 +415,7 @@ class Contexto:
 
 __all__ = [
     'API_VERSION', 'Aplicacion', 'Aviso', 'Campos', 'Columna', 'Contexto',
-    'Documento', 'Editor', 'ErrorComplemento', 'Fila', 'Insumo', 'InsumoTotal',
+    'Dato', 'Documento', 'Editor', 'ErrorComplemento', 'Fila', 'Insumo', 'InsumoTotal',
     'LineaPie', 'Moneda', 'Parrafo', 'Partida', 'PartidaNueva', 'Presupuesto',
-    'SaltoPagina', 'Tabla', 'Titulo', 'redondear',
+    'SaltoPagina', 'Tabla', 'Titulo', 'Totales', 'idioma', 'redondear',
 ]

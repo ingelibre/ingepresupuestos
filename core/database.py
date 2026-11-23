@@ -772,6 +772,8 @@ def init_db():
         ('gantt_plegado', "ALTER TABLE proyectos ADD COLUMN gantt_plegado TEXT DEFAULT ''"),
         # Tema de los reportes: '' = el de todos los proyectos, '-' = de fábrica.
         ('tema_reporte', "ALTER TABLE proyectos ADD COLUMN tema_reporte TEXT DEFAULT ''"),
+        # Ajustes de los complementos en el proyecto: JSON {id: {clave: valor}}.
+        ('compl_ajustes', "ALTER TABLE proyectos ADD COLUMN complementos_ajustes TEXT DEFAULT ''"),
         # Hash del código de recuperación de la cuenta (issue #32).
         ('usr_recuperacion', "ALTER TABLE usuarios ADD COLUMN recuperacion_hash TEXT DEFAULT ''"),
         # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,

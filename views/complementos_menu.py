@@ -14,13 +14,100 @@ complemento se ejecuta protegido: si falla se explica y el programa sigue.
 from __future__ import annotations
 
 import os
+from html import escape
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QApplication, QFileDialog, QMenu, QMessageBox)
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox, QScrollArea,
+    QSpinBox, QVBoxLayout, QWidget,
+)
 
 from core.complementos import cargador
 from ingepresupuestos import api
 from utils.i18n import tr
+
+
+class DatosDialog(QDialog):
+    """El formulario de `ctx.pedir_datos`. Los límites los impone cada campo."""
+
+    def __init__(self, titulo, campos, texto='', parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(titulo[:80])
+        vl = QVBoxLayout(self)
+        if texto:
+            lbl = QLabel(texto[:2000])
+            lbl.setTextFormat(Qt.PlainText)
+            lbl.setWordWrap(True)
+            vl.addWidget(lbl)
+        dentro = QWidget()
+        form = QFormLayout(dentro)
+        self._w = {}
+        for c in campos:
+            w = self._w[c.clave] = self._campo(c)
+            if c.ayuda:
+                w.setToolTip(escape(str(c.ayuda)[:500]))
+            if c.tipo == 'si_no':
+                form.addRow(w)
+            else:
+                rot = QLabel(str(c.titulo)[:120] + ":")
+                rot.setTextFormat(Qt.PlainText)
+                form.addRow(rot, w)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QScrollArea.NoFrame)
+        sc.setWidget(dentro)
+        sc.setMinimumSize(min(620, dentro.sizeHint().width() + 30),
+                          min(460, dentro.sizeHint().height() + 8))
+        vl.addWidget(sc, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText(tr("Aceptar"))
+        bb.button(QDialogButtonBox.Cancel).setText(tr("Cancelar"))
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        vl.addWidget(bb)
+
+    def _campo(self, c):
+        v = c.valor
+        num = isinstance(v, (int, float)) and not isinstance(v, bool)
+        if c.tipo == 'entero':
+            w = QSpinBox()
+            w.setRange(int(max(c.minimo, -2**31)), int(min(c.maximo, 2**31 - 1)))
+            w.setValue(int(v) if num else w.minimum())
+        elif c.tipo == 'numero':
+            w = QDoubleSpinBox()
+            w.setDecimals(max(0, min(6, int(c.decimales))))
+            w.setRange(c.minimo, c.maximo)
+            w.setGroupSeparatorShown(True)
+            w.setMinimumWidth(170)
+            w.setValue(float(v) if num else c.minimo)
+        elif c.tipo == 'opcion':
+            w = QComboBox()
+            w.addItems([str(o) for o in c.opciones])
+            w.setCurrentIndex(max(0, w.findText(str(v))))
+        elif c.tipo == 'si_no':
+            w = QCheckBox(str(c.titulo).replace('&', '&&')[:120])
+            w.setChecked(v is True)
+        else:
+            w = QLineEdit(str(v or ''))
+            w.setMaxLength(1000)
+            w.setMinimumWidth(300)
+        if c.tipo in ('entero', 'numero') and c.sufijo:
+            w.setSuffix(f" {c.sufijo}"[:12])
+        return w
+
+    def valores(self) -> dict:
+        out = {}
+        for k, w in self._w.items():
+            if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                out[k] = w.value()
+            elif isinstance(w, QComboBox):
+                out[k] = w.currentText()
+            elif isinstance(w, QCheckBox):
+                out[k] = w.isChecked()
+            else:
+                out[k] = w.text().strip()
+        return out
 
 
 class Interfaz:
@@ -45,6 +132,11 @@ class Interfaz:
     def preguntar(self, texto):
         return self._caja(QMessageBox.Question, texto,
                           QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes
+
+    def pedir_datos(self, titulo, campos, texto=''):
+        dlg = DatosDialog(titulo, campos, texto, self._padre)
+        dlg.setWindowModality(Qt.WindowModal)
+        return dlg.valores() if dlg.exec() == QDialog.Accepted else None
 
     def pedir_archivo(self, extensiones=()):
         filtro = " ".join(f"*.{e}" for e in extensiones)
@@ -112,7 +204,7 @@ def ejecutar_reporte(padre, cargado, registro, pid, formato, ruta=None) -> bool:
     def hacer():
         nonlocal ruta
         from core.complementos import contexto, reportes
-        p = contexto.presupuesto(pid, _usuario())
+        p = contexto.presupuesto(pid, _usuario(), cargado.id)
         if ruta is None:
             base = "".join(c for c in f"{p.nombre} - {registro.titulo}"
                            if c not in '<>:"/\\|?*' and ord(c) >= 32)[:120]
@@ -162,7 +254,7 @@ def ejecutar_importador(padre, ventana, cargado, registro, pid, ruta=None) -> bo
 def ejecutar_validador(padre, cargado, registro, pid) -> bool:
     def hacer():
         from core.complementos import contexto
-        p = contexto.presupuesto(pid, _usuario())
+        p = contexto.presupuesto(pid, _usuario(), cargado.id)
         avisos = list(registro.funcion(p) or [])
         if any(not isinstance(a, api.Aviso) for a in avisos):
             raise api.ErrorComplemento("un validador devuelve una lista de Aviso")

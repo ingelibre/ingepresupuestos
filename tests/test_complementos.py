@@ -940,3 +940,97 @@ def test_va_en_todos_los_paquetes():
     for y in RAIZ.glob('installer/*/com.ingepresupuestos.IngePresupuestos.yml'):
         t = y.read_text(encoding='utf-8')
         assert 'cp -a complementos core ingepresupuestos ' in t, y
+
+
+# ── API 2: pedir_datos, ajustes por proyecto y varios precios a la vez ────────
+
+def test_ajustes_por_proyecto_sobreviven_a_exportar_e_importar(pid, admin, tmp_path):
+    ctx = _ctx(pid, admin, tmp_path)
+    assert dict(ctx.ajustes) == {}
+    ctx.guardar_ajustes({'tasa': 18.0, 'nombre': 'ITBIS', 'si': True})
+    assert dict(ctx.ajustes) == dict(ctx.presupuesto.ajustes) == {
+        'tasa': 18.0, 'nombre': 'ITBIS', 'si': True}
+    # Otro complemento no los ve.
+    assert dict(contexto.presupuesto(pid, admin, 'otro').ajustes) == {}
+    assert dict(contexto.presupuesto(pid, admin).ajustes) == {}
+    conn = d.get_db()
+    crudo = conn.execute("SELECT complementos_ajustes FROM proyectos WHERE id=?",
+                         (pid,)).fetchone()[0]
+    conn.close()
+    from core import exporter
+    from core.ingepresupuestos_db_importer import importar_proyecto_db_directo
+    exporter.exportar_proyecto_db(pid, str(tmp_path / 'p.db'))
+    nuevo = importar_proyecto_db_directo(str(tmp_path / 'p.db'), pid)
+    conn = d.get_db()
+    assert conn.execute("SELECT complementos_ajustes FROM proyectos WHERE id=?",
+                        (nuevo,)).fetchone()[0] == crudo
+    conn.close()
+    with pytest.raises(api.ErrorComplemento):
+        ctx.guardar_ajustes({'x': [1]})
+    with pytest.raises(api.ErrorComplemento):
+        ctx.guardar_ajustes({'x': 'a' * 20_000})
+    with pytest.raises(api.ErrorComplemento):
+        ctx.guardar_ajustes({'x': float('nan')})
+    ctx.guardar_ajustes({})
+    assert dict(ctx.ajustes) == {}
+
+
+@pytest.mark.parametrize('crudo', ['', 'no json', '[1]', '{"de-prueba": 3}',
+                                   '{"de-prueba": {"a": [1], "b": NaN}}', None])
+def test_ajustes_ilegibles_de_un_db_ajeno(crudo):
+    assert dict(contexto.ajustes_de({'complementos_ajustes': crudo},
+                                    'de-prueba')) == {}
+
+
+def test_fijar_y_simular_precios(pid, admin, tmp_path):
+    ctx = _ctx(pid, admin, tmp_path)
+    p = ctx.presupuesto
+    ins = [i for x in p.hojas() for i in x.acu if not i.es_subpartida
+           and not i.unidad.startswith('%') and i.precio > 0]
+    a, b = ins[0], next(i for i in ins if i.recurso_id != ins[0].recurso_id)
+    cambio = {a.recurso_id: a.precio + 1, b.recurso_id: b.precio + 2}
+    sim = ctx.editar.simular_precios(cambio)
+    igual = ctx.presupuesto
+    assert (igual.costo_directo, igual.total) == (p.costo_directo, p.total)
+    assert ctx.operaciones.pila.resumen() is None
+    ctx.editar.fijar_precios(cambio)
+    q = ctx.presupuesto
+    assert (q.costo_directo, q.total) == (sim.costo_directo, sim.total)
+    assert q.total > p.total
+    conn = d.get_db()
+    cat = conn.execute("SELECT precio FROM recursos WHERE id=?",
+                       (a.recurso_id,)).fetchone()[0]
+    conn.close()
+    assert ctx.operaciones.pila.resumen()['herramienta'] == 'complemento:de-prueba'
+    # Si uno falla, no queda ninguno.
+    with pytest.raises(api.ErrorComplemento):
+        ctx.editar.fijar_precios({a.recurso_id: 999, 10**9: 1})
+    with pytest.raises(api.ErrorComplemento):
+        ctx.editar.simular_precios({a.recurso_id: -1})
+    assert ctx.presupuesto.total == q.total
+    assert not ctx.operaciones.simular
+    ctx.editar.fijar_precios({a.recurso_id: a.precio, b.recurso_id: b.precio})
+    conn = d.get_db()
+    assert conn.execute("SELECT precio FROM recursos WHERE id=?",
+                        (a.recurso_id,)).fetchone()[0] == cat
+    conn.close()
+
+
+def test_pedir_datos_comprueba_y_el_formulario_devuelve_tipos():
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from views.complementos_menu import DatosDialog
+    campos = [api.Dato('n', 'Número', valor=12.5, maximo=20),
+              api.Dato('e', 'Entero', 'entero', 3, 1, 9),
+              api.Dato('t', 'Texto', 'texto', '<b>x</b>'),
+              api.Dato('o', 'Opción', 'opcion', 'B', opciones=('A', 'B')),
+              api.Dato('s', 'Sí', 'si_no', True)]
+    dlg = DatosDialog('T', contexto.comprobar_datos(campos), 'texto')
+    assert dlg.valores() == {'n': 12.5, 'e': 3, 't': '<b>x</b>', 'o': 'B', 's': True}
+    dlg._w['n'].setValue(500)
+    assert dlg.valores()['n'] == 20
+    for malo in ([], [api.Dato('a', 'A', 'raro')], [api.Dato('a', 'A')] * 2, [3],
+                 [api.Dato('a', 'A', 'opcion')],
+                 [api.Dato('a', 'A', minimo=5, maximo=1)]):
+        with pytest.raises(api.ErrorComplemento):
+            contexto.comprobar_datos(malo)

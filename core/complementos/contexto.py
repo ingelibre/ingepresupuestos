@@ -11,6 +11,10 @@ conexión a la base.
 """
 from __future__ import annotations
 
+import json
+import math
+from types import MappingProxyType
+
 from core.mcp_operaciones import ErrorMCP, Operaciones
 from ingepresupuestos import api
 
@@ -33,12 +37,56 @@ def moneda(nombre: str) -> api.Moneda:
     return api.Moneda(nombre, c['simbolo'], c['sep_miles'], c['sep_dec'])
 
 
-def presupuesto(pid: int, usuario) -> api.Presupuesto:
+MAX_AJUSTES = 10_000
+
+
+def _valor_ok(v) -> bool:
+    return isinstance(v, (str, bool, int)) or (
+        isinstance(v, float) and math.isfinite(v))
+
+
+def _todos_los_ajustes(crudo) -> dict:
+    """El JSON de la columna; lo ilegible (un .db ajeno) es como si no hubiera."""
+    try:
+        d = json.loads(crudo or '{}')
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def ajustes_de(proy: dict, complemento: str | None):
+    d = _todos_los_ajustes(proy.get('complementos_ajustes')).get(complemento or '')
+    return MappingProxyType({k: v for k, v in d.items() if _valor_ok(v)}
+                            if isinstance(d, dict) else {})
+
+
+def comprobar_datos(campos) -> list:
+    """Los campos de `pedir_datos`, o ErrorComplemento."""
+    campos, vistos = list(campos), set()
+    if not 1 <= len(campos) <= 40:
+        raise api.ErrorComplemento("pedir_datos: de 1 a 40 campos")
+    for c in campos:
+        if not isinstance(c, api.Dato) or not str(c.clave) or c.clave in vistos:
+            raise api.ErrorComplemento("pedir_datos: campo repetido o que no es Dato")
+        vistos.add(c.clave)
+        if c.tipo not in ('numero', 'entero', 'texto', 'opcion', 'si_no'):
+            raise api.ErrorComplemento(f"pedir_datos: tipo {c.tipo!r}")
+        if c.tipo == 'opcion' and not c.opciones:
+            raise api.ErrorComplemento(f"pedir_datos: «{c.titulo}» sin opciones")
+        if c.tipo in ('numero', 'entero') and not (
+                math.isfinite(c.minimo) and math.isfinite(c.maximo)
+                and c.minimo <= c.maximo):
+            raise api.ErrorComplemento(f"pedir_datos: límites de «{c.titulo}»")
+    return campos
+
+
+def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presupuesto:
     """La foto del proyecto. Solo si ese usuario lo ve."""
     from core import partidas_ops
-    from core.database import (calcular_totales, get_acu_items, get_db,
-                               get_decimales_ppto, get_insumos_proyecto)
-    from core.pie import es_impuesto, pie_efectivo
+    from core.database import (calcular_totales, get_acu_hojas, get_acu_items,
+                               get_db, get_decimales_metrado, get_decimales_ppto,
+                               get_insumos_proyecto)
+    from core.pie import es_impuesto, etiqueta, pie_efectivo
     conn = get_db()
     try:
         try:
@@ -50,17 +98,13 @@ def presupuesto(pid: int, usuario) -> api.Presupuesto:
         subs = {None: proy.get('sub_presupuesto') or ''}
         subs.update((r['id'], r['nombre']) for r in conn.execute(
             "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=?", (pid,)))
-        partidas = []
+        partidas, cache = [], {}
         for p in partidas_ops.partidas_en_orden(conn, pid):
             acu = () if p['es_titulo'] else tuple(
-                api.Insumo(
-                    recurso_id=a['recurso_id'], codigo=a['codigo'] or '',
-                    descripcion=a['descripcion'] or '', tipo=a['tipo'] or 'MAT',
-                    unidad=a['unidad'] or '', cuadrilla=a['cuadrilla'] or 0.0,
-                    cantidad=a['cantidad'] or 0.0, precio=a['precio'] or 0.0,
-                    parcial=a['parcial'] or 0.0,
-                    es_subpartida=bool(a['sub_partida_id']))
-                for a in get_acu_items(conn, p['id'])[0])
+                map(_insumo, get_acu_items(conn, p['id'])[0]))
+            abierto = None
+            if any(a.es_subpartida for a in acu):
+                abierto = tuple(map(_insumo, get_acu_hojas(conn, p['id'], cache)))
             partidas.append(api.Partida(
                 id=p['id'], item=p['item'] or '', descripcion=p['descripcion'] or '',
                 nivel=p['nivel'] or 1, es_titulo=bool(p['es_titulo']),
@@ -68,7 +112,8 @@ def presupuesto(pid: int, usuario) -> api.Presupuesto:
                 precio_unitario=p['precio_unitario'] or 0.0,
                 parcial=parciales.get(p['id'], 0.0),
                 rendimiento=p['rendimiento'] or 0.0,
-                sub_presupuesto=subs.get(p['sub_presupuesto_id'], ''), acu=acu))
+                sub_presupuesto=subs.get(p['sub_presupuesto_id'], ''), acu=acu,
+                abierto=abierto))
         lineas, total = pie_efectivo(conn, pid, t['cd'])
         insumos = get_insumos_proyecto(conn, pid)
     finally:
@@ -83,12 +128,26 @@ def presupuesto(pid: int, usuario) -> api.Presupuesto:
         decimales=get_decimales_ppto(), partidas=tuple(partidas),
         pie=tuple(api.LineaPie(x['nombre'], x['codigo'] or '', x['tipo'],
                                x['pct'] or 0.0, x['valor'],
-                               x['tipo'] != 'subtotal' and es_impuesto(x))
+                               x['tipo'] != 'subtotal' and es_impuesto(x),
+                               etiqueta(x))
                   for x in lineas or ()),
         insumos=tuple(api.InsumoTotal(
             x['recurso_id'], x['codigo'], x['descripcion'], x['tipo'], x['unidad'],
             x['precio'], x['cantidad_total'], x['parcial_total']) for x in insumos),
-        costo_directo=t['cd'], total=total)
+        costo_directo=t['cd'], total=total,
+        ajustes=ajustes_de(proy, complemento),
+        decimales_metrado=get_decimales_metrado(),
+        modalidad=proy.get('modalidad') or '',
+        nombre_total=(proy.get('total_nombre') or '').strip())
+
+
+def _insumo(a: dict) -> api.Insumo:
+    return api.Insumo(
+        recurso_id=a['recurso_id'], codigo=a['codigo'] or '',
+        descripcion=a['descripcion'] or '', tipo=a['tipo'] or 'MAT',
+        unidad=a['unidad'] or '', cuadrilla=a['cuadrilla'] or 0.0,
+        cantidad=a['cantidad'] or 0.0, precio=a['precio'] or 0.0,
+        parcial=a['parcial'] or 0.0, es_subpartida=bool(a['sub_partida_id']))
 
 
 class _Editor(api.Editor):
@@ -148,6 +207,40 @@ class _Editor(api.Editor):
         self._hacer(self._ops.set_price, self._pid, recurso_id,
                     _numero(precio, "precio"))
 
+    def _cambio_precios(self, precios):
+        from core.database import calcular_totales, unificar_precio_recurso
+        from core.pie import pie_efectivo
+        lista = [(int(r), _numero(v, f"precio de {r}"))
+                 for r, v in dict(precios).items()]
+        if not lista:
+            raise api.ErrorComplemento("no hay precios que cambiar")
+
+        def cambio(conn, proy):
+            for rid, precio in lista:
+                r = conn.execute("SELECT unidad, codigo FROM recursos WHERE id=?",
+                                 (rid,)).fetchone()
+                if r is None or r['codigo'] == 'SUBPARTIDA' \
+                        or (r['unidad'] or '').strip().startswith('%'):
+                    raise ErrorMCP(f"el insumo {rid} no tiene precio propio")
+                if not unificar_precio_recurso(conn, self._pid, rid, precio):
+                    raise ErrorMCP(f"el insumo {rid} no se usa en el proyecto")
+            cd = calcular_totales(self._pid, conn)[1]['cd']
+            return api.Totales(cd, pie_efectivo(conn, self._pid, cd)[1])
+        return cambio
+
+    def fijar_precios(self, precios):
+        self._hacer(self._ops._escribir, '', self._pid, 'presupuesto',
+                    self._cambio_precios(precios))
+
+    def simular_precios(self, precios):
+        cambio = self._cambio_precios(precios)
+        self._ops.simular = True
+        try:
+            return self._hacer(self._ops._escribir, '', self._pid, 'presupuesto',
+                               cambio)['would_return']
+        finally:
+            self._ops.simular = False
+
     def renombrar(self, partida_id, descripcion):
         self._propia(partida_id)
         self._hacer(self._ops.edit_items, self._pid,
@@ -155,7 +248,6 @@ class _Editor(api.Editor):
 
 
 def _numero(x, donde) -> float:
-    import math
     if isinstance(x, bool) or not isinstance(x, (int, float)) \
             or not math.isfinite(x) or x < 0:
         raise api.ErrorComplemento(f"{donde}: debe ser un número desde 0")
@@ -174,7 +266,7 @@ class ContextoReal(api.Contexto):
 
     @property
     def presupuesto(self):
-        return presupuesto(self._pid, self._usuario)
+        return presupuesto(self._pid, self._usuario, self.complemento)
 
     def recurso(self, ruta):
         try:
@@ -191,6 +283,40 @@ class ContextoReal(api.Contexto):
 
     def preguntar(self, texto):
         return bool(self._ui.preguntar(str(texto)))
+
+    def pedir_datos(self, titulo, campos, *, texto=''):
+        campos = comprobar_datos(campos)
+        r = self._ui.pedir_datos(str(titulo), campos, str(texto))
+        return None if r is None else {c.clave: r[c.clave] for c in campos}
+
+    @property
+    def ajustes(self):
+        from core.database import get_db
+        conn = get_db()
+        try:
+            proy = self.operaciones._proyecto(conn, self._pid)
+        except ErrorMCP as e:
+            raise api.ErrorComplemento(str(e)) from None
+        finally:
+            conn.close()
+        return ajustes_de(proy, self.complemento)
+
+    def guardar_ajustes(self, ajustes):
+        nuevos = dict(ajustes)
+        if not all(isinstance(k, str) and _valor_ok(v) for k, v in nuevos.items()) \
+                or len(json.dumps(nuevos)) > MAX_AJUSTES:
+            raise api.ErrorComplemento(
+                "ajustes: solo textos, números y sí/no, hasta 10 KB")
+
+        def cambio(conn, proy):
+            todos = _todos_los_ajustes(proy.get('complementos_ajustes'))
+            todos[self.complemento] = nuevos
+            conn.execute("UPDATE proyectos SET complementos_ajustes=? WHERE id=?",
+                         (json.dumps(todos, ensure_ascii=False), self._pid))
+        try:
+            self.operaciones._escribir('', self._pid, 'presupuesto', cambio)
+        except ErrorMCP as e:
+            raise api.ErrorComplemento(str(e)) from None
 
     def pedir_archivo(self, extensiones=()):
         return self._ui.pedir_archivo(tuple(extensiones))
