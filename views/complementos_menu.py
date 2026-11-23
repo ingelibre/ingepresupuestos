@@ -20,7 +20,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox,
-    QProgressDialog, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+    QPlainTextEdit, QProgressDialog, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from core.complementos import cargador
 from core.complementos.contexto import Cancelado
@@ -88,6 +88,10 @@ class DatosDialog(QDialog):
         elif c.tipo == 'si_no':
             w = QCheckBox(str(c.titulo).replace('&', '&&')[:120])
             w.setChecked(v is True)
+        elif c.tipo == 'parrafo':
+            w = QPlainTextEdit(str(v or ''))
+            w.setMinimumSize(380, 120)
+            w.setTabChangesFocus(True)
         else:
             w = QLineEdit(str(v or ''))
             w.setMaxLength(1000)
@@ -103,6 +107,8 @@ class DatosDialog(QDialog):
                 out[k] = w.value()
             elif isinstance(w, QComboBox):
                 out[k] = w.currentText()
+            elif isinstance(w, QPlainTextEdit):
+                out[k] = w.toPlainText().strip()[:5000]
             elif isinstance(w, QCheckBox):
                 out[k] = w.isChecked()
             else:

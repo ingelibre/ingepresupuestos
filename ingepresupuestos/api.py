@@ -83,10 +83,25 @@ class Insumo:
     precio: float
     parcial: float               # ya redondeado; en un «%» no es cantidad × precio
     es_subpartida: bool = False
+    auxiliar_id: int = 0                     # la sub-partida de la línea (API 2)
 
     @property
     def es_porcentaje(self) -> bool:
         return self.unidad.startswith('%')
+
+
+@dataclass(frozen=True)
+class LineaMetrado:
+    """Una fila de la planilla; None = en blanco. En acero, `largo` es la
+    longitud y `kg_m` el peso por metro. (API 2)"""
+    descripcion: str
+    unidades: float | None
+    largo: float | None
+    ancho: float | None
+    alto: float | None
+    parcial: float
+    area: float | None = None
+    kg_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +119,8 @@ class Partida:
     sub_presupuesto: str
     acu: tuple[Insumo, ...] = ()
     abierto: tuple[Insumo, ...] | None = None
+    especificacion: str = ''                 # texto, un párrafo por línea (API 2)
+    mediciones: tuple['LineaMetrado', ...] = ()   # planilla de metrado (API 2)
 
     @property
     def acu_abierto(self) -> tuple[Insumo, ...]:
@@ -158,6 +175,9 @@ class Presupuesto:
     ajustes: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     decimales_metrado: int = 2      # (API 2)
     modalidad: str = ''             # (API 2)
+    #: Las sub-partidas (auxiliares, básicos), que no son partidas del
+    #: presupuesto: `Insumo.auxiliar_id` es el `id` de una de ellas. (API 2)
+    auxiliares: tuple['Partida', ...] = ()
     nombre_total: str = ''          # el que puso el usuario, o vacío (API 2)
 
     def importe(self, partida: Partida, precio_unitario: float) -> float:
@@ -251,7 +271,7 @@ class Aviso:
 class Dato:
     """Un campo de `ctx.pedir_datos`. (API 2)
 
-    tipo: numero | entero | texto | opcion | si_no"""
+    tipo: numero | entero | texto | parrafo | opcion | si_no"""
     clave: str
     titulo: str
     tipo: str = 'numero'
@@ -416,6 +436,6 @@ class Contexto:
 __all__ = [
     'API_VERSION', 'Aplicacion', 'Aviso', 'Campos', 'Columna', 'Contexto',
     'Dato', 'Documento', 'Editor', 'ErrorComplemento', 'Fila', 'Insumo', 'InsumoTotal',
-    'LineaPie', 'Moneda', 'Parrafo', 'Partida', 'PartidaNueva', 'Presupuesto',
+    'LineaMetrado', 'LineaPie', 'Moneda', 'Parrafo', 'Partida', 'PartidaNueva', 'Presupuesto',
     'SaltoPagina', 'Tabla', 'Titulo', 'Totales', 'idioma', 'redondear',
 ]

@@ -69,7 +69,7 @@ def comprobar_datos(campos) -> list:
         if not isinstance(c, api.Dato) or not str(c.clave) or c.clave in vistos:
             raise api.ErrorComplemento("pedir_datos: campo repetido o que no es Dato")
         vistos.add(c.clave)
-        if c.tipo not in ('numero', 'entero', 'texto', 'opcion', 'si_no'):
+        if c.tipo not in ('numero', 'entero', 'texto', 'parrafo', 'opcion', 'si_no'):
             raise api.ErrorComplemento(f"pedir_datos: tipo {c.tipo!r}")
         if c.tipo == 'opcion' and not c.opciones:
             raise api.ErrorComplemento(f"pedir_datos: «{c.titulo}» sin opciones")
@@ -99,6 +99,7 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
         subs.update((r['id'], r['nombre']) for r in conn.execute(
             "SELECT id, nombre FROM sub_presupuestos WHERE proyecto_id=?", (pid,)))
         partidas, cache = [], {}
+        planillas = _planillas(conn, pid)
         for p in partidas_ops.partidas_en_orden(conn, pid):
             acu = () if p['es_titulo'] else tuple(
                 map(_insumo, get_acu_items(conn, p['id'])[0]))
@@ -113,7 +114,12 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
                 parcial=parciales.get(p['id'], 0.0),
                 rendimiento=p['rendimiento'] or 0.0,
                 sub_presupuesto=subs.get(p['sub_presupuesto_id'], ''), acu=acu,
-                abierto=abierto))
+                abierto=abierto,
+                especificacion=_texto_plano(p['especificaciones']),
+                mediciones=tuple(planillas.get(p['id'], ()))))
+        auxiliares = tuple(_auxiliar(conn, x) for x in conn.execute(
+            "SELECT * FROM partidas WHERE proyecto_id=? AND es_subanalisis=1 "
+            "ORDER BY item, id", (pid,)).fetchall())
         lineas, total = pie_efectivo(conn, pid, t['cd'])
         insumos = get_insumos_proyecto(conn, pid)
     finally:
@@ -137,8 +143,48 @@ def presupuesto(pid: int, usuario, complemento: str | None = None) -> api.Presup
         costo_directo=t['cd'], total=total,
         ajustes=ajustes_de(proy, complemento),
         decimales_metrado=get_decimales_metrado(),
-        modalidad=proy.get('modalidad') or '',
+        auxiliares=auxiliares, modalidad=proy.get('modalidad') or '',
         nombre_total=(proy.get('total_nombre') or '').strip())
+
+
+def _texto_plano(spec) -> str:
+    if not spec:
+        return ''
+    from core.pdf_reports import especificacion_en_parrafos
+    return "\n".join(especificacion_en_parrafos(spec))[:20_000]
+
+
+def _planillas(conn, pid) -> dict:
+    """{partida_id: [LineaMetrado]} de todo el proyecto."""
+    out = {}
+
+    def veces(*ns):
+        ns = [n for n in ns if n is not None]
+        return math.prod(ns) if ns else None
+    for r in conn.execute(
+            "SELECT m.* FROM metrados_detalle m JOIN partidas p ON p.id=m.partida_id "
+            "WHERE p.proyecto_id=? ORDER BY m.partida_id, m.orden, m.id", (pid,)):
+        out.setdefault(r['partida_id'], []).append(api.LineaMetrado(
+            r['descripcion'] or '', veces(r['n_estructuras'], r['n_elementos']),
+            r['largo'], r['ancho'], r['alto'], r['parcial'] or 0.0, r['area']))
+    for r in conn.execute(
+            "SELECT m.* FROM acero_detalle m JOIN partidas p ON p.id=m.partida_id "
+            "WHERE p.proyecto_id=? ORDER BY m.partida_id, m.orden, m.id", (pid,)):
+        d = " ".join(x for x in (r['descripcion'], r['diametro']) if x)
+        out.setdefault(r['partida_id'], []).append(api.LineaMetrado(
+            d, veces(r['n_veces'], r['n_elementos']), r['longitud'], None, None,
+            r['parcial'] or 0.0, kg_m=r['kg_ml']))
+    return out
+
+
+def _auxiliar(conn, p) -> api.Partida:
+    from core.database import get_acu_items
+    return api.Partida(
+        id=p['id'], item=p['item'] or '', descripcion=p['descripcion'] or '', nivel=1,
+        es_titulo=False, unidad=p['unidad'] or '', metrado=0.0,
+        precio_unitario=p['precio_unitario'] or 0.0, parcial=0.0,
+        rendimiento=p['rendimiento'] or 0.0, sub_presupuesto='',
+        acu=tuple(map(_insumo, get_acu_items(conn, p['id'])[0])))
 
 
 def _insumo(a: dict) -> api.Insumo:
@@ -147,7 +193,8 @@ def _insumo(a: dict) -> api.Insumo:
         descripcion=a['descripcion'] or '', tipo=a['tipo'] or 'MAT',
         unidad=a['unidad'] or '', cuadrilla=a['cuadrilla'] or 0.0,
         cantidad=a['cantidad'] or 0.0, precio=a['precio'] or 0.0,
-        parcial=a['parcial'] or 0.0, es_subpartida=bool(a['sub_partida_id']))
+        parcial=a['parcial'] or 0.0, es_subpartida=bool(a['sub_partida_id']),
+        auxiliar_id=a['sub_partida_id'] or 0)
 
 
 class _Editor(api.Editor):
