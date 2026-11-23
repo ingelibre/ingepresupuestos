@@ -89,6 +89,11 @@
   </branding>
 
   <releases>
+    <release version="3.2.0" date="2026-11-25">
+      <description>
+        <p>Gracias a los usuarios por sus reportes y pedidos. Nuevo: sub-partidas; modelo BIM con lector IFC que respeta unidades y vincula elementos con partidas, y vista 3D (beta); lectura directa de IngeTrazo 0.6.3.3 o posterior; conexión con asistentes de IA por MCP, apagada por defecto; 20 complementos: ocho países, metrados de acero, ladrillos, tierras, concreto y zapatas, y reportes; temas de reportes; Deshacer y Rehacer; recuperación de la contraseña sin internet; corte a fin de mes; importación de los análisis de S10. Errores corregidos: los reportes no seguían los separadores de la moneda; los montos muy grandes fallaban; el XML de MS Project perdía predecesoras; abrir la planilla de acero modificaba el presupuesto; en Windows parte del ACU se veía pixelada. Al actualizar: en proyectos que nunca abrieron su pestaña «Pie», el reporte ahora incluye gastos generales, utilidad e impuesto.</p>
+      </description>
+    </release>
     <release version="3.0.18" date="2026-10-21">
       <description>
         <p>Gracias a quienes escribieron desde España, Brasil, Uruguay y Chile, y a David Ramos. Nuevo: importar ficheros BC3 (FIEBDC-3) de Presto, Arquímedes y las bases de precios españolas, como proyecto o a la Biblioteca; la interfaz en portugués de Brasil; importar insumos desde un Excel cualquiera asignando columnas, con la Lista Oficial del MTOP de Uruguay reconocida sola; franjas de imagen con el membrete de la empresa en el encabezado y el pie de los reportes; análisis de costos impreso con un bloque por tipo de recurso; columna INEI en ACU e Insumos; Ctrl+C copia filas para pegar en Excel; «Guardar en Biblioteca» elige el grupo; en Linux, capturas en la ficha del Flatpak, icono en el dock y la AppImage en el menú. Errores corregidos: el costo directo perdía partidas con ítems repetidos entre sub-presupuestos; el ACU e Insumos no seguían los decimales de Configuración; sin fecha de inicio el cronograma no descontaba domingos ni feriados; la Biblioteca mostraba solo 1 000 análisis y su búsqueda distinguía tildes; copiar insumos abría una ventana suelta; el total de la distribución del costo directo se cortaba.</p>
