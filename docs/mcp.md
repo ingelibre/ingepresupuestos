@@ -44,7 +44,7 @@ Al cerrar sesión se apaga.
 | `set_metrado` | Planilla o cantidad. Si ya hay planilla exige `replace: true` |
 | `set_acu`, `set_price`, `set_schedule` | Análisis, precio del insumo **en ese proyecto**, cronograma |
 | `bim_apply`, `link_elements`, `show_in_model` | Registrar o actualizar el modelo, vincular, señalar en IngeTrazo |
-| `export_report` | PDF, Excel o Word en una ruta absoluta; no sobrescribe sin `overwrite: true` |
+| `export_report` | PDF, o Excel de los reportes que lo tienen, en una ruta absoluta; no sobrescribe sin `overwrite: true` |
 | `undo_last` | Deshace el último cambio hecho por el asistente |
 
 Las partidas con elementos BIM vinculados se miden por el modelo: `set_metrado`

@@ -74,6 +74,15 @@ otorgan al Usuario sobre estos componentes.
   safetensors       0.8.0      Apache-2.0
   huggingface-hub   1.24.0     Apache-2.0
 
+  Dependencias de las anteriores, según el empaquetado: lxml, pypdfium2 (con
+  PDFium), Jinja2, MarkupSafe, joblib, click, httpcore, idna, fsspec,
+  websockets, pyasn1, pyasn1-modules y pycparser (BSD; pypdfium2 también
+  Apache-2.0); pdfminer.six, charset-normalizer, anyio, cffi, h11, jiter,
+  construct, annotated-types, docstring-parser, pydantic-core, tabulate,
+  typing-inspection, sniffio, PyYAML y urllib3 (MIT); requests, google-auth,
+  tenacity, distro, hf-xet y packaging (Apache-2.0); tqdm (MPL-2.0 y MIT);
+  filelock (MIT); defusedxml y typing-extensions (PSF).
+
   El texto íntegro de cada licencia acompaña a la biblioteca correspondiente
   dentro de _internal/ en la distribución.
 
