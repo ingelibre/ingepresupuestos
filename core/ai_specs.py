@@ -12,6 +12,8 @@ Proveedores soportados:
   - Ollama    (ia_proveedor=ollama) — modelo local
 """
 
+import threading
+
 from core.database import get_db, get_config, set_config
 
 
@@ -43,6 +45,36 @@ def _proveedor_activo() -> str:
     return _detectar_proveedor(api_key)
 
 
+# ── Motivo de fin de la última respuesta ───────────────────────────────────
+# Cada proveedor anota aquí si la respuesta se cortó por el tope de tokens
+# («length», «max_tokens», «MAX_TOKENS»). Va aparte del (texto, error) para no
+# cambiar el contrato de todos los que llaman, y por hilo porque las llamadas
+# corren en QThreads que pueden solaparse.
+
+_local = threading.local()
+
+
+def _anotar_fin(motivo) -> None:
+    m = str(getattr(motivo, 'value', None) or getattr(motivo, 'name', None)
+            or motivo or '').lower()
+    _local.cortada = m.split('.')[-1] in ('length', 'max_tokens',
+                                          'max_output_tokens')
+
+
+def respuesta_cortada() -> bool:
+    """¿La última respuesta de ESTE hilo se cortó por el tope de tokens?"""
+    return bool(getattr(_local, 'cortada', False))
+
+
+def _texto_chat(response) -> str:
+    """Texto de una respuesta tipo OpenAI, anotando por qué terminó. Los
+    modelos razonadores pueden gastar todo el tope pensando y devolver
+    `content` vacío o None."""
+    ch = response.choices[0]
+    _anotar_fin(getattr(ch, 'finish_reason', None))
+    return ch.message.content
+
+
 # ── Llamada a Ollama ───────────────────────────────────────────────────────
 
 def _llamar_ollama(prompt: str, max_tokens: int = 1500):
@@ -72,6 +104,7 @@ def _llamar_ollama(prompt: str, max_tokens: int = 1500):
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read())
         texto = data.get("message", {}).get("content", "")
+        _anotar_fin(data.get("done_reason"))
         if not texto:
             return None, "Ollama no devolvió respuesta. Verifica que el modelo esté descargado."
         return texto, None
@@ -98,7 +131,7 @@ def _llamar_groq(prompt: str, api_key: str, max_tokens: int):
                 model=modelo, max_tokens=max_tokens,
                 messages=[{'role': 'user', 'content': prompt}]
             )
-            return response.choices[0].message.content, None
+            return _texto_chat(response), None
         except Exception as e_mod:
             # Modelo decomisionado o inexistente (Groq retira modelos con
             # frecuencia): auto-repararse con el default vigente y GUARDARLO,
@@ -114,7 +147,7 @@ def _llamar_groq(prompt: str, api_key: str, max_tokens: int):
                     messages=[{'role': 'user', 'content': prompt}]
                 )
                 set_config('groq_modelo', _GROQ_MODELO_DEFAULT)
-                return response.choices[0].message.content, None
+                return _texto_chat(response), None
             raise
     except Exception as e:
         err = str(e)
@@ -134,7 +167,9 @@ def _llamar_anthropic(prompt: str, api_key: str, max_tokens: int):
             model=modelo, max_tokens=max_tokens,
             messages=[{'role': 'user', 'content': prompt}]
         )
-        return message.content[0].text, None
+        _anotar_fin(getattr(message, 'stop_reason', None))
+        # Con razonamiento, el primer bloque es «thinking» y no trae texto.
+        return ''.join(getattr(b, 'text', '') or '' for b in message.content), None
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower():
@@ -153,7 +188,7 @@ def _llamar_openai(prompt: str, api_key: str, max_tokens: int):
             model=modelo, max_tokens=max_tokens,
             messages=[{'role': 'user', 'content': prompt}]
         )
-        return response.choices[0].message.content, None
+        return _texto_chat(response), None
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or 'incorrect' in err.lower():
@@ -210,7 +245,7 @@ def _llamar_openrouter(prompt: str, api_key: str, max_tokens: int):
                 messages=[{'role': 'user', 'content': prompt}],
                 extra_headers={'X-Title': 'ingePresupuestos'},
             )
-            return r.choices[0].message.content
+            return _texto_chat(r)
 
         def _es_modelo_muerto(exc) -> bool:
             em = str(exc)
@@ -266,7 +301,7 @@ def _llamar_deepseek(prompt: str, api_key: str, max_tokens: int):
             model=modelo, max_tokens=max_tokens,
             messages=[{'role': 'user', 'content': prompt}]
         )
-        return response.choices[0].message.content, None
+        return _texto_chat(response), None
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or '401' in err:
@@ -298,7 +333,7 @@ def _llamar_qwen(prompt: str, api_key: str, max_tokens: int):
             model=modelo, max_tokens=max_tokens,
             messages=[{'role': 'user', 'content': prompt}]
         )
-        return response.choices[0].message.content, None
+        return _texto_chat(response), None
     except Exception as e:
         err = str(e)
         if 'authentication' in err.lower() or 'invalid' in err.lower() or '401' in err:
@@ -386,6 +421,14 @@ def _gemini_modelo_disponible(client, prefer: str = 'flash') -> str | None:
         return None
 
 
+def _texto_gemini(resp):
+    try:
+        _anotar_fin(resp.candidates[0].finish_reason)
+    except Exception:
+        _anotar_fin(None)
+    return resp.text
+
+
 def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
     try:
         from google import genai
@@ -411,8 +454,18 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
 
         try:
             try:
-                resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
-                return resp.text, None
+                try:
+                    resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
+                except Exception as e_th:
+                    # Hay modelos que no dejan apagar el razonamiento («Budget 0
+                    # is invalid. This model only works in thinking mode»).
+                    if 'thinking' not in str(e_th).lower() \
+                            or 'thinking_config' not in cfg_kwargs:
+                        raise
+                    cfg_kwargs.pop('thinking_config')
+                    cfg = types.GenerateContentConfig(**cfg_kwargs)
+                    resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
+                return _texto_gemini(resp), None
             except Exception as e_503:
                 # «503 UNAVAILABLE: high demand» es pasajero (Marco lo vio el
                 # 8 sep 2026 con la conexión recién probada OK): un reintento
@@ -423,14 +476,14 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
                 _t.sleep(2)
                 try:
                     resp = client.models.generate_content(model=modelo, contents=prompt, config=cfg)
-                    return resp.text, None
+                    return _texto_gemini(resp), None
                 except Exception as e_2:
                     if not _saturado(e_2):
                         raise
                     alt = _gemini_modelo_disponible(client)
                     if alt and alt != modelo:
                         resp = client.models.generate_content(model=alt, contents=prompt, config=cfg)
-                        return resp.text, None
+                        return _texto_gemini(resp), None
                     raise
         except Exception as e_mod:
             # ¿El modelo configurado ya no existe/soporta generación? (típico al
@@ -446,7 +499,7 @@ def _llamar_gemini(prompt: str, api_key: str, max_tokens: int):
                         set_config('gemini_modelo', alt)
                     except Exception:
                         pass
-                    return resp.text, None
+                    return _texto_gemini(resp), None
             raise
     except Exception as e:
         err = str(e)
@@ -485,6 +538,7 @@ def _llamar_ia(prompt: str, api_key: str, max_tokens: int = 1500):
     escribían NULL en la BD (borrando la especificación o la memoria que el
     usuario ya tenía) y los que hacen re.search(texto) morían con TypeError.
     """
+    _local.cortada = False
     proveedor = _proveedor_activo()
     if proveedor == 'ollama':
         texto, error = _llamar_ollama(prompt, max_tokens)
@@ -2466,10 +2520,150 @@ def _estructura_referencia(nombre: str, notas: str = '', excluir_pid=None,
             + "\n".join(lineas) + "\n")
 
 
-def sugerir_partidas_ia(proyecto_id: int) -> tuple:
+# ── Lectura tolerante del JSON de partidas (issue #50) ─────────────────────
+
+_CLAVES_ITEM = ('item', 'ítem', 'codigo', 'código', 'code')
+_CLAVES_DESC = ('descripcion', 'descripción', 'descricao', 'descrição',
+                'description', 'nombre', 'name')
+_CLAVES_UND = ('unidad', 'unidade', 'und', 'un', 'unit')
+_CLAVES_HIJOS = ('partidas', 'subpartidas', 'hijos', 'items', 'children',
+                 'servicos', 'serviços')
+_SIN_UNIDAD = {'', '-', '--', '—', '–', 'n/a', 'na', 'null', 'none', 'título',
+               'titulo'}
+
+
+def _campo(d: dict, claves) -> str:
+    for k in claves:
+        v = d.get(k)
+        if v is not None and not isinstance(v, (dict, list)):
+            return str(v).strip()
+    return ''
+
+
+def _aplanar_partidas(nodo) -> list:
+    """Partidas de un JSON ya leído: {"partidas": […]}, lista suelta o árbol
+    con hijos. Los números sueltos en «item» también valen."""
+    if isinstance(nodo, list):
+        return [p for n in nodo for p in _aplanar_partidas(n)]
+    if not isinstance(nodo, dict):
+        return []
+    out = []
+    item, desc = _campo(nodo, _CLAVES_ITEM), _campo(nodo, _CLAVES_DESC)
+    if item and desc:
+        und = _campo(nodo, _CLAVES_UND)
+        if und.lower() in _SIN_UNIDAD:
+            und = ''
+        out.append({'item': item.rstrip('.'), 'descripcion': desc,
+                    'unidad': und, 'metrado_sugerido': None,
+                    'es_titulo': not und})
+    for v in nodo.values():
+        if isinstance(v, list):
+            out += _aplanar_partidas(v)
+    return out
+
+
+def leer_partidas_json(texto: str) -> list:
+    """Partidas que se puedan rescatar del texto de una IA: JSON limpio, dentro
+    de ```json, con prosa o razonamiento alrededor, o CORTADO a la mitad (se
+    conservan las partidas completas). [] si no hay ninguna."""
+    import json
+    import re
+    t = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', ' ', texto or '',
+               flags=re.S | re.I)
+    dec = json.JSONDecoder()
+    out, vistos, pos = [], set(), 0
+    while True:
+        m = re.compile(r'[\[{]').search(t, pos)
+        if not m:
+            break
+        try:
+            nodo, fin = dec.raw_decode(t, m.start())
+        except ValueError:
+            pos = m.start() + 1          # contenedor cortado: probar dentro
+            continue
+        pos = fin
+        for p in _aplanar_partidas(nodo):
+            clave = (p['item'], p['descripcion'])
+            if clave not in vistos:
+                vistos.add(clave)
+                out.append(p)
+    return out
+
+
+def _llamar_partidas(prompt: str, api_key: str) -> tuple:
+    """Pide la lista, completándola si llega cortada. → (partidas, error, aviso)
+
+    Un presupuesto de 80 partidas pasa de 4000 tokens, y los modelos
+    razonadores gastan además tokens pensando. Groq cuenta el tope pedido
+    contra su cuota por minuto y Ollama corre en el equipo: a esos se les pide
+    menos de una vez y se completa por tandas."""
+    from utils.i18n import tr
+    tope = 4000 if _proveedor_activo() in ('groq', 'ollama') else 8000
+    partidas, vistos = [], set()
+    pregunta, cortada = prompt, False
+    for intento in range(3):
+        text, err = _llamar_ia(pregunta, api_key, max_tokens=tope)
+        cortada = respuesta_cortada()
+        if err and not cortada:
+            if partidas:                 # la 1.ª tanda ya sirve: no perderla
+                break
+            return None, f"Error IA: {err}", ''
+        nuevas = [p for p in leer_partidas_json(text or '')
+                  if p['item'] not in vistos]
+        # Cortada sin «finish_reason» (servidores que no lo informan): el JSON
+        # abre el contenedor y no lo cierra.
+        if nuevas and not cortada and (text or '').strip().rstrip('`').rstrip()[-1:] \
+                not in ('}', ']') and '"partidas"' in (text or ''):
+            cortada = not _json_cerrado(text)
+        vistos.update(p['item'] for p in nuevas)
+        partidas += nuevas
+        if not cortada:
+            if not partidas:
+                inicio = ' '.join((text or '').split())[:160]
+                return None, tr(
+                    "La IA respondió, pero no con la lista de partidas en el "
+                    "formato pedido. Vuelve a intentarlo o prueba otro modelo.\n"
+                    "Respuesta: «{inicio}…»").format(inicio=inicio), ''
+            return partidas, None, ''
+        if not nuevas and partidas:
+            break                        # la tanda no aportó nada: basta
+        if partidas:
+            ya = "\n".join(f"{p['item']} {p['descripcion']}" for p in partidas)
+            pregunta = (f"{prompt}\n\nTu respuesta anterior se cortó. YA TENGO "
+                        f"estas partidas:\n{ya}\n\nDevuelve, en el mismo formato "
+                        "JSON, SOLO las que siguen después de la última (no "
+                        "repitas ninguna). Si ya no falta ninguna, devuelve "
+                        '{"partidas": []}.')
+        else:
+            tope *= 2                    # todo se fue en razonar: más espacio
+    if not partidas:
+        return None, tr("La respuesta de la IA se cortó antes de entregar la lista: "
+                      "el modelo gasta todo el espacio en razonar. Elige en "
+                      "Configuración → Inteligencia artificial un modelo sin "
+                      "razonamiento (por ejemplo uno «flash») y vuelve a "
+                      "intentarlo."), ''
+    return partidas, None, tr(
+        "La respuesta de la IA llegó incompleta: se muestran las {n} partidas "
+        "recibidas. Revisa si falta algún capítulo al final.")
+
+
+def _json_cerrado(text: str) -> bool:
+    import json
+    i = text.rfind('{', 0, text.find('"partidas"'))
+    if i < 0:
+        return True
+    try:
+        json.JSONDecoder().raw_decode(text, i)
+        return True
+    except ValueError:
+        return False
+
+
+def sugerir_partidas_ia(proyecto_id: int, avisos: list | None = None) -> tuple:
     """Pide a la IA una lista de partidas típicas según el nombre + ubicación
-    + modalidad del proyecto. Retorna (lista, error)."""
-    import re, json
+    + modalidad del proyecto. Retorna (lista, error). Si la
+    respuesta llegó incompleta, lo explica en `avisos` (lista del llamador)."""
+    from core.paises import pais_actual, perfil
     api_key = get_config('api_key', '')
     conn = get_db()
     proy = conn.execute(
@@ -2480,7 +2674,8 @@ def sugerir_partidas_ia(proyecto_id: int) -> tuple:
         return None, "Proyecto no encontrado."
 
     nombre    = proy['nombre'] or 'Sin nombre'
-    ubicacion = proy['ubicacion'] or 'Perú'
+    pais      = perfil()['nombre']
+    ubicacion = proy['ubicacion'] or pais
     modalidad = proy['modalidad'] or 'Contrata'
     # Notas del proyecto — el usuario las llena en el form de creación
     try:
@@ -2516,13 +2711,25 @@ def sugerir_partidas_ia(proyecto_id: int) -> tuple:
     except Exception:
         esqueleto_block = ''
 
-    prompt = f"""Eres ingeniero residente experto en presupuestos peruanos. \
+    if pais_actual() == 'PE':
+        experto = 'presupuestos peruanos'
+        terminos = 'Usa terminología técnica peruana estándar (CAPECO, RNE, NTP).'
+    else:
+        experto = f'presupuestos de obra en {pais}'
+        terminos = (f'Usa la terminología y las normas técnicas habituales en '
+                    f'{pais}; no uses nombres ni normas de otro país.')
+        if pais_actual() == 'BR':
+            terminos += (' Escribe las descripciones en portugués de Brasil, '
+                         'pero conserva las claves del JSON como se indican.')
+
+    prompt = f"""Eres ingeniero residente experto en {experto}. \
 A partir del nombre, ubicación y NOTAS del proyecto, genera una LISTA \
 REALISTA de partidas típicas que debería incluir, organizadas jerárquicamente \
 con numeración 01, 01.01, 01.01.01, etc.
 
 DATOS DEL PROYECTO:
 - Nombre: {nombre}
+- País: {pais}
 - Ubicación: {ubicacion}
 - Modalidad: {modalidad}{notas_block}
 {esqueleto_block}{menu_block}
@@ -2545,7 +2752,7 @@ und, pto, glb, etc.
 6. Respeta el orden constructivo: provisionales → preliminares → mov.tierras \
 → concreto simple → estructuras (acero/encofrado/concreto) → albañilería \
 → revoques → instalaciones → acabados → limpieza.
-7. Usa terminología técnica peruana estándar (CAPECO, RNE, NTP).
+7. {terminos}
 
 FORMATO DE RESPUESTA (JSON puro, sin markdown):
 {{
@@ -2558,42 +2765,12 @@ FORMATO DE RESPUESTA (JSON puro, sin markdown):
 
 Responde ÚNICAMENTE con el JSON, sin texto adicional ni bloques markdown."""
 
-    text, err = _llamar_ia(prompt, api_key, max_tokens=4000)
+    partidas, err, aviso = _llamar_partidas(prompt, api_key)
     if err:
-        return None, f"Error IA: {err}"
-    if not text:
-        return None, "La IA no devolvió respuesta."
-
-    text = text.strip()
-    text = re.sub(r'^```(?:json)?\s*', '', text)
-    text = re.sub(r'\s*```$', '', text)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        return None, f"Respuesta IA no es JSON válido: {e}"
-
-    parts = data.get('partidas', []) if isinstance(data, dict) else data
-    if not isinstance(parts, list):
-        return None, "Formato inesperado de respuesta IA."
-
-    out = []
-    for p in parts:
-        if not isinstance(p, dict):
-            continue
-        item = (p.get('item') or '').strip()
-        desc = (p.get('descripcion') or '').strip()
-        und  = (p.get('unidad') or '').strip()
-        if not item or not desc:
-            continue
-        es_titulo = not und  # sin unidad → título
-        out.append({
-            'item': item,
-            'descripcion': desc,
-            'unidad': und,
-            'metrado_sugerido': None,
-            'es_titulo': es_titulo,
-        })
-    return out, None
+        return None, err
+    if aviso and avisos is not None:
+        avisos.append(aviso.replace('{n}', str(len(partidas))))
+    return partidas, None
 
 
 def importar_partidas_sugeridas(proyecto_id: int, partidas: list) -> int:

@@ -12759,6 +12759,10 @@ class _DialogAmpliarSeccion(QDialog):
         return self._texto_resultado
 
 
+# Consultas de IA que siguen en vuelo tras cerrar su diálogo.
+_HILOS_HUERFANOS: set = set()
+
+
 class _WorkerSugerirPartidas(QThread):
     """Sugiere partidas con IA en segundo plano. Incluye TODO el RAG: cargar el
     modelo de embeddings la 1ª vez (~6 s), recuperación y la llamada al LLM. Va
@@ -12769,11 +12773,12 @@ class _WorkerSugerirPartidas(QThread):
     def __init__(self, proyecto_id: int):
         super().__init__()
         self.proyecto_id = proyecto_id
+        self.avisos: list[str] = []
 
     def run(self):
         try:
             from core.ai_specs import sugerir_partidas_ia
-            ps, err = sugerir_partidas_ia(self.proyecto_id)
+            ps, err = sugerir_partidas_ia(self.proyecto_id, self.avisos)
             self.terminado.emit(ps, err or '')
         except Exception as e:
             self.terminado.emit(None, tr("Error inesperado: {e}").format(e=e))
@@ -12921,6 +12926,10 @@ class _DialogSugerirPartidas(QDialog):
         from PySide6.QtWidgets import QMessageBox
         self.btn_ia.setEnabled(True)
         self.btn_ia.setText(tr("🌐  Sugerir con IA"))
+        if err and not err.startswith("Error IA:"):
+            # La conexión funcionó: mandar a revisar la clave despistaría (#50).
+            QMessageBox.warning(self, tr("Sugerir con IA"), err)
+            return
         if err:
             QMessageBox.warning(self, tr("Sugerir con IA"),
                 tr("No se pudo obtener la sugerencia:\n\n{err}\n\nRevisa Configuración → Inteligencia artificial: elige un proveedor (Groq, Gemini y OpenRouter son gratuitos), pega tu clave y pulsa «Probar conexión». O usa una plantilla local mientras tanto.").format(err=err))
@@ -12932,13 +12941,24 @@ class _DialogSugerirPartidas(QDialog):
                 "intentarlo."))
             return
         self._poblar(ps)
+        avisos = getattr(self._worker_sug, 'avisos', None)
+        if avisos:
+            QMessageBox.information(self, tr("Sugerir con IA"), "\n".join(avisos))
 
     def done(self, r):
-        # QDialog + QThread: esperar al worker en vuelo antes de cerrar para no
-        # destruir el hilo con la tarea corriendo (CLAUDE.md). No usar closeEvent.
+        # QDialog + QThread: no destruir el hilo con la tarea corriendo
+        # (CLAUDE.md). Una consulta puede durar minutos (tandas, modelos que
+        # razonan): se espera un momento y, si sigue, se suelta el diálogo y el
+        # hilo termina solo. No usar closeEvent.
         w = getattr(self, '_worker_sug', None)
         if w and w.isRunning():
-            w.wait(15000)
+            try:
+                w.terminado.disconnect(self._on_ia_terminado)
+            except (RuntimeError, TypeError):
+                pass
+            if not w.wait(500):
+                _HILOS_HUERFANOS.add(w)
+                w.finished.connect(lambda w=w: _HILOS_HUERFANOS.discard(w))
         super().done(r)
 
     def _cargar_plantilla(self, idx: int):
