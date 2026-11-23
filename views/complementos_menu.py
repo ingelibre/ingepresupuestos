@@ -19,8 +19,8 @@ from html import escape
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox, QScrollArea,
-                               QProgressDialog)
+    QFileDialog, QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QProgressDialog, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from core.complementos import cargador
 from core.complementos.contexto import Cancelado
