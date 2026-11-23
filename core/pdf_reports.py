@@ -3369,9 +3369,9 @@ def _build_pie_rows(pid: int, cd: float) -> list:
       ''     → rubro normal (GG, Util, IGV, supervisión…)
       'gran' → PRESUPUESTO TOTAL (último)
     """
-    from core.pie import calcular_pie, etiqueta
+    from core.pie import etiqueta, pie_efectivo
     conn = get_db()
-    lineas, total = calcular_pie(conn, pid, cd)
+    lineas, total = pie_efectivo(conn, pid, cd)
     conn.close()
     filas = [('Costo Directo', _rn(cd or 0, get_decimales_ppto()), 'sub')]
     for l in lineas or []:
@@ -3421,13 +3421,13 @@ def _html_gastos_generales(pid: int, proy: dict, totales: dict) -> str:
     (N° personas × tiempo × %participación × precio) y los subtotales que
     componen el pie del presupuesto."""
     o, od, _os = _brand_colors()
-    from core.exporter import _calcular_rubros_pie
+    from core.pie import pie_efectivo
     sym = _moneda_simbolo(proy.get('moneda') or 'Soles')
     dec = get_decimales_ppto()
     cd  = totales.get('cd', 0) or 0
 
     conn = get_db()
-    rubros_pie, total_final = _calcular_rubros_pie(conn, pid, cd)
+    rubros_pie, total_final = pie_efectivo(conn, pid, cd)
 
     parts = ['<h2>Desagregado del Pie de Presupuesto</h2>']
 

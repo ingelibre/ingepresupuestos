@@ -1214,12 +1214,11 @@ def calcular_totales(proyecto_id):
         subtotal = subs[-1] if subs else cd + gf + utilidad
     else:
         # Fallback: fórmula simple desde campos del proyecto
-        n = _DECIMALES_PPTO
-        gf = _rn(cd * (proyecto['gf_pct'] or 0) / 100, n)
-        utilidad = _rn(cd * (proyecto['utilidad_pct'] or 0) / 100, n)
-        subtotal = _rn(cd + gf + utilidad, n)
-        igv = _rn(subtotal * (proyecto['igv_pct'] or 0) / 100, n)
-        total_obra = _rn(subtotal + igv, n)
+        from core.pie import lineas_simples
+        simples, total_obra = lineas_simples(proyecto, cd)
+        val = {l['codigo']: l['valor'] for l in simples}
+        gf, utilidad = val.get('GG', 0.0), val.get('UTIL', 0.0)
+        subtotal, igv = val['SUB'], val.get('IGV', 0.0)
 
     conn2.close()
     return items_con_total, {

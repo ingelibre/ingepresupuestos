@@ -2160,7 +2160,8 @@ def _hoja_gastos_generales(wb, proyecto_id):
     proyecto  = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     _, totales = calcular_totales(proyecto_id)
     cd        = totales['cd']
-    rubros_pie, total_final = _calcular_rubros_pie(conn, proyecto_id, cd)
+    from core.pie import pie_efectivo
+    rubros_pie, total_final = pie_efectivo(conn, proyecto_id, cd)
 
     ws = wb.create_sheet("Pie de Presupuesto")
     ws.page_setup.paperSize = ws.PAPERSIZE_A4

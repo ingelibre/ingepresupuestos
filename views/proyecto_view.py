@@ -3760,10 +3760,10 @@ class ProyectoView(QWidget):
         all_subs=True usa el CD global del proyecto (todos los subpresupuestos)."""
         # El cálculo es `core.pie.calcular_pie`, el mismo del PDF y el Excel
         # (issue #3: estaba copiado cinco veces y ninguna redondeaba).
-        from core.pie import calcular_pie
+        from core.pie import pie_efectivo
         cd = self._total_proyecto(all_subs=all_subs)
         conn = get_db()
-        lineas, total = calcular_pie(conn, self.pid, cd)
+        lineas, total = pie_efectivo(conn, self.pid, cd)
         conn.close()
         # En mayúsculas como el resto de filas y como lo imprimen PDF, Excel
         # y Word (David Ramos, 16 sep 2026), y en negrita como un subtotal,
