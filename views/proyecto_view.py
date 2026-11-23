@@ -10180,7 +10180,7 @@ class ProyectoView(QWidget):
         a_print.triggered.connect(self._archivo_imprimir)
         menu.addAction(a_print)
 
-        a_db = QAction(tr("Exportar") + " (.db)…", self)
+        a_db = QAction(tr("Guardar copia (.db)") + "…", self)
         a_db.triggered.connect(self._archivo_exportar_db)
         menu.addAction(a_db)
 
@@ -10529,7 +10529,7 @@ class ProyectoView(QWidget):
         safe = _re.sub(r'[\\/:*?"<>|]', '_', nombre).strip() or f"proyecto_{self.pid}"
         sugerido = f"{safe}.db"
         ruta, _f = QFileDialog.getSaveFileName(
-            self, tr("Exportar proyecto a SQLite (.db)"), sugerido,
+            self, tr("Guardar copia (.db)"), sugerido,
             tr("Base de datos SQLite (*.db)")
         )
         if not ruta:
@@ -10543,15 +10543,15 @@ class ProyectoView(QWidget):
         except Exception as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(
-                self, tr("Exportar proyecto"),
-                tr("No se pudo exportar el proyecto:\n{e}").format(e=e)
+                self, tr("Guardar copia (.db)"),
+                tr("No se pudo guardar la copia:\n{e}").format(e=e)
             )
             return
         QApplication.restoreOverrideCursor()
 
         res = QMessageBox.information(
-            self, tr("Exportar proyecto"),
-            tr("Proyecto exportado correctamente:\n\n{ruta}\n\nPuedes importarlo en otra instalación desde el menu Importar → ingePresupuestos (.db).").format(ruta=ruta),
+            self, tr("Guardar copia (.db)"),
+            tr("Copia guardada:\n\n{ruta}\n\nPuedes abrirla en otra instalación desde Archivo → Abrir → Desde archivo (.db).").format(ruta=ruta),
             QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok,
             QMessageBox.StandardButton.Ok,
         )
