@@ -37,7 +37,7 @@ from core.config import DB_PATH
 from widgets.num_item import NumItem
 from core.database import (
     get_db, _r2, _rn, _recalcular_pu, calcular_totales,
-    get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
+    get_acu_hojas, get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
     _siguiente_codigo_inei,
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
@@ -415,7 +415,7 @@ class _SeleccionarRecursoDialog(QDialog):
             " FROM acu_items ai"
             " JOIN recursos r ON r.id = ai.recurso_id"
             " JOIN partidas p ON p.id = ai.partida_id"
-            " WHERE p.proyecto_id=? AND r.id != ?"
+            " WHERE p.proyecto_id=? AND r.id != ? AND ai.sub_partida_id IS NULL"
             " ORDER BY r.descripcion",
             (self._proyecto_id, self._excluir)
         ).fetchall()
@@ -1188,7 +1188,7 @@ class _PresupuestoTree(QTreeWidget):
         if pid is None or sub_id is None:
             return 0
         row = conn.execute(
-            "SELECT COUNT(*) FROM partidas "
+            "SELECT COUNT(*) FROM partidas_ppto "
             "WHERE proyecto_id=? AND nivel=1 AND ("
             "  sub_presupuesto_id IS NULL OR "
             "  sub_presupuesto_id IN ("
@@ -2087,19 +2087,19 @@ class ProyectoView(QWidget):
         conn = get_db()
         if all_subs:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0",
                 (self.pid,)
             ).fetchall()
         elif self._sub_ppto_id is None:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 AND sub_presupuesto_id IS NULL",
                 (self.pid,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 AND sub_presupuesto_id=?",
                 (self.pid, self._sub_ppto_id)
             ).fetchall()
@@ -5301,7 +5301,7 @@ class ProyectoView(QWidget):
         try:
             conn = get_db()
             n = conn.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=?",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=?",
                 (self.pid,)).fetchone()[0]
             conn.close()
         except Exception:
@@ -5323,12 +5323,12 @@ class ProyectoView(QWidget):
         conn = get_db()
         if self._sub_ppto_id is None:
             rows = conn.execute(
-                "SELECT * FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id IS NULL ORDER BY item",
+                "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id IS NULL ORDER BY item",
                 (self.pid,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id=? ORDER BY item",
+                "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id=? ORDER BY item",
                 (self.pid, self._sub_ppto_id)
             ).fetchall()
         # IDs de partidas con planilla de metrados
@@ -6074,9 +6074,10 @@ class ProyectoView(QWidget):
         """Actualiza acu_items.precio en el proyecto y recalcula partidas afectadas."""
         try:
             conn = get_db()
+            # sub-partidas: incluidas (no es un listado del presupuesto).
             conn.execute(
                 """UPDATE acu_items SET precio=?
-                   WHERE recurso_id=?
+                   WHERE recurso_id=? AND sub_partida_id IS NULL
                    AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
                 (nuevo_precio, recurso_id, self.pid)
             )
@@ -6360,7 +6361,7 @@ class ProyectoView(QWidget):
         self._limpiar_resaltado_insumo()
         conn = get_db()
         ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT ai.partida_id FROM acu_items ai "
+            "SELECT DISTINCT ai.partida_id FROM acu_hojas ai "
             "JOIN partidas p ON p.id = ai.partida_id "
             "WHERE ai.recurso_id=? AND p.proyecto_id=?",
             (recurso_id, self.pid)).fetchall()]
@@ -6606,12 +6607,19 @@ class ProyectoView(QWidget):
         conn = get_db()
         dm = get_decimales_metrado()
         rows = conn.execute(
-            "SELECT p.id, p.metrado FROM partidas p"
+            "SELECT p.id, p.metrado FROM partidas_ppto p"
             " WHERE p.proyecto_id=? AND p.es_titulo=0" + cond_sub,
             (self.pid, *par_sub)).fetchall()
         tot = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
+        cache_sub: dict = {}
         for r in rows:
-            _, tt = get_acu_items(conn, r['id'])
+            # Con las sub-partidas abiertas en sus insumos, como el Resumen
+            # del PDF y del Word (que suman `get_insumos_proyecto`).
+            tt: dict = {}
+            for it in get_acu_hojas(conn, r['id'], cache_sub):
+                k = it['tipo'] if it['tipo'] in tot else (
+                    'EQ' if (it['unidad'] or '').startswith('%') else 'MAT')
+                tt[k] = tt.get(k, 0.0) + (it['parcial'] or 0)
             m = round(r['metrado'] or 0, dm)
             for k, v in tt.items():
                 tot[k] = tot.get(k, 0.0) + (v or 0) * m
@@ -6660,7 +6668,7 @@ class ProyectoView(QWidget):
         top5 = conn.execute(
             f"""SELECT item, descripcion,
                        ROUND(ROUND(COALESCE(metrado,0), {_dm}) * COALESCE(precio_unitario,0), {_dec}) as total
-               FROM partidas p WHERE proyecto_id=? AND es_titulo=0""" + cond_sub + """
+               FROM partidas_ppto p WHERE proyecto_id=? AND es_titulo=0""" + cond_sub + """
                ORDER BY total DESC LIMIT 5""",
             (self.pid, *par_sub)
         ).fetchall()
@@ -6800,6 +6808,7 @@ class ProyectoView(QWidget):
 
     def recalcular(self):
         conn = get_db()
+        # sub-partidas: incluidas (no es un listado del presupuesto).
         partidas = conn.execute(
             "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0", (self.pid,)
         ).fetchall()
@@ -7636,10 +7645,10 @@ class ProyectoView(QWidget):
         new_id = cur.lastrowid
         for ai in conn.execute("SELECT * FROM acu_items WHERE partida_id=?", (part_id,)).fetchall():
             conn.execute(
-                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio, orden)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio, orden,"
+                " sub_partida_id) VALUES (?,?,?,?,?,?,?)",
                 (new_id, ai['recurso_id'], ai['cuadrilla'], ai['cantidad'], ai['precio'],
-                 ai['orden'])
+                 ai['orden'], ai['sub_partida_id'])
             )
         conn.commit()
         conn.close()
@@ -8131,9 +8140,10 @@ class ProyectoView(QWidget):
         elif col == 5:  # precio — actualiza todo el recurso en el proyecto
             rid  = row_data['recurso_id']
             poid = row_data['proy_id']
+            # sub-partidas: incluidas (no es un listado del presupuesto).
             conn.execute(
                 """UPDATE acu_items SET precio=? WHERE recurso_id=?
-                   AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
+                   AND sub_partida_id IS NULL AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
                 (valor, rid, poid)
             )
             afectadas = conn.execute(
@@ -8299,8 +8309,8 @@ class ProyectoView(QWidget):
                 continue
             acu_id = self._acu_row_ids[r]
             row = conn.execute(
-                "SELECT recurso_id, cuadrilla, cantidad, COALESCE(precio,0) as precio "
-                "FROM acu_items WHERE id=?", (acu_id,)
+                "SELECT recurso_id, cuadrilla, cantidad, COALESCE(precio,0) as precio,"
+                " sub_partida_id FROM acu_items WHERE id=?", (acu_id,)
             ).fetchone()
             if row:
                 items.append(dict(row))
@@ -8330,10 +8340,22 @@ class ProyectoView(QWidget):
         rend    = partida['rendimiento'] or 1
         es_global = _partida_global(partida['unidad'])
 
+        sin_pegar = 0   # sub-partidas que no caben aquí
         for it in self._acu_clipboard:
             rec = conn.execute("SELECT tipo, unidad FROM recursos WHERE id=?",
                                (it['recurso_id'],)).fetchone()
             if not rec:
+                continue
+            if it.get('sub_partida_id'):
+                from core.subpartidas import enlazar_copia
+                try:
+                    entro = enlazar_copia(conn, self._partida_actual_id,
+                                          it['sub_partida_id'], it['cantidad'] or 0,
+                                          partida['proyecto_id'])
+                except ValueError:
+                    entro = False
+                if not entro:
+                    sin_pegar += 1
                 continue
             cuad = it['cuadrilla'] or 0
             cant = it['cantidad'] or 0
@@ -8557,15 +8579,19 @@ class ProyectoView(QWidget):
         conn.execute("DELETE FROM biblioteca_acu_items WHERE cu_id=?", (cu_id,))
         acu_items = conn.execute(
             "SELECT a.recurso_id, a.cuadrilla, a.cantidad, "
-            "       COALESCE(a.precio, r.precio) AS precio "
+            "       COALESCE(a.precio, r.precio) AS precio, a.sub_partida_id "
             "FROM acu_items a JOIN recursos r ON r.id = a.recurso_id "
             "WHERE a.partida_id=?", (self._partida_actual_id,)
         ).fetchall()
+        # La biblioteca no tiene sub-partidas: ahí la línea entra aplanada.
+        from core.subpartidas import recurso_equivalente
         for it in acu_items:
+            rid_bib = (recurso_equivalente(conn, it['sub_partida_id'])
+                       if it['sub_partida_id'] else it['recurso_id'])
             conn.execute(
                 "INSERT INTO biblioteca_acu_items (cu_id, recurso_id, cuadrilla, cantidad, precio) "
                 "VALUES (?,?,?,?,?)",
-                (cu_id, it['recurso_id'], it['cuadrilla'], it['cantidad'], it['precio'])
+                (cu_id, rid_bib, it['cuadrilla'], it['cantidad'], it['precio'])
             )
         conn.commit()
         conn.close()
@@ -10474,7 +10500,7 @@ class ProyectoView(QWidget):
             _, totales = calcular_totales(self.pid)
             conn_s = _gdb()
             n_part = conn_s.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
                 (self.pid,)
             ).fetchone()[0]
             # Proyecto vacío → ofrecer sugerir partidas (IA o plantilla)
@@ -10494,7 +10520,7 @@ class ProyectoView(QWidget):
                 )
                 return
             top = conn_s.execute(
-                "SELECT item, descripcion FROM partidas "
+                "SELECT item, descripcion FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 "
                 "ORDER BY (COALESCE(metrado,0) * COALESCE(precio_unitario,0)) DESC "
                 "LIMIT 1",
@@ -10551,12 +10577,12 @@ class ProyectoView(QWidget):
             # Inspeccionar conteos rápidos en BD
             conn = get_db()
             n_sin_metr = conn.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? "
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? "
                 "AND es_titulo=0 AND (metrado IS NULL OR metrado=0)",
                 (self.pid,)
             ).fetchone()[0]
             n_sin_acu = conn.execute(
-                "SELECT COUNT(*) FROM partidas p WHERE p.proyecto_id=? "
+                "SELECT COUNT(*) FROM partidas_ppto p WHERE p.proyecto_id=? "
                 "AND p.es_titulo=0 AND NOT EXISTS "
                 "(SELECT 1 FROM acu_items WHERE partida_id=p.id)",
                 (self.pid,)
@@ -10618,7 +10644,7 @@ class ProyectoView(QWidget):
                    FROM acu_items ai
                      JOIN partidas p ON p.id = ai.partida_id
                      JOIN recursos r ON r.id = ai.recurso_id
-                   WHERE p.proyecto_id = ?
+                   WHERE p.proyecto_id = ? AND ai.sub_partida_id IS NULL
                      AND SUBSTR(r.unidad,1,1) != '%'
                    GROUP BY ai.recurso_id
                    HAVING variantes > 1
@@ -10658,7 +10684,7 @@ class ProyectoView(QWidget):
             # comparando contra la cuenta guardada por proyecto
             conn_xp = get_db()
             cnt_total = conn_xp.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=?",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=?",
                 (self.pid,)
             ).fetchone()[0]
             conn_xp.close()
@@ -11801,7 +11827,7 @@ class ProyectoView(QWidget):
             return
         conn = get_db()
         n_part = conn.execute(
-            "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id=?",
+            "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id=?",
             (self.pid, sub_id)
         ).fetchone()[0]
         otros = conn.execute(
@@ -12381,7 +12407,7 @@ class _WorkerEspecsTodo(QThread):
             from core.database import get_db as _get_db
             conn = _get_db()
             partidas = conn.execute(
-                "SELECT id, item, descripcion, especificaciones FROM partidas "
+                "SELECT id, item, descripcion, especificaciones FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
                 (self.proyecto_id,)
             ).fetchall()

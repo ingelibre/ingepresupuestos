@@ -279,7 +279,7 @@ class MetradosView(QWidget):
         self._proy = dict(proy)
 
         todas = conn.execute(
-            "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item",
+            "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item",
             (self.pid,)
         ).fetchall()
 
@@ -332,11 +332,11 @@ class MetradosView(QWidget):
         partida con metrados normales NO se reclasifica."""
         con_acero = {r['partida_id'] for r in conn.execute(
             "SELECT DISTINCT partida_id FROM acero_detalle "
-            "WHERE partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)",
+            "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
             (self.pid,)).fetchall()}
         con_met = {r['partida_id'] for r in conn.execute(
             "SELECT DISTINCT partida_id FROM metrados_detalle "
-            "WHERE partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)",
+            "WHERE partida_id IN (SELECT id FROM partidas_ppto WHERE proyecto_id=?)",
             (self.pid,)).fetchall()}
         ids = set(con_acero)
         for p in todas:
@@ -458,7 +458,7 @@ class MetradosView(QWidget):
             return
         conn = get_db()
         todas = conn.execute(
-            "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (self.pid,)
+            "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (self.pid,)
         ).fetchall()
         # Set de partidas de acero (dato + heurística), consistente con cargar().
         acero_ids = getattr(self, '_acero_partida_ids', None)

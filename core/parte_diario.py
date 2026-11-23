@@ -354,14 +354,12 @@ def estimar_consumo_dia(parte_id: int, enteros: bool = False) -> dict[str, list[
             "WHERE parte_id=? AND metrado_dia>0", (parte_id,)).fetchall()
         buckets = {'mo': {}, 'mat': {}, 'eq': {}, 'sc': {}}
         for m in metr:
-            part = conn.execute("SELECT rendimiento FROM partidas WHERE id=?",
-                               (m['partida_id'],)).fetchone()
-            rend = (part['rendimiento'] if part and part['rendimiento'] else 1) or 1
             M = m['metrado_dia'] or 0
             items = conn.execute(
                 "SELECT ai.recurso_id, ai.cuadrilla, ai.cantidad, r.descripcion, "
-                "r.unidad, r.tipo FROM acu_items ai "
+                "r.unidad, r.tipo, ai.factor, o.rendimiento FROM acu_hojas ai "
                 "JOIN recursos r ON r.id = ai.recurso_id "
+                "JOIN partidas o ON o.id = ai.origen_id "
                 "WHERE ai.partida_id=?", (m['partida_id'],)).fetchall()
             for it in items:
                 if (it['unidad'] or '').strip().startswith('%'):
@@ -369,7 +367,7 @@ def estimar_consumo_dia(parte_id: int, enteros: bool = False) -> dict[str, list[
                 clase = _TIPO_CLASE.get(it['tipo'], 'mat')
                 if clase == 'mo':
                     cu = it['cuadrilla'] or 0
-                    aporte = (cu / rend * M) if cu else (it['cantidad'] or 0) * M
+                    aporte = (cu / (it['rendimiento'] or 1) * it['factor'] * M) if cu else (it['cantidad'] or 0) * M
                 else:
                     aporte = (it['cantidad'] or 0) * M
                 d = buckets[clase]
@@ -565,7 +563,7 @@ def partidas_proyecto(proyecto_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT id, item, descripcion, unidad, nivel, es_titulo, metrado, "
             "precio_unitario, sub_presupuesto_id "
-            "FROM partidas WHERE proyecto_id=? ORDER BY item",
+            "FROM partidas_ppto WHERE proyecto_id=? ORDER BY item",
             (proyecto_id,)).fetchall()
         return [dict(r) for r in rows]
     finally:

@@ -114,7 +114,7 @@ def insumos_sin_indice(limite: int | None = None, conn=None,
             filtro_proy = (
                 " AND r.id IN (SELECT ai.recurso_id FROM acu_items ai "
                 "              JOIN partidas p ON p.id = ai.partida_id "
-                "             WHERE p.proyecto_id = ?)")
+                "             WHERE p.proyecto_id = ? AND ai.sub_partida_id IS NULL)")
         sql = (f"SELECT r.id, r.codigo, r.descripcion, r.tipo, r.unidad, "
                f"COALESCE(r.precio,0) AS precio, "
                f"COALESCE(r.indice_inei,'') AS indice_actual "

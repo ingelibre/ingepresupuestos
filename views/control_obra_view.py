@@ -525,7 +525,7 @@ class _ValorizacionesPanel(QWidget):
         prow = conn.execute("SELECT estado FROM proyectos WHERE id=?",
                             (self.pid,)).fetchone()
         estado = ((prow['estado'] if prow else '') or '').lower()
-        n = conn.execute("SELECT COUNT(*) c FROM partidas WHERE proyecto_id=? "
+        n = conn.execute("SELECT COUNT(*) c FROM partidas_ppto WHERE proyecto_id=? "
                          "AND es_titulo=0", (self.pid,)).fetchone()['c']
         conn.close()
         # El aviso de estado lo da el banner global de ControlObraView.

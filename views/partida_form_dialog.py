@@ -59,7 +59,7 @@ class PartidaFormDialog(QDialog):
     def _cargar_grupos(self) -> list[str]:
         conn = get_db()
         rows = conn.execute(
-            "SELECT DISTINCT grupo FROM partidas WHERE proyecto_id=? AND grupo!='' ORDER BY grupo",
+            "SELECT DISTINCT grupo FROM partidas_ppto WHERE proyecto_id=? AND grupo!='' ORDER BY grupo",
             (self.pid,)
         ).fetchall()
         conn.close()

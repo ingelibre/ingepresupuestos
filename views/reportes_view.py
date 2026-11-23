@@ -1988,7 +1988,7 @@ class ReportesView(QWidget):
             from core.database import get_db as _gdb
             cn = _gdb()
             cnt_part = cn.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
                 (self.pid,)).fetchone()[0] or 0
             cn.close()
             if cnt_part == 0:

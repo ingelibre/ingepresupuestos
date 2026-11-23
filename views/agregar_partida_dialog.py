@@ -506,7 +506,7 @@ class AgregarPartidaDialog(QDialog):
         try:
             conn = get_db()
             for r in conn.execute(
-                "SELECT DISTINCT grupo FROM partidas WHERE proyecto_id=? AND grupo IS NOT NULL AND grupo!=''",
+                "SELECT DISTINCT grupo FROM partidas_ppto WHERE proyecto_id=? AND grupo IS NOT NULL AND grupo!=''",
                 (self.pid,)
             ).fetchall():
                 grupos.add(r[0])
@@ -953,7 +953,7 @@ class AgregarPartidaDialog(QDialog):
         - Nada seleccionado          → raíz: "01", "02"…
         """
         existing = {r[0] for r in conn.execute(
-            "SELECT item FROM partidas WHERE proyecto_id=?", (self.pid,)
+            "SELECT item FROM partidas_ppto WHERE proyecto_id=?", (self.pid,)
         ).fetchall()}
 
         ctx         = self._contexto_item
@@ -1001,13 +1001,13 @@ class AgregarPartidaDialog(QDialog):
         """
         if self._sub_ppto_id is None:
             rows = conn.execute(
-                "SELECT item FROM partidas "
+                "SELECT item FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=1 AND sub_presupuesto_id IS NULL",
                 (self.pid,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT item FROM partidas "
+                "SELECT item FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=1 AND sub_presupuesto_id=?",
                 (self.pid, self._sub_ppto_id)
             ).fetchall()

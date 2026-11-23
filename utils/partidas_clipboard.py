@@ -43,7 +43,7 @@ def _serializar_partida(conn, part_id: int) -> dict:
 
     # ACU items con descripción/tipo/unidad del recurso
     acu = conn.execute(
-        """SELECT ai.cuadrilla, ai.cantidad, ai.orden,
+        """SELECT ai.cuadrilla, ai.cantidad, ai.orden, ai.sub_partida_id,
                   COALESCE(ai.precio, r.precio, 0) AS precio,
                   r.codigo, r.descripcion, r.tipo, r.unidad, r.indice_inei
            FROM acu_items ai JOIN recursos r ON r.id = ai.recurso_id
@@ -51,6 +51,10 @@ def _serializar_partida(conn, part_id: int) -> dict:
         (part_id,)
     ).fetchall()
     out['acu_items'] = [dict(r) for r in acu]
+    # La sub-partida viaja entera con la línea que la usa (issue #23).
+    for ai in out['acu_items']:
+        if ai.get('sub_partida_id'):
+            ai['sub_partida'] = _serializar_partida(conn, ai['sub_partida_id'])
 
     out['metrados_detalle'] = [dict(r) for r in conn.execute(
         "SELECT * FROM metrados_detalle WHERE partida_id=? ORDER BY orden",
@@ -95,7 +99,7 @@ def _subarbol_ids(conn, root_id: int) -> list[int]:
     pref = root['item'] + '.'
     if sub is None:
         rows = conn.execute(
-            "SELECT id FROM partidas "
+            "SELECT id FROM partidas_ppto "
             "WHERE proyecto_id=? AND sub_presupuesto_id IS NULL "
             "  AND (item=? OR item LIKE ?) "
             "ORDER BY item",
@@ -103,7 +107,7 @@ def _subarbol_ids(conn, root_id: int) -> list[int]:
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id FROM partidas "
+            "SELECT id FROM partidas_ppto "
             "WHERE proyecto_id=? AND sub_presupuesto_id=? "
             "  AND (item=? OR item LIKE ?) "
             "ORDER BY item",
@@ -155,13 +159,13 @@ def copiar_subppto(conn, pid_origen: int, sub_ppto_id: int | None,
     global _SUBPPTO_CLIP
     if sub_ppto_id is None:
         rows = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? "
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? "
             "AND sub_presupuesto_id IS NULL AND nivel=1 ORDER BY item",
             (pid_origen,)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? "
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? "
             "AND sub_presupuesto_id=? AND nivel=1 ORDER BY item",
             (pid_origen, sub_ppto_id)
         ).fetchall()
@@ -209,14 +213,14 @@ def _siguiente_root(conn, pid_destino: int, sub_id: int | None) -> int:
     """Siguiente número de partida raíz disponible (CAST a int)."""
     if sub_id is None:
         row = conn.execute(
-            "SELECT MAX(CAST(item AS INTEGER)) FROM partidas "
+            "SELECT MAX(CAST(item AS INTEGER)) FROM partidas_ppto "
             "WHERE proyecto_id=? AND sub_presupuesto_id IS NULL "
             "  AND instr(item,'.')=0",
             (pid_destino,)
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT MAX(CAST(item AS INTEGER)) FROM partidas "
+            "SELECT MAX(CAST(item AS INTEGER)) FROM partidas_ppto "
             "WHERE proyecto_id=? AND sub_presupuesto_id=? "
             "  AND instr(item,'.')=0",
             (pid_destino, sub_id)
@@ -280,6 +284,25 @@ def _resolve_recurso_dst(conn, codigo: str, descripcion: str, tipo: str,
     return c.lastrowid
 
 
+def _pegar_subpartida(conn, sub: dict, pid_destino: int, hechas: dict) -> int:
+    """La sub-partida serializada, en el proyecto destino (id). Reúsa la que
+    ya haya con la misma ficha y composición; si no, la crea."""
+    from core import subpartidas as SP
+    if sub['id'] in hechas:
+        return hechas[sub['id']]
+    items = [{'recurso_id': _resolve_recurso_dst(
+                  conn, i.get('codigo') or '', i.get('descripcion') or '',
+                  i.get('tipo') or 'MAT', i.get('unidad') or 'und',
+                  float(i.get('precio') or 0)),
+              'cuadrilla': i.get('cuadrilla'), 'cantidad': i.get('cantidad'),
+              'precio': i.get('precio')} for i in sub.get('acu_items') or []]
+    sid = (SP._gemela(conn, pid_destino, sub['descripcion'], sub['unidad'], items)
+           or SP._crear_con_items(conn, pid_destino, sub['descripcion'],
+                                  sub['unidad'], sub.get('rendimiento'), items))
+    hechas[sub['id']] = sid
+    return sid
+
+
 def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
           contexto_item: str | None = None,
           contexto_es_titulo: bool = False) -> list[int]:
@@ -294,9 +317,10 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
         return []
 
     nuevos_root_ids: list[int] = []
+    subs_pegadas: dict = {}   # id de la sub-partida en el origen → en el destino
 
     existing = {r[0] for r in conn.execute(
-        "SELECT item FROM partidas WHERE proyecto_id=?", (pid_destino,)
+        "SELECT item FROM partidas_ppto WHERE proyecto_id=?", (pid_destino,)
     ).fetchall()}
 
     if contexto_item and contexto_es_titulo:
@@ -381,7 +405,21 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
                 nuevos_root_ids.append(new_pid)
 
             # ACU items
+            con_subs = False
             for ai in p.get('acu_items') or []:
+                if ai.get('sub_partida'):
+                    from core.database import _recalcular_pu
+                    from core.subpartidas import enlazar
+                    sid = _pegar_subpartida(conn, ai['sub_partida'],
+                                            pid_destino, subs_pegadas)
+                    enlazar(conn, new_pid, sid, ai.get('cantidad') or 0,
+                            ai.get('orden'))
+                    # Su costo puede ser otro aquí (precios del proyecto): solo
+                    # entonces cambia el PU de la partida pegada.
+                    pu = conn.execute("SELECT precio_unitario FROM partidas"
+                                      " WHERE id=?", (sid,)).fetchone()[0] or 0
+                    con_subs |= abs(pu - float(ai.get('precio') or 0)) > 0.005
+                    continue
                 rec_id = _resolve_recurso_dst(
                     conn, ai.get('codigo') or '',
                     ai.get('descripcion') or '',
@@ -401,6 +439,9 @@ def pegar(conn, pid_destino: int, sub_ppto_id: int | None,
                     (new_pid, rec_id, ai.get('cuadrilla'),
                      ai.get('cantidad'), precio_dst, ai.get('orden'))
                 )
+
+            if con_subs:
+                _recalcular_pu(conn, new_pid)
 
             # Metrados detalle
             for m in p.get('metrados_detalle') or []:
