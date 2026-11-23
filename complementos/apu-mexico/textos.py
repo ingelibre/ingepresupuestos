@@ -2,239 +2,92 @@
 """Textos en inglés y portugués; el español es la clave."""
 from ingepresupuestos import api
 
-TEXTOS = {'en': {'Indirectos de oficina': 'Office overhead',
-        'Indirectos de campo': 'Site overhead',
-        'Financiamiento': 'Financing',
-        'Utilidad': 'Profit',
-        'Cargos adicionales': 'Additional charges',
-        'MATERIALES': 'MATERIALS',
-        'MANO DE OBRA': 'LABOR',
-        'HERRAMIENTA Y EQUIPO': 'TOOLS AND EQUIPMENT',
-        'SUBCONTRATOS Y OTROS': 'SUBCONTRACTS AND OTHER',
-        'Porcentajes del sobrecosto…': 'Markup percentages…',
-        'Porcentajes del sobrecosto': 'Markup percentages',
-        'Indirectos, financiamiento, utilidad y cargos de este proyecto': 'Overhead, '
-                                                                          'financing, '
-                                                                          'profit and '
-                                                                          'charges for '
-                                                                          'this '
-                                                                          'project',
-        'Matriz de precio unitario': 'Unit price matrix',
-        'No cambia el total del presupuesto': 'Does not change the budget total',
-        'Escribe los porcentajes de tu contrato o licitación; el programa no propone ninguno. Los indirectos van sobre el costo directo; cada cargo siguiente, sobre lo acumulado.': 'Enter '
-                                                                                                                                                                                     'the '
-                                                                                                                                                                                     'percentages '
-                                                                                                                                                                                     'from '
-                                                                                                                                                                                     'your '
-                                                                                                                                                                                     'contract '
-                                                                                                                                                                                     'or '
-                                                                                                                                                                                     'bid; '
-                                                                                                                                                                                     'the '
-                                                                                                                                                                                     'program '
-                                                                                                                                                                                     'suggests '
-                                                                                                                                                                                     'none. '
-                                                                                                                                                                                     'Overhead '
-                                                                                                                                                                                     'applies '
-                                                                                                                                                                                     'to '
-                                                                                                                                                                                     'the '
-                                                                                                                                                                                     'direct '
-                                                                                                                                                                                     'cost; '
-                                                                                                                                                                                     'each '
-                                                                                                                                                                                     'later '
-                                                                                                                                                                                     'charge, '
-                                                                                                                                                                                     'to '
-                                                                                                                                                                                     'the '
-                                                                                                                                                                                     'running '
-                                                                                                                                                                                     'total.',
-        'El presupuesto no tiene partidas.': 'The budget has no items.',
-        'Este reporte no cambia el presupuesto: muestra el sobrecosto dentro de cada precio unitario.': 'This '
-                                                                                                        'report '
-                                                                                                        'does '
-                                                                                                        'not '
-                                                                                                        'change '
-                                                                                                        'the '
-                                                                                                        'budget: '
-                                                                                                        'it '
-                                                                                                        'shows '
-                                                                                                        'the '
-                                                                                                        'markup '
-                                                                                                        'inside '
-                                                                                                        'each '
-                                                                                                        'unit '
-                                                                                                        'price.',
-        'Todos los porcentajes están en 0. Escríbelos en Complementos → Porcentajes del sobrecosto.': 'All '
-                                                                                                      'percentages '
-                                                                                                      'are '
-                                                                                                      '0. '
-                                                                                                      'Enter '
-                                                                                                      'them '
-                                                                                                      'in '
-                                                                                                      'Add-ons '
-                                                                                                      '→ '
-                                                                                                      'Markup '
-                                                                                                      'percentages.',
-        'Subtotal': 'Subtotal',
-        'Ajuste de redondeo': 'Rounding adjustment',
-        'COSTO DIRECTO': 'DIRECT COST',
-        'PRECIO UNITARIO': 'UNIT PRICE',
-        'Unidad': 'Unit',
-        'Cantidad': 'Quantity',
-        'Importe': 'Amount',
-        'TOTAL': 'TOTAL',
-        'Catálogo de conceptos': 'Schedule of items',
-        'Clave': 'Code',
-        'Concepto': 'Item',
-        'P. unitario': 'Unit price',
-        'Costo': 'Cost',
-        'Manda el precio unitario redondeado: el total es la suma de los importes.': 'The '
-                                                                                     'rounded '
-                                                                                     'unit '
-                                                                                     'price '
-                                                                                     'rules: '
-                                                                                     'the '
-                                                                                     'total '
-                                                                                     'is '
-                                                                                     'the '
-                                                                                     'sum '
-                                                                                     'of '
-                                                                                     'the '
-                                                                                     'amounts.',
-        'Total del catálogo': 'Schedule total',
-        'Pie del presupuesto sin impuestos': 'Budget footer before tax',
-        'Diferencia': 'Difference',
-        'La diferencia puede venir del redondeo o de que los porcentajes de este reporte no son los del pie.': 'The '
-                                                                                                               'difference '
-                                                                                                               'may '
-                                                                                                               'come '
-                                                                                                               'from '
-                                                                                                               'rounding '
-                                                                                                               'or '
-                                                                                                               'from '
-                                                                                                               'this '
-                                                                                                               "report's "
-                                                                                                               'percentages '
-                                                                                                               'not '
-                                                                                                               'matching '
-                                                                                                               'the '
-                                                                                                               'footer.'},
- 'pt_BR': {'Indirectos de oficina': 'Custos indiretos de escritório',
-           'Indirectos de campo': 'Custos indiretos de campo',
-           'Financiamiento': 'Financiamento',
-           'Utilidad': 'Lucro',
-           'Cargos adicionales': 'Encargos adicionais',
-           'MATERIALES': 'MATERIAIS',
-           'MANO DE OBRA': 'MÃO DE OBRA',
-           'HERRAMIENTA Y EQUIPO': 'FERRAMENTAS E EQUIPAMENTOS',
-           'SUBCONTRATOS Y OTROS': 'SUBCONTRATOS E OUTROS',
-           'Porcentajes del sobrecosto…': 'Percentuais do sobrecusto…',
-           'Porcentajes del sobrecosto': 'Percentuais do sobrecusto',
-           'Indirectos, financiamiento, utilidad y cargos de este proyecto': 'Indiretos, '
-                                                                             'financiamento, '
-                                                                             'lucro e '
-                                                                             'encargos '
-                                                                             'deste '
-                                                                             'projeto',
-           'Matriz de precio unitario': 'Matriz de preço unitário',
-           'No cambia el total del presupuesto': 'Não altera o total do orçamento',
-           'Escribe los porcentajes de tu contrato o licitación; el programa no propone ninguno. Los indirectos van sobre el costo directo; cada cargo siguiente, sobre lo acumulado.': 'Digite '
-                                                                                                                                                                                        'os '
-                                                                                                                                                                                        'percentuais '
-                                                                                                                                                                                        'do '
-                                                                                                                                                                                        'seu '
-                                                                                                                                                                                        'contrato '
-                                                                                                                                                                                        'ou '
-                                                                                                                                                                                        'licitação; '
-                                                                                                                                                                                        'o '
-                                                                                                                                                                                        'programa '
-                                                                                                                                                                                        'não '
-                                                                                                                                                                                        'sugere '
-                                                                                                                                                                                        'nenhum. '
-                                                                                                                                                                                        'Os '
-                                                                                                                                                                                        'indiretos '
-                                                                                                                                                                                        'incidem '
-                                                                                                                                                                                        'sobre '
-                                                                                                                                                                                        'o '
-                                                                                                                                                                                        'custo '
-                                                                                                                                                                                        'direto; '
-                                                                                                                                                                                        'cada '
-                                                                                                                                                                                        'encargo '
-                                                                                                                                                                                        'seguinte, '
-                                                                                                                                                                                        'sobre '
-                                                                                                                                                                                        'o '
-                                                                                                                                                                                        'acumulado.',
-           'El presupuesto no tiene partidas.': 'O orçamento não tem itens.',
-           'Este reporte no cambia el presupuesto: muestra el sobrecosto dentro de cada precio unitario.': 'Este '
-                                                                                                           'relatório '
-                                                                                                           'não '
-                                                                                                           'altera '
-                                                                                                           'o '
-                                                                                                           'orçamento: '
-                                                                                                           'mostra '
-                                                                                                           'o '
-                                                                                                           'sobrecusto '
-                                                                                                           'dentro '
-                                                                                                           'de '
-                                                                                                           'cada '
-                                                                                                           'preço '
-                                                                                                           'unitário.',
-           'Todos los porcentajes están en 0. Escríbelos en Complementos → Porcentajes del sobrecosto.': 'Todos '
-                                                                                                         'os '
-                                                                                                         'percentuais '
-                                                                                                         'estão '
-                                                                                                         'em '
-                                                                                                         '0. '
-                                                                                                         'Digite-os '
-                                                                                                         'em '
-                                                                                                         'Complementos '
-                                                                                                         '→ '
-                                                                                                         'Percentuais '
-                                                                                                         'do '
-                                                                                                         'sobrecusto.',
-           'Subtotal': 'Subtotal',
-           'Ajuste de redondeo': 'Ajuste de arredondamento',
-           'COSTO DIRECTO': 'CUSTO DIRETO',
-           'PRECIO UNITARIO': 'PREÇO UNITÁRIO',
-           'Unidad': 'Unidade',
-           'Cantidad': 'Quantidade',
-           'Importe': 'Valor',
-           'TOTAL': 'TOTAL',
-           'Catálogo de conceptos': 'Catálogo de itens',
-           'Clave': 'Código',
-           'Concepto': 'Item',
-           'P. unitario': 'P. unitário',
-           'Costo': 'Custo',
-           'Manda el precio unitario redondeado: el total es la suma de los importes.': 'Prevalece '
-                                                                                        'o '
-                                                                                        'preço '
-                                                                                        'unitário '
-                                                                                        'arredondado: '
-                                                                                        'o '
-                                                                                        'total '
-                                                                                        'é '
-                                                                                        'a '
-                                                                                        'soma '
-                                                                                        'dos '
-                                                                                        'valores.',
-           'Total del catálogo': 'Total do catálogo',
-           'Pie del presupuesto sin impuestos': 'Rodapé do orçamento sem impostos',
-           'Diferencia': 'Diferença',
-           'La diferencia puede venir del redondeo o de que los porcentajes de este reporte no son los del pie.': 'A '
-                                                                                                                  'diferença '
-                                                                                                                  'pode '
-                                                                                                                  'vir '
-                                                                                                                  'do '
-                                                                                                                  'arredondamento '
-                                                                                                                  'ou '
-                                                                                                                  'de '
-                                                                                                                  'os '
-                                                                                                                  'percentuais '
-                                                                                                                  'deste '
-                                                                                                                  'relatório '
-                                                                                                                  'não '
-                                                                                                                  'serem '
-                                                                                                                  'os '
-                                                                                                                  'do '
-                                                                                                                  'rodapé.'}}
+TEXTOS = {
+    "en": {
+        "Indirectos de oficina": "Office overhead",
+        "Indirectos de campo": "Site overhead",
+        "Financiamiento": "Financing",
+        "Utilidad": "Profit",
+        "Cargos adicionales": "Additional charges",
+        "MATERIALES": "MATERIALS",
+        "MANO DE OBRA": "LABOR",
+        "HERRAMIENTA Y EQUIPO": "TOOLS AND EQUIPMENT",
+        "SUBCONTRATOS Y OTROS": "SUBCONTRACTS AND OTHER",
+        "Porcentajes del sobrecosto…": "Markup percentages…",
+        "Porcentajes del sobrecosto": "Markup percentages",
+        "Indirectos, financiamiento, utilidad y cargos de este proyecto": "Overhead, financing, profit and charges for this project",
+        "Matriz de precio unitario": "Unit price matrix",
+        "No cambia el total del presupuesto": "Does not change the budget total",
+        "Escribe los porcentajes de tu contrato o licitación; el programa no propone ninguno. Los indirectos van sobre el costo directo; cada cargo siguiente, sobre lo acumulado.": "Enter the percentages from your contract or bid; the program suggests none. Overhead applies to the direct cost; each later charge, to the running total.",
+        "El presupuesto no tiene partidas.": "The budget has no items.",
+        "Este reporte no cambia el presupuesto: muestra el sobrecosto dentro de cada precio unitario.": "This report does not change the budget: it shows the markup inside each unit price.",
+        "Todos los porcentajes están en 0. Escríbelos en Complementos → Porcentajes del sobrecosto.": "All percentages are 0. Enter them in Add-ons → Markup percentages.",
+        "Subtotal": "Subtotal",
+        "Ajuste de redondeo": "Rounding adjustment",
+        "COSTO DIRECTO": "DIRECT COST",
+        "PRECIO UNITARIO": "UNIT PRICE",
+        "Unidad": "Unit",
+        "Cantidad": "Quantity",
+        "Importe": "Amount",
+        "TOTAL": "TOTAL",
+        "Catálogo de conceptos": "Schedule of items",
+        "Clave": "Code",
+        "Concepto": "Item",
+        "P. unitario": "Unit price",
+        "Costo": "Cost",
+        "Manda el precio unitario redondeado: el total es la suma de los importes.": "The rounded unit price rules: the total is the sum of the amounts.",
+        "Total del catálogo": "Schedule total",
+        "Pie del presupuesto sin impuestos": "Budget footer before tax",
+        "Diferencia": "Difference",
+        "La diferencia puede venir del redondeo o de que los porcentajes de este reporte no son los del pie.": "The difference may come from rounding or from this report's percentages not matching the footer.",
+        "Descripción": "Description",
+        "Auxiliares o básicos": "Auxiliary items",
+        "El proyecto no tiene sub-partidas (básicos).": "The project has no sub-items (auxiliaries).",
+        "No se suman: un básico puede estar dentro de otro. Su costo ya está en los precios unitarios.": "They are not added up: one auxiliary may be inside another. Their cost is already in the unit prices."
+    },
+    "pt_BR": {
+        "Indirectos de oficina": "Custos indiretos de escritório",
+        "Indirectos de campo": "Custos indiretos de campo",
+        "Financiamiento": "Financiamento",
+        "Utilidad": "Lucro",
+        "Cargos adicionales": "Encargos adicionais",
+        "MATERIALES": "MATERIAIS",
+        "MANO DE OBRA": "MÃO DE OBRA",
+        "HERRAMIENTA Y EQUIPO": "FERRAMENTAS E EQUIPAMENTOS",
+        "SUBCONTRATOS Y OTROS": "SUBCONTRATOS E OUTROS",
+        "Porcentajes del sobrecosto…": "Percentuais do sobrecusto…",
+        "Porcentajes del sobrecosto": "Percentuais do sobrecusto",
+        "Indirectos, financiamiento, utilidad y cargos de este proyecto": "Indiretos, financiamento, lucro e encargos deste projeto",
+        "Matriz de precio unitario": "Matriz de preço unitário",
+        "No cambia el total del presupuesto": "Não muda o total do orçamento",
+        "Escribe los porcentajes de tu contrato o licitación; el programa no propone ninguno. Los indirectos van sobre el costo directo; cada cargo siguiente, sobre lo acumulado.": "Digite os percentuais do seu contrato ou licitação; o programa não sugere nenhum. Os indiretos incidem sobre o custo direto; cada encargo seguinte, sobre o acumulado.",
+        "El presupuesto no tiene partidas.": "O orçamento não tem itens.",
+        "Este reporte no cambia el presupuesto: muestra el sobrecosto dentro de cada precio unitario.": "Este relatório não altera o orçamento: mostra o sobrecusto dentro de cada preço unitário.",
+        "Todos los porcentajes están en 0. Escríbelos en Complementos → Porcentajes del sobrecosto.": "Todos os percentuais estão em 0. Digite-os em Complementos → Percentuais do sobrecusto.",
+        "Subtotal": "Subtotal",
+        "Ajuste de redondeo": "Ajuste de arredondamento",
+        "COSTO DIRECTO": "CUSTO DIRETO",
+        "PRECIO UNITARIO": "PREÇO UNITÁRIO",
+        "Unidad": "Unidade",
+        "Cantidad": "Quantidade",
+        "Importe": "Valor",
+        "TOTAL": "TOTAL",
+        "Catálogo de conceptos": "Catálogo de itens",
+        "Clave": "Código",
+        "Concepto": "Item",
+        "P. unitario": "P. unitário",
+        "Costo": "Custo",
+        "Manda el precio unitario redondeado: el total es la suma de los importes.": "Prevalece o preço unitário arredondado: o total é a soma dos valores.",
+        "Total del catálogo": "Total do catálogo",
+        "Pie del presupuesto sin impuestos": "Rodapé do orçamento sem impostos",
+        "Diferencia": "Diferença",
+        "La diferencia puede venir del redondeo o de que los porcentajes de este reporte no son los del pie.": "A diferença pode vir do arredondamento ou de os percentuais deste relatório não serem os do rodapé.",
+        "Descripción": "Descrição",
+        "Auxiliares o básicos": "Composições auxiliares",
+        "El proyecto no tiene sub-partidas (básicos).": "O projeto não tem composições auxiliares.",
+        "No se suman: un básico puede estar dentro de otro. Su costo ya está en los precios unitarios.": "Não se somam: uma auxiliar pode estar dentro de outra. Seu custo já está nos preços unitários."
+    }
+}
 
 
 def t(s):

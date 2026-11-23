@@ -25,6 +25,8 @@ def registrar(app):
                ayuda=t("Indirectos, financiamiento, utilidad y cargos de este proyecto"))
     app.reporte("matriz", t("Matriz de precio unitario"), reporte,
                 ayuda=t("No cambia el total del presupuesto"))
+    app.reporte("basicos", t("Auxiliares o básicos"), basicos,
+                ayuda=t("No cambia el total del presupuesto"))
 
 
 def porcentajes(ajustes):
@@ -137,6 +139,46 @@ def reporte(p):
             "La diferencia puede venir del redondeo o de que los porcentajes de este "
             "reporte no son los del pie.")))
     return api.Documento(t("Matriz de precio unitario"), bloques)
+
+
+def cantidades(p):
+    """{id de auxiliar: cantidad en toda la obra}, también a través de otros."""
+    aux = {a.id: a for a in p.auxiliares}
+    out = dict.fromkeys(aux, 0.0)
+
+    def sumar(acu, veces, camino):
+        for i in acu:
+            a = aux.get(i.auxiliar_id)
+            if a is not None and a.id not in camino:
+                out[a.id] += veces * i.cantidad
+                sumar(a.acu, veces * i.cantidad, camino | {a.id})
+    for x in p.hojas():
+        sumar(x.acu, api.redondear(x.metrado, p.decimales_metrado), frozenset())
+    return out
+
+
+def basicos(p):
+    if not p.auxiliares:
+        raise api.ErrorComplemento(t("El proyecto no tiene sub-partidas (básicos)."))
+    d, cant = p.decimales, cantidades(p)
+    filas = [[a.item, a.descripcion, a.unidad, a.precio_unitario, cant[a.id],
+              api.redondear(cant[a.id] * a.precio_unitario, d)] for a in p.auxiliares]
+    bloques = [
+        api.Tabla([api.Columna(t("Clave"), 11), api.Columna(t("Descripción"), 41),
+                   api.Columna(t("Unidad"), 9, "centro"),
+                   api.Columna(t("Costo"), 13, "derecha", d),
+                   api.Columna(t("Cantidad"), 12, "derecha", 4),
+                   api.Columna(t("Importe"), 14, "derecha", d)], filas),
+        api.Parrafo(t("No se suman: un básico puede estar dentro de otro. Su costo ya "
+                      "está en los precios unitarios."))]
+    for a in p.auxiliares:
+        bloques += [api.Titulo(f"{a.item}  {a.descripcion} ({a.unidad})", 3),
+                    api.Tabla(_columnas(d), [
+                        [i.codigo, i.descripcion, i.unidad, i.cantidad, i.precio,
+                         i.parcial] for i in a.acu] + [api.Fila(
+                             [None, t("COSTO DIRECTO"), None, None, None,
+                              a.precio_unitario], "subtotal")])]
+    return api.Documento(t("Auxiliares o básicos"), bloques)
 
 
 def _columnas(d):

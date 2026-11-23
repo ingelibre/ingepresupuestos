@@ -2,10 +2,10 @@
   "esquema": 1,
   "id": "apu-mexico",
   "nombre": "Matriz de precio unitario (México)",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "autor": "IngePresupuestos (issue #30)",
   "licencia": "GPL-3.0-or-later",
-  "descripcion": "Matriz de cada precio unitario con costo directo, indirectos de oficina y de campo, financiamiento, utilidad y cargos adicionales en cascada, y el catálogo de conceptos con el precio unitario redondeado. Los porcentajes se escriben por proyecto y empiezan en 0. Es un reporte: no cambia el presupuesto.",
+  "descripcion": "Matriz de cada precio unitario con costo directo, indirectos de oficina y de campo, financiamiento, utilidad y cargos adicionales en cascada, y el catálogo de conceptos con el precio unitario redondeado. Los porcentajes se escriben por proyecto y empiezan en 0. Es un reporte: no cambia el presupuesto. También lista los auxiliares o básicos.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/30",
   "api_version": 2,
   "codigo": "complemento.py",
@@ -17,11 +17,11 @@
   "traducciones": {
     "en": {
       "nombre": "Unit price matrix (Mexico)",
-      "descripcion": "Matrix of each unit price with direct cost, office and site overhead, financing, profit and additional charges in cascade, plus the schedule of items with the rounded unit price. Percentages are entered per project and start at 0. It is a report: it does not change the budget."
+      "descripcion": "Matrix of each unit price with direct cost, office and site overhead, financing, profit and additional charges in cascade, plus the schedule of items with the rounded unit price. Percentages are entered per project and start at 0. It is a report: it does not change the budget. It also lists the auxiliary items."
     },
     "pt_BR": {
       "nombre": "Matriz de preço unitário (México)",
-      "descripcion": "Matriz de cada preço unitário com custo direto, indiretos de escritório e de campo, financiamento, lucro e encargos adicionais em cascata, e o catálogo de itens com o preço unitário arredondado. Os percentuais são por projeto e começam em 0. É um relatório: não altera o orçamento."
+      "descripcion": "Matriz de cada preço unitário com custo direto, indiretos de escritório e de campo, financiamento, lucro e encargos adicionais em cascata, e o catálogo de itens com o preço unitário arredondado. Os percentuais são por projeto e começam em 0. É um relatório: não altera o orçamento. Também lista as composições auxiliares."
     }
   }
 }
