@@ -30,6 +30,9 @@ TIPOS_PIE = ('rubro', 'pct_cd', 'pct_sub', 'pct_util', 'subtotal')
 #: Valores del pie que salen del proyecto o del impuesto del país.
 PCT_PIE = ('gastos_generales', 'utilidad', 'impuesto')
 IDIOMAS = ('es', 'en', 'pt_BR')
+#: Para agrupar en el gestor. Lista cerrada: así se puede filtrar y traducir.
+CATEGORIAS = ('reportes', 'paises', 'precios', 'metrados', 'importar', 'revision',
+              'temas', 'otros')
 SEPARADORES = ((',', '.'), ('.', ','), (' ', ','), ("'", '.'))
 
 MAX_JSON = 1_000_000
@@ -296,15 +299,45 @@ def _indice(v: _V, x, d):
 _RE_HEX = re.compile(r'#[0-9A-Fa-f]{6}\Z')
 _RE_IMAGEN = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,60}\.(png|jpe?g)\Z', re.I)
 MAX_IMAGEN, MAX_LADO = 1_000_000, 4000
+#: La de la tarjeta se decodifica en una rejilla: más pequeña.
+MAX_LADO_TARJETA = 1600
 
 
-def tipo_imagen(b: bytes) -> str | None:
+def imagen_tarjeta(b: bytes) -> str | None:
+    """'png' | 'jpg' | 'webp' si vale como imagen del gestor; si no, None."""
+    if not b or len(b) > MAX_IMAGEN:
+        return None
+    if b[:4] == b'RIFF' and b[8:12] == b'WEBP':
+        lados = _lados_webp(b)
+        return 'webp' if lados and all(
+            0 < n <= MAX_LADO_TARJETA for n in lados) else None
+    return tipo_imagen(b, MAX_LADO_TARJETA)
+
+
+def _lados_webp(b: bytes):
+    """(ancho, alto) del primer trozo de un WebP, sin decodificarlo."""
+    t = b[12:16]
+    if len(b) < 30:
+        return None
+    if t == b'VP8X':
+        return (int.from_bytes(b[24:27], 'little') + 1,
+                int.from_bytes(b[27:30], 'little') + 1)
+    if t == b'VP8L' and b[20] == 0x2f:
+        n = int.from_bytes(b[21:25], 'little')
+        return (n & 0x3fff) + 1, (n >> 14 & 0x3fff) + 1
+    if t == b'VP8 ' and b[23:26] == b'\x9d\x01\x2a':
+        return (int.from_bytes(b[26:28], 'little') & 0x3fff,
+                int.from_bytes(b[28:30], 'little') & 0x3fff)
+    return None
+
+
+def tipo_imagen(b: bytes, lado: int = MAX_LADO) -> str | None:
     """'png' | 'jpg' mirando el CONTENIDO, con sus topes; None si no vale."""
     if not b or len(b) > MAX_IMAGEN:
         return None
     if b[:8] == b'\x89PNG\r\n\x1a\n' and b[12:16] == b'IHDR' and len(b) > 24:
         w, h = int.from_bytes(b[16:20], 'big'), int.from_bytes(b[20:24], 'big')
-        return 'png' if 0 < w <= MAX_LADO and 0 < h <= MAX_LADO else None
+        return 'png' if 0 < w <= lado and 0 < h <= lado else None
     if b[:3] == b'\xff\xd8\xff':
         i = 2
         while i + 9 < len(b) and b[i] == 0xFF:
@@ -312,7 +345,7 @@ def tipo_imagen(b: bytes) -> str | None:
             if 0xC0 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
                 h = int.from_bytes(b[i + 5:i + 7], 'big')
                 w = int.from_bytes(b[i + 7:i + 9], 'big')
-                return 'jpg' if 0 < w <= MAX_LADO and 0 < h <= MAX_LADO else None
+                return 'jpg' if 0 < w <= lado and 0 < h <= lado else None
             if largo < 2:
                 return None
             i += 2 + largo
@@ -455,6 +488,7 @@ _LISTAS = {
 }
 _CAMPOS = ('esquema', 'id', 'nombre', 'version', 'autor', 'licencia',
            'descripcion', 'web', 'api_version', 'codigo', 'titulos', 'unidades',
+           'categorias', 'traducciones', 'imagen',
            *_LISTAS)
 
 
@@ -482,6 +516,24 @@ def validar(crudo) -> dict:
     out['web'] = v.texto(x.get('web', ''), 'web', 200, vacio=True)
     if out['web'] and not re.match(r'https://[^\s<>"]+\Z', out['web']):
         v.mal('web', "debe empezar con https://")
+    out['categorias'] = [v.de(c, f"categorias[{i}]", CATEGORIAS) for i, c in
+                         enumerate(v.lista(x.get('categorias', []),
+                                           'categorias', 3))]
+    if len(set(out['categorias'])) != len(out['categorias']):
+        v.mal('categorias', "hay repetidas")
+    out['traducciones'] = {}
+    ts = v.obj(x.get('traducciones', {}), 'traducciones', dict.fromkeys(IDIOMAS))
+    for idi, t in ts.items():
+        dt = f"traducciones.{idi}"
+        t = v.obj(t, dt, dict.fromkeys(('nombre', 'descripcion')))
+        out['traducciones'][idi] = {
+            k: v.texto(t[k], f"{dt}.{k}", n, multilinea=k == 'descripcion')
+            for k, n in (('nombre', 60), ('descripcion', 1000)) if k in t}
+    out['imagen'] = ''
+    if 'imagen' in x:
+        out['imagen'] = v.texto(x['imagen'], 'imagen', 150)
+        if not re.search(r'\.(png|jpe?g|webp)\Z', out['imagen'].lower()):
+            v.mal('imagen', "la ruta de un PNG, JPG o WebP del paquete")
     api = x.get('api_version')
     if api is not None and (type(api) is not int or not 1 <= api <= 999):
         v.mal('api_version', "debe ser un entero desde 1")
@@ -535,6 +587,11 @@ def leer(datos: bytes) -> dict:
     except (ValueError, RecursionError) as e:
         raise ErrorEsquema([f"{ARCHIVO}: no es un JSON válido ({e})"]) from None
     return validar(crudo)
+
+
+def texto(m: dict, campo: str, idioma: str) -> str:
+    """`nombre` o `descripcion` en ese idioma o, si no está, el de base."""
+    return m['traducciones'].get(idioma, {}).get(campo) or m[campo]
 
 
 def tiene_datos(m: dict) -> list[str]:

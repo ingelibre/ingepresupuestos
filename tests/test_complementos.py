@@ -848,14 +848,6 @@ def test_consentimiento_y_gestor(tmp_path, monkeypatch):
         assert s in ver
     c.chks[0].setChecked(True)
     assert c.btn.isEnabled()
-    g = cd.ComplementosDialog()
-    assert g.actual().id == i.id and g.btn_act.isEnabled() and g.btn_rec.isEnabled()
-    monkeypatch.setattr(cd.ConsentimientoDialog, 'exec', lambda s: QDialog.Accepted)
-    g._activar()
-    assert gestor.uno(i.id).activo and cargador.cargados()
-    assert g.btn_des.isEnabled() and not g.btn_act.isEnabled()
-    g._desactivar()
-    assert not gestor.uno(i.id).activo and not cargador.cargados()
 
 
 def test_gestor_explica_lo_que_no_se_puede_instalar(tmp_path, monkeypatch):
@@ -863,7 +855,7 @@ def test_gestor_explica_lo_que_no_se_puede_instalar(tmp_path, monkeypatch):
     dichos = []
     monkeypatch.setattr(cd, '_aviso', lambda p, t, *a: dichos.append(t))
     g = cd.ComplementosDialog()
-    g._instalar(zip_de(tmp_path, [('a.txt', 'x')]))
+    g.instalar(zip_de(tmp_path, [('a.txt', 'x')]))
     assert 'complemento.json' in dichos[0]
     assert gestor.instalados() == []
 

@@ -69,5 +69,5 @@ def reporte(p):
                    api.Columna(t("Metrado"), 12, "derecha", p.decimales_metrado),
                    api.Columna(t("P. unitario"), 13, "derecha", d),
                    api.Columna(t("Parcial"), 15, "derecha", d)], filas),
-        api.Tabla([api.Columna("", 80), api.Columna("", 20, "derecha", d)], pie,
+        api.Tabla([api.Columna("", 80, "derecha"), api.Columna("", 20, "derecha", d)], pie,
                   cabecera=False)])

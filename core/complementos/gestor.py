@@ -121,7 +121,15 @@ class Info:
 
     @property
     def nombre(self) -> str:
-        return self.paquete.manifiesto['nombre'] if self.paquete else self.id
+        return self._texto('nombre') if self.paquete else self.id
+
+    @property
+    def descripcion(self) -> str:
+        return self._texto('descripcion') if self.paquete else ''
+
+    def _texto(self, campo):
+        from utils.i18n import idioma_actual
+        return esquema.texto(self.paquete.manifiesto, campo, idioma_actual())
 
 
 def _info(id_: str, e: dict) -> Info:
@@ -370,6 +378,31 @@ def incluidos() -> list[Path]:
                       if (d / esquema.ARCHIVO).is_file())
     except OSError:
         return []
+
+
+def explorar() -> list[tuple[Path, Info]]:
+    """Lo que ofrece la pestaña Explorar, instalado o no: hoy, los incluidos.
+    El `Info` describe lo OFRECIDO, no lo instalado. Otra fuente se añade aquí."""
+    out = []
+    for d in incluidos():
+        try:
+            p = paquete.leer_carpeta(d)
+            out.append((d, Info(p.id, p, False, 'disponible', '', '')))
+        except ErrorPaquete as e:
+            out.append((d, Info(d.name, None, False, 'dañado', str(e), '')))
+    return out
+
+
+def es_mas_nueva(a: str, b: str) -> bool:
+    """¿La versión `a` es posterior a la `b`? «1.0-rc1» va antes que «1.0»."""
+    def clave(v):
+        v = v.split('+')[0]
+        num, _, pre = v.partition('-')
+        n = [int(x) for x in num.split('.')]
+        return (n + [0] * (4 - len(n)), not pre,
+                [(0, int(x), '') if x.isdigit() else (1, 0, x)
+                 for x in re.findall(r'\d+|[^\d.]+', pre)])
+    return clave(a) > clave(b)
 
 
 # ── Centinela de carga ───────────────────────────────────────────────────────

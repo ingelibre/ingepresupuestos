@@ -2,11 +2,26 @@
   "esquema": 1,
   "id": "impuesto-materiales",
   "nombre": "Impuesto sobre materiales",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autor": "IngePresupuestos (issue #57)",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "Reporte con el impuesto sobre los materiales (por ejemplo, ITBIS 18 % en República Dominicana) por partida y en total, con la tasa y el nombre editables por proyecto. No altera precios ni totales.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/57",
   "api_version": 2,
-  "codigo": "complemento.py"
+  "codigo": "complemento.py",
+  "categorias": [
+    "reportes",
+    "paises"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Tax on materials",
+      "descripcion": "Report of the tax on materials (for example, ITBIS 18% in the Dominican Republic) per item and in total, with rate and name editable per project. It does not change prices or totals."
+    },
+    "pt_BR": {
+      "nombre": "Imposto sobre materiais",
+      "descripcion": "Relatório do imposto sobre os materiais (por exemplo, ITBIS 18 % na República Dominicana) por item e no total, com alíquota e nome editáveis por projeto. Não altera preços nem totais."
+    }
+  }
 }

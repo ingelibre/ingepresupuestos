@@ -21,10 +21,17 @@ Nada se descarga de internet. Todo se instala **apagado**.
 
 ## Instalar y usar
 
+En el proyecto, **Complementos ▾ ▸ Administrar complementos…**; también en
 **Configuración ▸ Complementos ▸ Gestionar complementos…**
 
-- **Instalar .zip…** o **Instalar carpeta…**. En **Incluidos** están los que
-  vienen con el programa.
+- **Explorar** enseña los que vienen con el programa; **Instalados**, los tuyos.
+  Se buscan (sin tildes ni mayúsculas), se filtran por categoría y se ordenan.
+- **Instalar** (o **Instalar .zip…** / **Instalar carpeta…**) lo deja apagado.
+- **Actualizar** sale cuando el incluido es de una versión posterior. Como cambia
+  el contenido, hay que volver a activarlo.
+- **Detalles** enseña la ficha y cada archivo; en **⋯** están Importar índice,
+  Recargar, Abrir carpeta y Desinstalar.
+- **INCLUIDO** se pone por contenido: un paquete ajeno con el mismo `id` no la lleva.
 - **Activar…** enseña autor, licencia, archivos y qué datos cambia.
 - **Desactivar** y **Desinstalar** no tocan los proyectos: la moneda que trajo un
   complemento se queda guardada como tuya, el país elegido conserva sus valores y
@@ -177,6 +184,9 @@ cuál.
 | `id` | minúsculas, números y guiones, de 3 a 40: `pais-brasil` |
 | `nombre`, `version`, `autor`, `licencia` | obligatorios |
 | `descripcion`, `web` | opcionales; `web` empieza con `https://` |
+| `categorias` | opcional, hasta 3 de: `reportes` `paises` `precios` `metrados` `importar` `revision` `temas` `otros` |
+| `traducciones` | opcional: `{"en": {"nombre": "…", "descripcion": "…"}, "pt_BR": {…}}`; se usa según el idioma del programa |
+| `imagen` | opcional: ruta de un PNG, JPG o WebP del paquete, de hasta 1 MB y 1600 px de lado. Se ve unas 2,5 veces más ancha que alta, desde arriba. Sin ella salen las iniciales |
 | `api_version`, `codigo` | solo con código: la API mínima y el `.py` de entrada |
 
 Secciones de datos, todas opcionales:
@@ -361,7 +371,7 @@ Cualquier otro se muestra con la línea del complemento donde ocurrió.
   y se explica; el programa arranca igual. Un complemento que se queda en un
   bucle sin fin sí lo bloquea: arranca con `--sin-complementos`.
 - El `.zip` se valida antes de escribir nada: sin rutas absolutas, `..`, enlaces,
-  nombres reservados ni cifrado; solo `.json .csv .txt .md .png .jpg` (y `.py` con
+  nombres reservados ni cifrado; solo `.json .csv .txt .md .png .jpg .webp` (y `.py` con
   código); hasta 200 archivos, 5 MB cada uno y 20 MB en total.
 
 ## Límites

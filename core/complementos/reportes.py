@@ -58,9 +58,19 @@ def _dec(col) -> int:
     return 2 if col.decimales is None else max(0, min(8, int(col.decimales)))
 
 
-def _html(doc: api.Documento, moneda: api.Moneda) -> str:
-    out = []
+# QTextDocument no separa una tabla de lo que la rodea: se separa con un
+# párrafo bajo. Y el fondo de una fila solo lo pinta si va en cada celda.
+def _aire(px: int) -> str:
+    return (f'<p style="margin:0;font-size:{px}px;line-height:{px}px">&nbsp;</p>')
+
+
+def _html(doc: api.Documento, moneda: api.Moneda, fondo: str = '#F0F1F2') -> str:
+    out, antes = [], None
     for b in doc.bloques:
+        if antes is not None and not isinstance(antes, api.SaltoPagina):
+            out.append(_aire(12 if isinstance(b, api.Titulo) else
+                             3 if isinstance(antes, api.Titulo) else 6))
+        antes = b
         if isinstance(b, api.Titulo):
             tag = _TITULOS.get(b.nivel, 'h3')
             out.append(f"<{tag}>{escape(str(b.texto))}</{tag}>")
@@ -69,31 +79,35 @@ def _html(doc: api.Documento, moneda: api.Moneda) -> str:
             out.append(f'<p align="{_ALINEAR[b.alinear]}">'
                        + (f"<b>{t}</b>" if b.negrita else t) + "</p>")
         elif isinstance(b, api.Campos):
+            ancho = max([110] + [7 * len(str(k)) for k, _v in b.pares])
             out.append('<table class="meta-info">' + "".join(
-                f'<tr><td class="k" width="150">{escape(str(k))}</td>'
-                f'<td class="v">{escape(str(v))}</td></tr>'
+                f'<tr><td class="k" width="{ancho}" style="padding:1px 12px 1px 0">'
+                f'{escape(str(k))}</td><td class="v" style="padding:1px 0">'
+                f'{escape(str(v))}</td></tr>'
                 for k, v in b.pares) + '</table>')
         elif isinstance(b, api.SaltoPagina):
             out.append('<p style="page-break-before:always"></p>')
         else:
-            out.append(_html_tabla(b, moneda))
+            out.append(_html_tabla(b, moneda, fondo))
     return "\n".join(out)
 
 
-def _html_tabla(b: api.Tabla, moneda) -> str:
+def _html_tabla(b: api.Tabla, moneda, fondo) -> str:
+    aire = 'padding:2px 5px'
+    lleno = f'{aire};background:{fondo}'
     def ancho(c):
         return f' width="{int(c.ancho)}%"' if c.ancho else ''
     h = ['<table class="data" width="100%" cellspacing="0">']
     if b.cabecera:
         h.append('<thead><tr>' + "".join(
-            f'<th align="{_ALINEAR[c.alinear]}"{ancho(c)}>{escape(str(c.titulo))}</th>'
+            f'<th align="{_ALINEAR[c.alinear]}"{ancho(c)} style="{lleno}">{escape(str(c.titulo))}</th>'
             for c in b.columnas) + '</tr></thead>')
     for f in map(_fila, b.filas):
         h.append('<tr>')
         celdas = list(f.celdas)
         # Un título de una sola celda ocupa toda la tabla.
         if f.estilo == 'titulo' and len(celdas) == 1:
-            h.append(f'<td colspan="{len(b.columnas)}"><b>'
+            h.append(f'<td colspan="{len(b.columnas)}" style="{aire}"><b>'
                      f'{escape(str(celdas[0]))}</b></td></tr>')
             continue
         celdas += [None] * (len(b.columnas) - len(celdas))
@@ -106,7 +120,8 @@ def _html_tabla(b: api.Tabla, moneda) -> str:
                 t = escape(str(v)).replace('\n', '<br>')
             if f.estilo != 'normal':
                 t = f"<b>{t}</b>"
-            h.append(f'<td align="{_ALINEAR[c.alinear]}"{ancho(c)}>{t}</td>')
+            h.append(f'<td align="{_ALINEAR[c.alinear]}"{ancho(c)} style="'
+                     f'{lleno if f.estilo == "subtotal" else aire}">{t}</td>')
         h.append('</tr>')
     h.append('</table>')
     return "".join(h)
@@ -120,7 +135,8 @@ def _a_pdf(doc, p: api.Presupuesto, ruta: str) -> None:
         r = pdf_reports._PdfRenderer(
             proy, str(doc.titulo), with_cover=False,
             orient='landscape' if doc.horizontal else 'portrait')
-        r.render_to_file(_html(doc, p.moneda), ruta)
+        r.render_to_file(_html(doc, p.moneda, pdf_reports._brand_colors(
+            r.formato)[2]), ruta)
 
 
 def _a_excel(doc, p: api.Presupuesto, ruta: str) -> None:

@@ -71,6 +71,8 @@ LEEME = '''# __NOMBRE__
 Complemento de IngePresupuestos.
 
 1. Edita `complemento.json` (autor, licencia, descripción)__EDITA__.
+   Opcional para el gestor: `imagen` (PNG, JPG o WebP de la carpeta) y
+   `traducciones` (nombre y descripción en otros idiomas).
 2. Comprueba: `ingepresupuestos --validar-complemento <esta carpeta>`
 3. En IngePresupuestos: Configuración ▸ Complementos ▸ Instalar carpeta…, y Activar.
 4. Tras cada cambio: Recargar.
@@ -97,7 +99,8 @@ def crear(nombre: str, donde, *, datos: bool = False, autor: str = '') -> Path:
         raise FileExistsError(str(destino))
     m = {'esquema': esquema.ESQUEMA, 'id': id_, 'nombre': nombre,
          'version': '0.1.0', 'autor': autor or 'Tu nombre',
-         'licencia': 'GPL-3.0-or-later', 'descripcion': ''}
+         'licencia': 'GPL-3.0-or-later', 'descripcion': '',
+         'categorias': ['otros' if datos else 'reportes']}
     archivos = {}
     if datos:
         m.update(titulos=["OBRAS PRELIMINARES"], unidades=[], vocabulario=[

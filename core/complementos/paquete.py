@@ -29,7 +29,7 @@ MAX_RATIO = 200
 MAX_RUTA = 150
 MAX_NIVELES = 6
 
-EXT_DATOS = {'.json', '.csv', '.txt', '.md', '.png', '.jpg', '.jpeg'}
+EXT_DATOS = {'.json', '.csv', '.txt', '.md', '.png', '.jpg', '.jpeg', '.webp'}
 EXT_CODIGO = {'.py'}
 SIN_EXT = {'LICENSE', 'LICENCIA', 'COPYING', 'README', 'LEEME'}
 #: Restos que deja el sistema o un editor: se saltan, no se rechazan.
@@ -134,6 +134,13 @@ def _armar(archivos: dict) -> Paquete:
         if a and esquema.tipo_imagen(archivos[a]) is None:
             raise ErrorPaquete(f"{a}: el logo debe ser PNG o JPG, de hasta 1 MB "
                                "y 4000 px de lado")
+    if m['imagen']:
+        if m['imagen'] not in archivos:
+            raise ErrorPaquete(f"imagen: falta el archivo {m['imagen']}")
+        if esquema.imagen_tarjeta(archivos[m['imagen']]) is None:
+            raise ErrorPaquete(
+                f"{m['imagen']}: la imagen debe ser PNG, JPG o WebP, de hasta 1 MB "
+                f"y {esquema.MAX_LADO_TARJETA} px de lado")
     if m['codigo'] and m['codigo'] not in archivos:
         raise ErrorPaquete(f"falta el archivo de código {m['codigo']}")
     return Paquete(m, dict(archivos), huella(archivos))

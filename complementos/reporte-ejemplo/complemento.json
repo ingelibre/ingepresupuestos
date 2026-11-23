@@ -2,11 +2,25 @@
   "esquema": 1,
   "id": "reporte-ejemplo",
   "nombre": "Reporte de ejemplo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autor": "IngePresupuestos (issue #19)",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "El reporte propio más pequeño posible: los diez insumos que más cuestan y cuánto pesan en el costo directo. Cópialo para empezar el tuyo.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/19",
   "api_version": 1,
-  "codigo": "complemento.py"
+  "codigo": "complemento.py",
+  "categorias": [
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Sample report",
+      "descripcion": "The smallest possible report of your own: the ten most expensive resources and their share of the direct cost. Copy it to start yours."
+    },
+    "pt_BR": {
+      "nombre": "Relatório de exemplo",
+      "descripcion": "O menor relatório próprio possível: os dez insumos que mais custam e quanto pesam no custo direto. Copie-o para começar o seu."
+    }
+  }
 }

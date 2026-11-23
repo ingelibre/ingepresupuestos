@@ -2,7 +2,7 @@
   "esquema": 1,
   "id": "tema-sobrio",
   "nombre": "Tema Sobrio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autor": "IngePresupuestos",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "Reportes en blanco y negro, con letra con remates, sin filas alternas y con el pie «página/páginas». Pensado para fotocopiar.",
@@ -27,5 +27,19 @@
       "encabezado": {"mostrar": true, "derecha2": ""},
       "pie": {"mostrar": true, "linea": true, "izquierda": "{empresa}", "centro": "", "derecha": "{pagina}/{paginas}"}
     }
-  ]
+  ],
+  "categorias": [
+    "temas"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Plain theme",
+      "descripcion": "Black and white reports in a serif font, without alternating rows and with a «page/pages» footer. Meant for photocopying."
+    },
+    "pt_BR": {
+      "nombre": "Tema Sóbrio",
+      "descripcion": "Relatórios em preto e branco, com fonte serifada, sem linhas alternadas e com rodapé «página/páginas». Pensado para fotocopiar."
+    }
+  }
 }

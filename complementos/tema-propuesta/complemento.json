@@ -2,7 +2,7 @@
   "esquema": 1,
   "id": "tema-propuesta",
   "nombre": "Tema Propuesta",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autor": "IngePresupuestos",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "Para entregar a un cliente: azul, título «Propuesta económica», la unidad después de la cantidad y dos firmas al final del presupuesto.",
@@ -39,5 +39,19 @@
         {"nombre": "", "cargo": "Aceptado por el cliente"}
       ]
     }
-  ]
+  ],
+  "categorias": [
+    "temas"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Proposal theme",
+      "descripcion": "To hand to a client: blue, titled «Propuesta económica», with the unit after the quantity and two signatures at the end of the budget."
+    },
+    "pt_BR": {
+      "nombre": "Tema Proposta",
+      "descripcion": "Para entregar a um cliente: azul, título «Propuesta económica», a unidade depois da quantidade e duas assinaturas no fim do orçamento."
+    }
+  }
 }

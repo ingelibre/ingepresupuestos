@@ -2,11 +2,25 @@
   "esquema": 1,
   "id": "presupuesto-con-datos",
   "nombre": "Presupuesto con datos del proyecto",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "autor": "IngePresupuestos (issue #62)",
   "licencia": "GPL-3.0-or-later",
   "descripcion": "Reporte de presupuesto que empieza con los datos del proyecto: cliente, número de presupuesto, ubicación, fecha y descripción, en la primera página.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/62",
   "api_version": 2,
-  "codigo": "complemento.py"
+  "codigo": "complemento.py",
+  "categorias": [
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Budget with project data",
+      "descripcion": "Budget report that starts with the project data: client, budget number, location, date and description, on the first page."
+    },
+    "pt_BR": {
+      "nombre": "Orçamento com dados do projeto",
+      "descripcion": "Relatório de orçamento que começa com os dados do projeto: cliente, número do orçamento, localização, data e descrição, na primeira página."
+    }
+  }
 }

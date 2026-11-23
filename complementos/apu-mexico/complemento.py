@@ -113,12 +113,13 @@ def reporte(p):
             api.Campos([(t("Unidad"), x.unidad),
                         (t("Cantidad"), p.moneda.numero(x.metrado, p.decimales_metrado)),
                         (t("Importe"), p.moneda.formato(importe, d))]),
-            api.Tabla(_columnas(d), filas), api.SaltoPagina()]
+            api.Tabla(_columnas(d), filas)]
     total = api.redondear(total, d)
     catalogo.append(api.Fila([None, t("TOTAL"), None, None, None, total], "subtotal"))
     pie = api.redondear(p.costo_directo + sum(
         l.valor for l in p.pie if l.tipo != "subtotal" and not l.es_impuesto), d)
     bloques += [
+        api.SaltoPagina(),
         api.Titulo(t("Catálogo de conceptos"), 2),
         api.Tabla([api.Columna(t("Clave"), 10), api.Columna(t("Concepto"), 42),
                    api.Columna(t("Unidad"), 9, "centro"),
