@@ -103,6 +103,38 @@ def limpiar_carpeta(subdir: str, fila_id: int):
     shutil.rmtree(UPLOADS_DIR / subdir / str(fila_id), ignore_errors=True)
 
 
+def limpiar_huerfanos(dias: int = 30) -> int:
+    """Carpetas de especificaciones cuya partida se borró hace `dias` o más.
+    No se quitan al borrarla porque Deshacer (y el de la IA, que sobrevive a
+    cerrar la app) las necesita. Los ids no se reutilizan."""
+    import time
+    from core.config import UPLOADS_DIR
+    raiz = UPLOADS_DIR / 'especificaciones'
+    if not raiz.is_dir():
+        return 0
+    conn = get_db()
+    try:
+        vivas = {str(r[0]) for r in conn.execute("SELECT id FROM partidas")}
+    finally:
+        conn.close()
+    n = 0
+    for c in raiz.iterdir():
+        if c.is_dir() and not c.is_symlink() and c.name.isdecimal() \
+                and c.name not in vivas:
+            marca = c / '.huerfana'
+            try:
+                if not marca.exists():
+                    marca.touch()           # desde hoy cuenta el plazo
+                elif time.time() - marca.stat().st_mtime > dias * 86400:
+                    shutil.rmtree(c, ignore_errors=True)
+                    n += 1
+            except OSError:
+                pass
+        elif c.is_dir():
+            (c / '.huerfana').unlink(missing_ok=True)
+    return n
+
+
 def texto_adjunto_pdf(ruta: str, max_pags: int = 6, max_chars: int = 6000) -> str:
     """Texto de la ficha técnica (PDF digital). Un PDF escaneado —solo
     imagen, sin capa de texto— devuelve ''. Import perezoso: pdfplumber

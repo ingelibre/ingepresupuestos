@@ -169,6 +169,11 @@ def main():
         pass
 
     init_db()
+    try:
+        from core.adjuntos import limpiar_huerfanos
+        limpiar_huerfanos()
+    except Exception:
+        pass
 
     # Backup automático "daily" al iniciar (idempotente: si ya existe el de
     # hoy, no duplica). Luego rotación según política.
