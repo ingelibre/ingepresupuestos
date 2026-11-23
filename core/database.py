@@ -1316,6 +1316,33 @@ def partidas_pu_inconsistente(conn, pid: int) -> list[dict]:
     return out
 
 
+def motivo_revision(pu, tiene_acu: bool) -> str | None:
+    """Por qué conviene revisar el precio de una partida (issue #53):
+    'precio_1' (relleno 1.00 del banco), 'sin_precio', 'sin_acu' o None."""
+    p = round(float(pu or 0), 2)
+    if p == 1.0:
+        return 'precio_1'
+    if p == 0:
+        return 'sin_precio'
+    return None if tiene_acu else 'sin_acu'
+
+
+def partidas_por_revisar(conn, pid: int) -> list[dict]:
+    """Partidas (no títulos) del proyecto con precio 1.00, sin precio o sin ACU."""
+    rows = conn.execute(
+        """SELECT p.id, p.item, p.descripcion, p.precio_unitario,
+                  EXISTS(SELECT 1 FROM acu_items a WHERE a.partida_id=p.id) AS acu
+           FROM partidas p WHERE p.proyecto_id=? AND COALESCE(p.es_titulo,0)=0
+           ORDER BY COALESCE(p.sub_presupuesto_id,0), p.item""", (pid,)).fetchall()
+    out = []
+    for r in rows:
+        m = motivo_revision(r['precio_unitario'], bool(r['acu']))
+        if m:
+            out.append({'partida_id': r['id'], 'item': r['item'] or '',
+                        'descripcion': r['descripcion'] or '', 'motivo': m})
+    return out
+
+
 def _siguiente_codigo_inei(conn, indice: str) -> str:
     """Retorna el siguiente código de 7 dígitos para un índice INEI dado (IU(2)+seq(5))."""
     indice = str(indice).zfill(2)[:2]

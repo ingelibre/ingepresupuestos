@@ -1048,6 +1048,16 @@ class ConfiguracionView(QWidget):
         self.spin_dec_met.valueChanged.connect(self._actualizar_ejemplo)
         self._actualizar_ejemplo()
 
+        from PySide6.QtWidgets import QCheckBox
+        from views.aviso_partidas_dialog import CLAVE, aviso_activo
+        self.chk_aviso_precios = QCheckBox(
+            tr("Avisar antes de imprimir o exportar si hay partidas con precio "
+               "1.00 o sin precio"))
+        self.chk_aviso_precios.setChecked(aviso_activo())
+        self.chk_aviso_precios.toggled.connect(
+            lambda on: set_config(CLAVE, '1' if on else '0'))
+        vl.addWidget(self.chk_aviso_precios)
+
         hl = QHBoxLayout()
         hl.addStretch()
         btn = QPushButton(tr("Guardar"))

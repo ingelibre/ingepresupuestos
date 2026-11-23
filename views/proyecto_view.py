@@ -5337,6 +5337,10 @@ class ProyectoView(QWidget):
             "JOIN partidas p ON p.id=md.partida_id WHERE p.proyecto_id=?",
             (self.pid,)
         ).fetchall()}
+        con_acu = {r[0] for r in conn.execute(
+            "SELECT DISTINCT a.partida_id FROM acu_items a "
+            "JOIN partidas p ON p.id=a.partida_id WHERE p.proyecto_id=?",
+            (self.pid,))}
         conn.close()
 
         self.tree.blockSignals(True)
@@ -5421,6 +5425,7 @@ class ProyectoView(QWidget):
                 tw.setText(3, f"{met:,.{get_decimales_metrado()}f}")
                 tw.setData(3, Qt.UserRole, tiene_planilla)   # ✓ en Metrado = planilla
                 tw.setText(4, f"{pu:,.{dec}f}")
+                self._marcar_precio(tw, pu, row['id'] in con_acu)
                 parcial = parcial_wysiwyg(met, pu, dec)
                 tw.setText(5, fmt_num(parcial, self._moneda, dec))
                 tw.setData(5, Qt.UserRole, float(parcial))  # valor numérico para totales de títulos
@@ -8267,6 +8272,16 @@ class ProyectoView(QWidget):
         if self.tabs.currentIndex() == 1:
             self.cargar_insumos(self._ins_estado)
 
+    def _marcar_precio(self, tw, pu, tiene_acu: bool):
+        """P.U. en rojo discreto (y el motivo en el tooltip) si la partida tiene
+        el precio de relleno 1.00, no tiene precio o no tiene ACU (issue #53)."""
+        from core.database import motivo_revision
+        from utils.theme import RED_500
+        from views.aviso_partidas_dialog import motivo_texto
+        motivo = motivo_revision(pu, tiene_acu)
+        tw.setForeground(4, QBrush(QColor(RED_500 if motivo else SLATE_700)))
+        tw.setToolTip(4, motivo_texto(motivo) if motivo else '')
+
     def _actualizar_arbol_partida(self, part_id: int):
         """Actualiza P.U. y Parcial del ítem en el árbol después de un cambio en ACU."""
         if part_id not in self._id_to_item:
@@ -8275,6 +8290,8 @@ class ProyectoView(QWidget):
         p = conn.execute(
             "SELECT metrado, precio_unitario FROM partidas WHERE id=?", (part_id,)
         ).fetchone()
+        tiene_acu = conn.execute("SELECT 1 FROM acu_items WHERE partida_id=? LIMIT 1",
+                                 (part_id,)).fetchone() is not None
         conn.close()
         if not p:
             return
@@ -8284,6 +8301,7 @@ class ProyectoView(QWidget):
         dec     = get_decimales_ppto()
         parcial = parcial_wysiwyg(met, pu, dec)
         tw.setText(4, f"{pu:,.{dec}f}")
+        self._marcar_precio(tw, pu, tiene_acu)
         tw.setText(5, fmt(parcial, self._moneda, dec))
         tw.setData(5, Qt.UserRole, float(parcial))
         # Recalcular totales de los títulos padres
@@ -10333,6 +10351,10 @@ class ProyectoView(QWidget):
             if dlg.exec() != QDialog.Accepted or lw.currentRow() < 0:
                 return
             clave, nombre, generador = opciones[lw.currentRow()]
+
+        from views.aviso_partidas_dialog import confirmar_salida
+        if not confirmar_salida(self, self.pid, clave):
+            return
 
         # Ventanita de progreso: se genera en este hilo y el Completo o un
         # cronograma tardan; sin esto parecía colgado.
