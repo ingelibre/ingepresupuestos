@@ -1,0 +1,12 @@
+{
+  "esquema": 1,
+  "id": "apu-mexico",
+  "nombre": "Matriz de precio unitario (México)",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #30)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Matriz de cada precio unitario con costo directo, indirectos de oficina y de campo, financiamiento, utilidad y cargos adicionales en cascada, y el catálogo de conceptos con el precio unitario redondeado. Los porcentajes se escriben por proyecto y empiezan en 0. Es un reporte: no cambia el presupuesto.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/30",
+  "api_version": 2,
+  "codigo": "complemento.py"
+}
