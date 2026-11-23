@@ -35,7 +35,7 @@ import core.paises as paises                                      # noqa: E402
 import core.pdf_reports as pr                                     # noqa: E402
 from core.pie import lineas_por_defecto                           # noqa: E402
 from core.word_reports import generar_word                        # noqa: E402
-from utils.formatting import monto_en_letras                      # noqa: E402
+from utils.formatting import fmt_doc, monto_en_letras             # noqa: E402
 
 
 def _proyecto(pie, subs=1, pais='UY', gf=10.0, util=5.0, imp=22.0, precio=3000.0):
@@ -100,7 +100,7 @@ def test_letras_y_cifras_coinciden_en_todos_los_formatos(pie, pais, subs, tmp_pa
         cd = d.calcular_totales(pid)[1]['cd']
         total = d.calcular_totales(pid)[1]['total']
         letras = monto_en_letras(total, 'Pesos Uruguayos')
-        cifras = re.compile(re.escape(pr._fmt(total)))
+        cifras = re.compile(re.escape(fmt_doc(total, 2, moneda='Pesos Uruguayos')))
         if pie in ('vacio', 'defecto'):
             assert total > cd
 

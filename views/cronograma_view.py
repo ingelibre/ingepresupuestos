@@ -48,7 +48,7 @@ from core.pdf_reports import (
     _rect_logo,
     _oculto as _oculto_rep,
 )
-from utils.formatting import fmt, parse_num, ITEM_TRAMOS_POR_LINEA
+from utils.formatting import fmt, fmt_doc, parse_num, ITEM_TRAMOS_POR_LINEA
 from utils.i18n import N_, tr
 from utils.icons import qss_icon_url
 from utils.theme import nivel_fg as _nivel_fg
@@ -7871,7 +7871,7 @@ class ValorizadoWidget(_EscGlobalMixin, QWidget):
             # Cantidad (= metrado): número sin símbolo de moneda, con los
             # decimales de metrado configurados y coma como separador de miles
             _dm = get_decimales_metrado()
-            cant_txt = (f"{metrado_v:,.{_dm}f}") if metrado_v else ''
+            cant_txt = (fmt_doc(metrado_v, _dm, moneda=moneda)) if metrado_v else ''
             cells_left = [
                 (p['item'] or '',           Qt.AlignLeft  | Qt.AlignVCenter),
                 (p['descripcion'] or '',     Qt.AlignLeft  | Qt.AlignVCenter),
@@ -7900,7 +7900,7 @@ class ValorizadoWidget(_EscGlobalMixin, QWidget):
                 mval = weekly_met[i] if i < len(weekly_met) else 0.0
                 vval = weekly[i] if i < len(weekly) else 0.0
                 # Metrado (sub-col 2i)
-                itm = QTableWidgetItem(f"{mval:,.2f}" if mval > 0 else '')
+                itm = QTableWidgetItem(fmt_doc(mval, 2, moneda=moneda) if mval > 0 else '')
                 itm.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 itm.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if mval > 0:
@@ -8530,7 +8530,7 @@ class ValorizadoWidget(_EscGlobalMixin, QWidget):
             if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
-            return parse_num(s)
+            return parse_num(s, self._cv._moneda, mostrado=True)
 
         # Acceso a las partidas para detectar títulos por índice (las filas
         # del QTableWidget mantienen el mismo orden que `_cv._partidas`).
@@ -11232,7 +11232,7 @@ class InsumosWidget(_EscGlobalMixin, QWidget):
 
             cost_total = sum(rec['weekly'])
             qty_total  = sum(rec.get('weekly_qty', []))
-            cant_txt = f"{qty_total:,.2f}" if qty_total > 0 else ''
+            cant_txt = fmt_doc(qty_total, 2, moneda=moneda) if qty_total > 0 else ''
             cells_left = [
                 (rec['tipo'],                  Qt.AlignCenter),
                 (rec['codigo'],                Qt.AlignLeft  | Qt.AlignVCenter),
@@ -11257,7 +11257,7 @@ class InsumosWidget(_EscGlobalMixin, QWidget):
                 qv = wq[i] if i < len(wq) else 0.0
                 vv = rec['weekly'][i] if i < len(rec['weekly']) else 0.0
                 # Cantidad (sub-col 2i)
-                itq = QTableWidgetItem(f"{qv:,.2f}" if qv > 0 else '')
+                itq = QTableWidgetItem(fmt_doc(qv, 2, moneda=moneda) if qv > 0 else '')
                 itq.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 itq.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if qv > 0:
@@ -11816,7 +11816,7 @@ class InsumosWidget(_EscGlobalMixin, QWidget):
             if not _re.match(r'^\s*-?\s*(?:' + _re_simbolos_moneda() + r')?'
                              r'\s*-?' + _NUM + r'\s*%?\s*$', str(s)):
                 return s
-            return parse_num(s)
+            return parse_num(s, self._cv._moneda, mostrado=True)
 
         def _alto_desc(texto: str) -> float:
             """Alto de fila (pts) para que la Descripción mergeada C+D con

@@ -44,7 +44,7 @@ from core.formula_polinomica import (
     incidencias_por_iu,
 )
 from core.indices_inei import listar_areas
-from utils.formatting import fmt, parse_num
+from utils.formatting import fmt, fmt_doc, parse_num
 from views._catalogo_base import EditorPlenoDelegate
 from utils.i18n import tr, N_
 from utils.icons import icon
@@ -392,7 +392,7 @@ class DesgloseIUDialog(QDialog):
         for ins in des['insumos']:
             it = QTreeWidgetItem([
                 ins['descripcion'], ins['unidad'] or '',
-                f"{ins['cantidad']:,.2f}", fmt(ins['monto'], moneda),
+                fmt_doc(ins['cantidad'], 2, moneda=moneda), fmt(ins['monto'], moneda),
                 f"{ins['monto'] / total * 100:.2f}%",
             ])
             f_b = QFont(); f_b.setBold(True)
@@ -406,7 +406,7 @@ class DesgloseIUDialog(QDialog):
             for p in ins['partidas']:
                 hijo = QTreeWidgetItem([
                     f"{p['item']}  {p['descripcion']}", p['unidad'] or '',
-                    f"{p['cantidad']:,.2f}", fmt(p['monto'], moneda),
+                    fmt_doc(p['cantidad'], 2, moneda=moneda), fmt(p['monto'], moneda),
                     f"{p['monto'] / total * 100:.2f}%",
                 ])
                 for c in (2, 3, 4):

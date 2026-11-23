@@ -64,9 +64,11 @@ def fmt(valor: float, moneda: str = 'Soles', decimales: int = 2) -> str:
 
 # Agrupación de miles perfecta con coma: 1,000 · 12,500 · 1,234,567
 _RE_MILES_COMA = _re.compile(r'^\d{1,3}(?:,\d{3})+$')
+_RE_MILES_PUNTO = _re.compile(r'^\d{1,3}(\.\d{3})+$')
 
 
-def parse_num(val) -> float:
+def parse_num(val, moneda: 'str | None' = None, *,
+              mostrado: bool = False) -> float:
     """Convierte a float un número escrito por el usuario o formateado por la app.
 
     Acepta '21.36' y '21,36' como decimales, entiende el separador de miles
@@ -78,6 +80,11 @@ def parse_num(val) -> float:
     f"{v:,.2f}", así que todo valor de 4 cifras o más vuelve del widget con
     coma. Tratar esa coma como decimal partía el número (1,000.00 → error) y
     la cantidad se perdía en el cálculo.
+
+    Con `moneda` de coma decimal, la coma es SIEMPRE decimal («12,345» son
+    doce y fracción, no doce mil).  Un punto solo sigue siendo decimal —es el
+    del teclado numérico— salvo en un texto `mostrado` por la app, donde
+    «1.234» es agrupación de miles.
     """
     if val is None or val == '':
         return 0.0
@@ -89,6 +96,17 @@ def parse_num(val) -> float:
     s   = s.replace('-', '')
     if not s:
         return 0.0
+    if moneda and separadores(moneda)[1] == ',':
+        if ',' in s and s.rfind('.') > s.rfind(','):
+            s = s.replace(',', '')      # «1,234.56» pegado de fuera
+        elif ',' in s:
+            s = s.replace('.', '').replace(',', '.')
+        elif s.count('.') > 1 or (mostrado and _RE_MILES_PUNTO.match(s)):
+            s = s.replace('.', '')
+        try:
+            return -float(s) if neg else float(s)
+        except ValueError:
+            return 0.0
     if ',' in s and '.' in s:
         # Con ambos separadores, el ÚLTIMO en aparecer es el decimal
         if s.rfind(',') > s.rfind('.'):
@@ -107,7 +125,8 @@ def parse_num(val) -> float:
         return 0.0
 
 
-def parse_num_opt(val) -> 'float | None':
+def parse_num_opt(val, moneda: 'str | None' = None, *,
+                  mostrado: bool = False) -> 'float | None':
     """Como parse_num, pero devuelve None cuando el texto no contiene número.
 
     Para celdas de planilla donde «vacío» y «cero» significan cosas distintas
@@ -117,7 +136,17 @@ def parse_num_opt(val) -> 'float | None':
     s = str(val).strip()
     if not s or not _re.search(r'\d', s):
         return None
-    return parse_num(s)
+    return parse_num(s, moneda, mostrado=mostrado)
+
+
+def texto_para_editar(txt: str, moneda: 'str | None' = None) -> str:
+    """El número de una celda, sin separador de miles, para abrir su editor."""
+    miles, dec = separadores(moneda or '')
+    if dec == '.':
+        return (txt or '').replace(miles, '').strip()
+    if dec in (txt or '') or len((txt or '').split(miles)) > 2:
+        return txt.replace(miles, '').strip()
+    return (txt or '').strip()       # «1.5» crudo: el punto es decimal
 
 
 def texto_rendimiento(rendimiento, unidad='', *, decimales=2,

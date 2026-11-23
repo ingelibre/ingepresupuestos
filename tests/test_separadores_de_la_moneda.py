@@ -140,3 +140,60 @@ def test_los_generadores_con_proyecto_estan_decorados():
                 args = set(inspect.signature(fn).parameters)
                 if args & {'pid', 'proy', 'proyecto_id', 'val_id', 'req_id'}:
                     assert hasattr(fn, '__wrapped__'), nombre
+
+
+def test_leer_de_vuelta_lo_que_se_muestra():
+    for n in (0.125, 12.345, 1234.5, 12345.678, 1234567.0):
+        for dec in (0, 2, 3, 4):
+            for m in ('Soles', UY, 'Dólares'):
+                t = F.fmt_doc(n, dec, moneda=m)
+                assert F.parse_num(t, m, mostrado=True) == pytest.approx(round(n, dec)), (t, m)
+                ed = F.texto_para_editar(t, m)
+                if dec:
+                    assert F.parse_num(ed, m) == pytest.approx(round(n, dec)), (ed, m)
+    # Lo tecleado: la coma es decimal y el punto del teclado numérico también.
+    assert F.parse_num('0,125', UY) == 0.125
+    assert F.parse_num('0.125', UY) == 0.125
+    assert F.texto_para_editar('1.5', UY) == '1.5'
+    assert F.parse_num('1,234') == 1234       # sin moneda, como siempre
+
+
+def test_el_arbol_y_la_planilla_en_pantalla(uruguay):
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    from views.proyecto_view import ProyectoView
+    from models.usuario import Usuario
+    conn = d.get_db()
+    p = conn.execute("SELECT id, metrado, precio_unitario FROM partidas WHERE"
+                     " proyecto_id=? AND es_titulo=0 AND metrado>0 LIMIT 1",
+                     (PID,)).fetchone()
+    conn.execute("DELETE FROM metrados_detalle WHERE partida_id=?", (p['id'],))
+    conn.execute("UPDATE partidas SET metrado=12345.67 WHERE id=?", (p['id'],))
+    conn.commit()
+    conn.close()
+    conn = d.get_db()
+    conn.execute("UPDATE proyectos SET estado='elaboracion' WHERE id=?", (PID,))
+    conn.commit()
+    conn.close()
+    v = ProyectoView(PID, Usuario(id=1, nombre="t", rol="admin"))
+    try:
+        v.recargar_partidas()
+        tw = v._id_to_item[p['id']]
+        assert tw.text(3) == '12.345,67'
+        assert tw.text(4) == F.fmt_doc(p['precio_unitario'], 2, moneda=UY)
+
+        dele, idx = v._metrado_delegate, v.tree.indexFromItem(tw, 3)
+        ed = dele.createEditor(v.tree.viewport(), QStyleOptionViewItem(), idx)
+        dele.setEditorData(ed, idx)
+        assert ed.text() == '12345,67'
+        for escrito, vale, se_ve in (('2500,5', 2500.5, '2.500,50'),
+                                     ('12.5', 12.5, '12,50')):
+            ed.setText(escrito)
+            dele.setModelData(ed, v.tree.model(), idx)
+            assert v._id_to_item[p['id']].text(3) == se_ve
+            conn = d.get_db()
+            assert conn.execute("SELECT metrado FROM partidas WHERE id=?",
+                                (p['id'],)).fetchone()[0] == vale
+            conn.close()
+    finally:
+        v.hide()
+        v.deleteLater()

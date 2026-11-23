@@ -30,7 +30,7 @@ from PySide6.QtGui import (QColor, QFont, QPainter, QBrush, QKeySequence,
                            QTextCharFormat, QPolygonF)
 
 from core.database import get_db, get_decimales_metrado, get_config, set_config
-from utils.formatting import fmt_num, parse_num, parse_num_opt
+from utils.formatting import fmt_doc, fmt_num, parse_num, parse_num_opt
 from utils.i18n import tr, N_
 import core.valorizacion as V
 import core.parte_diario as PD
@@ -718,16 +718,16 @@ class _ValorizacionesPanel(QWidget):
             self._set(r, COL_S_PCT, _pp(f['sal_val'], base), es_tit=True, nivel=niv, num=True)
             return
         self._set(r, COL_UND, f['unidad'] or "", num=True)
-        self._set(r, COL_B_METR, _m(f['base_metr'], dm), num=True)
+        self._set(r, COL_B_METR, _m(f['base_metr'], dm, self._proy.get('moneda', '')), num=True)
         self._set(r, COL_B_PU, money(f['precio_unitario']), num=True)
         self._set(r, COL_B_PARC, money(f['base_val']), num=True)
-        self._set(r, COL_A_METR, _m(f['ant_metr'], dm), num=True)
+        self._set(r, COL_A_METR, _m(f['ant_metr'], dm, self._proy.get('moneda', '')), num=True)
         self._set(r, COL_A_VAL, money(f['ant_val']), num=True)
         self._set(r, COL_A_PCT, _pp(f['ant_val'], base), num=True)
         # Grupo «Actual» resaltado en banana; el metrado (editable) más fuerte.
         # Si lo alimenta el parte diario, queda de solo lectura y en azul.
         es_diario = (f.get('origen') == 'diario')
-        self._set(r, COL_C_METR, _m(f['act_metr'], dm), num=True,
+        self._set(r, COL_C_METR, _m(f['act_metr'], dm, self._proy.get('moneda', '')), num=True,
                   editable=(abierta and not es_diario),
                   bg=(DIARIO_BG if es_diario else BANANA_100),
                   tip=(tr("Metrado calculado desde el parte diario (cuaderno de "
@@ -735,10 +735,10 @@ class _ValorizacionesPanel(QWidget):
                        if es_diario else None))
         self._set(r, COL_C_VAL, money(f['act_val']), num=True, bg=BANANA_SOFT)
         self._set(r, COL_C_PCT, _pp(f['act_val'], base), num=True, bg=BANANA_SOFT)
-        self._set(r, COL_K_METR, _m(f['acu_metr'], dm), num=True, danger=over_metr)
+        self._set(r, COL_K_METR, _m(f['acu_metr'], dm, self._proy.get('moneda', '')), num=True, danger=over_metr)
         self._set(r, COL_K_VAL, money(f['acu_val']), num=True, danger=over_val)
         self._set(r, COL_K_PCT, _pp(f['acu_val'], base), num=True, danger=over_val)
-        self._set(r, COL_S_METR, _m(f['sal_metr'], dm), num=True)
+        self._set(r, COL_S_METR, _m(f['sal_metr'], dm, self._proy.get('moneda', '')), num=True)
         self._set(r, COL_S_VAL, money(f['sal_val']), num=True)
         self._set(r, COL_S_PCT, _pp(f['sal_val'], base), num=True)
 
@@ -863,13 +863,14 @@ class _ValorizacionesPanel(QWidget):
         pid_part = item0.data(Qt.UserRole)
         if pid_part is None:
             return
-        val = parse_num(item.text())
+        val = parse_num(item.text(), self._proy.get('moneda', ''),
+                        mostrado=not get_decimales_metrado())
         if val < 0:
             val = 0
         if V.set_metrado_ejecutado(self._val_id, pid_part, val):
             # Reformatear la celda editada a los decimales de metrado (1 → 1.00).
             self.tbl.blockSignals(True)
-            item.setText(_m(val, get_decimales_metrado()))
+            item.setText(_m(val, get_decimales_metrado(), self._proy.get('moneda', '')))
             self.tbl.blockSignals(False)
             # Actualización EN SU LUGAR (no reconstruye la tabla) → rápido y
             # conserva el foco para seguir bajando por la columna.
@@ -908,8 +909,8 @@ class _ValorizacionesPanel(QWidget):
             self._upd(r, COL_S_VAL, money(f['sal_val']))
             self._upd(r, COL_S_PCT, _pp(f['sal_val'], base))
             if not es_tit:
-                self._upd(r, COL_K_METR, _m(f['acu_metr'], dm), danger=over_metr)
-                self._upd(r, COL_S_METR, _m(f['sal_metr'], dm))
+                self._upd(r, COL_K_METR, _m(f['acu_metr'], dm, self._proy.get('moneda', '')), danger=over_metr)
+                self._upd(r, COL_S_METR, _m(f['sal_metr'], dm, self._proy.get('moneda', '')))
         self.tbl.blockSignals(False)
         self._pintar_total(resumen, moneda)
         self._pintar_resumen(resumen)
@@ -1812,20 +1813,20 @@ class _CuadernoPanel(QWidget):
                     self._celda(self.tbl_dias, r, j, "")
                 continue
             self._celda(self.tbl_fix, r, CUA_UND, p['unidad'] or "")
-            self._celda(self.tbl_fix, r, CUA_BASE, _m(p['metrado'] or 0, dm), num=True)
+            self._celda(self.tbl_fix, r, CUA_BASE, _m(p['metrado'] or 0, dm, self._proy.get('moneda', '')), num=True)
             total = 0.0
             for j, pr in enumerate(partes):
                 val = metr_por_parte[pr['id']].get(p['id'], 0)
                 total += val
                 cerr = (pr['estado'] == 'cerrado')
                 det = (pr['id'], p['id']) in self._con_detalle
-                self._celda(self.tbl_dias, r, j, (_m(val, dm) if val else ""),
+                self._celda(self.tbl_dias, r, j, (_m(val, dm, self._proy.get('moneda', '')) if val else ""),
                             num=True,
                             editable=(not cerr and not det and _co_editable(self._proy)),
                             daybg=(DAY_CLOSED_BG if cerr else None),
                             rotip=(tr("Metrado calculado desde la planilla del día.")
                                    if det else None))
-            self._celda(self.tbl_fix, r, CUA_ACUM, (_m(total, dm) if total else ""),
+            self._celda(self.tbl_fix, r, CUA_ACUM, (_m(total, dm, self._proy.get('moneda', '')) if total else ""),
                         num=True, acum=True, over=_excede(total, p['metrado'] or 0))
         self.tbl_fix.blockSignals(False)
         self.tbl_dias.blockSignals(False)
@@ -2158,12 +2159,12 @@ class _CuadernoPanel(QWidget):
             tr("Metrados — {item}  {descripcion}").format(item=p.get('item',''), descripcion=p.get('descripcion','')).strip())
         ref, reftot = PD.get_metrado_detalle_proyecto(pid_part)
         self._llenar_met(self.tbl_ref, ref, dm, editable=False)
-        self.lbl_ref_total.setText(tr("Total proyecto: {total}").format(total=_m(reftot, dm)))
+        self.lbl_ref_total.setText(tr("Total proyecto: {total}").format(total=_m(reftot, dm, self._proy.get('moneda', ''))))
         parte = PD.get_parte(self._dia_parte)
         abierto = bool(parte and parte['estado'] == 'abierto')
         dia, diatot = PD.get_metrado_detalle_dia(self._dia_parte, pid_part)
         self._llenar_met(self.tbl_dia, dia, dm, editable=abierto, add_empty=abierto)
-        self.lbl_dia_total.setText(tr("Total del día: {total}").format(total=_m(diatot, dm)))
+        self.lbl_dia_total.setText(tr("Total del día: {total}").format(total=_m(diatot, dm, self._proy.get('moneda', ''))))
         self.tbl_dia.setEnabled(True)
 
     # ── Copiar / pegar / eliminar (Ctrl+C / Ctrl+V / Supr / clic derecho) ─────
@@ -2262,7 +2263,7 @@ class _CuadernoPanel(QWidget):
             parc = PD._parcial_dims(fila)
             pit = self.tbl_dia.item(r, 7)
             if pit is not None:
-                pit.setText(_m(parc, dm) if parc else "")
+                pit.setText(_m(parc, dm, self._proy.get('moneda', '')) if parc else "")
         # Fila vacía final si la última tiene datos.
         last = self.tbl_dia.rowCount() - 1
         if last < 0 or self._fila_met_no_vacia(self.tbl_dia, last):
@@ -2280,7 +2281,7 @@ class _CuadernoPanel(QWidget):
         total = PD.save_metrado_detalle_dia(self._dia_parte, self._partida_sel, filas)
         if total is None:
             return
-        self.lbl_dia_total.setText(tr("Total del día: {total}").format(total=_m(total, dm)))
+        self.lbl_dia_total.setText(tr("Total del día: {total}").format(total=_m(total, dm, self._proy.get('moneda', ''))))
         self._reflejar_metrado_en_grilla(self._partida_sel, self._dia_parte, total)
 
     # ── Mano de obra / insumos del día (Fase B) ───────────────────────────────
@@ -2483,7 +2484,7 @@ class _CuadernoPanel(QWidget):
         cant = None
         if ct:
             try:
-                cant = parse_num(ct)
+                cant = parse_num(ct, self._proy.get('moneda', ''))
             except (TypeError, ValueError):
                 cant = None
         return {'recurso_id': rid, 'descripcion': txt(RES_DESC),
@@ -2700,7 +2701,7 @@ class _CuadernoPanel(QWidget):
                 _numtxt(f.get('n_estructuras')), _numtxt(f.get('n_elementos')),
                 _numtxt(f.get('area')), _numtxt(f.get('largo')),
                 _numtxt(f.get('ancho')), _numtxt(f.get('alto')),
-                (_m(parc, dm) if parc else '')]
+                (_m(parc, dm, self._proy.get('moneda', '')) if parc else '')]
         for c, txt in enumerate(vals):
             it = QTableWidgetItem(txt)
             if c >= 1:
@@ -2722,7 +2723,7 @@ class _CuadernoPanel(QWidget):
             if not t:
                 return None
             try:
-                val = parse_num(t)
+                val = parse_num(t, self._proy.get('moneda', ''))
             except (TypeError, ValueError):
                 return None
             return None if val == 0 else val   # 0 = dimensión vacía
@@ -2749,7 +2750,7 @@ class _CuadernoPanel(QWidget):
         self._met_loading = True
         pit = self.tbl_dia.item(r, 7)
         if pit:
-            pit.setText(_m(parc, dm) if parc else "")
+            pit.setText(_m(parc, dm, self._proy.get('moneda', '')) if parc else "")
         # Agregar fila vacía si se llenó la última.
         last = self.tbl_dia.rowCount() - 1
         if r == last and self._fila_met_no_vacia(self.tbl_dia, r):
@@ -2772,7 +2773,7 @@ class _CuadernoPanel(QWidget):
         self.tbl_dias.blockSignals(True)
         it = self.tbl_dias.item(row, col)
         if it is not None:
-            it.setText(_m(total, dm) if total else "")
+            it.setText(_m(total, dm, self._proy.get('moneda', '')) if total else "")
             flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
             if total > 0:
                 it.setToolTip(tr("Metrado calculado desde la planilla del día."))
@@ -2798,13 +2799,14 @@ class _CuadernoPanel(QWidget):
         pid_part = self._row_partida[r] if r < len(self._row_partida) else None
         if pid_part is None:
             return
-        val = parse_num(item.text())
+        val = parse_num(item.text(), self._proy.get('moneda', ''),
+                        mostrado=not get_decimales_metrado())
         if val < 0:
             val = 0
         if PD.set_metrado_dia(self._col2parte[col], pid_part, val):
             dm = get_decimales_metrado()
             self.tbl_dias.blockSignals(True)
-            item.setText(_m(val, dm) if val else "")
+            item.setText(_m(val, dm, self._proy.get('moneda', '')) if val else "")
             self.tbl_dias.blockSignals(False)
             self._recalcular_acum(r, dm)
 
@@ -2813,13 +2815,13 @@ class _CuadernoPanel(QWidget):
         for col in self._col2parte:
             it = self.tbl_dias.item(row, col)
             if it and it.text():
-                total += parse_num(it.text())
+                total += parse_num(it.text(), self._proy.get('moneda', ''), mostrado=True)
         ita = self.tbl_fix.item(row, CUA_ACUM)
         if ita is None:
             return
         base = (self._partidas[row]['metrado'] if row < len(self._partidas) else 0) or 0
         self.tbl_fix.blockSignals(True)
-        ita.setText(_m(total, dm) if total else "")
+        ita.setText(_m(total, dm, self._proy.get('moneda', '')) if total else "")
         # Rojo si el ejecutado acumulado supera el contractual.
         if _excede(total, base):
             ita.setForeground(QColor(RED_700))
@@ -2923,7 +2925,7 @@ class _CuadernoPanel(QWidget):
             L.append("ACTIVIDADES REALIZADAS:")
             for a in acts:
                 L.append(f"- {a['item']} {a['descripcion']} — "
-                         f"{_m(a['metrado_dia'], dm)} {a['unidad'] or ''}".rstrip())
+                         f"{_m(a['metrado_dia'], dm, self._proy.get('moneda', ''))} {a['unidad'] or ''}".rstrip())
             L.append("")
         # 3) Materiales · Equipos · Servicios
         for clase, tit in (('mat', 'MATERIALES'), ('eq', 'EQUIPOS'),
@@ -3565,8 +3567,8 @@ class _AlmacenPanel(QWidget):
             if primera_datos is None:
                 primera_datos = r
             vals = [f['descripcion'], f['unidad'],
-                    _m(f['pedido'], dm), _m(f['ingresado'], dm),
-                    _m(f['consumido'], dm), _m(f['stock'], dm), _m(f['por_llegar'], dm)]
+                    _m(f['pedido'], dm, self._proy.get('moneda', '')), _m(f['ingresado'], dm, self._proy.get('moneda', '')),
+                    _m(f['consumido'], dm, self._proy.get('moneda', '')), _m(f['stock'], dm, self._proy.get('moneda', '')), _m(f['por_llegar'], dm, self._proy.get('moneda', ''))]
             for c, txt in enumerate(vals):
                 it = QTableWidgetItem(txt)
                 if c == ALM_DESC:
@@ -3627,7 +3629,7 @@ class _AlmacenPanel(QWidget):
         self.k_titulo.setText(f"{f['descripcion']}  ({und})" if und else f['descripcion'])
         self.k_resumen.setText(
             tr("Pedido {pedido} · Ingresado {ingresado} · "
-            "Consumido {consumido} · Stock {stock}").format(pedido=_m(f['pedido'], dm), ingresado=_m(f['ingresado'], dm), consumido=_m(f['consumido'], dm), stock=_m(f['stock'], dm)))
+            "Consumido {consumido} · Stock {stock}").format(pedido=_m(f['pedido'], dm, self._proy.get('moneda', '')), ingresado=_m(f['ingresado'], dm, self._proy.get('moneda', '')), consumido=_m(f['consumido'], dm, self._proy.get('moneda', '')), stock=_m(f['stock'], dm, self._proy.get('moneda', ''))))
         mov = ALM.movimientos(self.pid, rid)
         self._k_loading = True
         self.k_tbl.setRowCount(0)
@@ -3651,9 +3653,9 @@ class _AlmacenPanel(QWidget):
             else:
                 tip = ""
             vals = [_fmt_fecha(m['fecha']),
-                    _m(cant, dm) if es_ent else "",
-                    _m(cant, dm) if not es_ent else "",
-                    _m(round(stock, 2), dm),
+                    _m(cant, dm, self._proy.get('moneda', '')) if es_ent else "",
+                    _m(cant, dm, self._proy.get('moneda', '')) if not es_ent else "",
+                    _m(round(stock, 2), dm, self._proy.get('moneda', '')),
                     m.get('observacion') or ""]
             for c, txt in enumerate(vals):
                 it = QTableWidgetItem(txt)
@@ -3743,7 +3745,7 @@ class _AlmacenPanel(QWidget):
         if dlg.exec() != QDialog.Accepted:
             return None
         try:
-            q = parse_num(cant.text())
+            q = parse_num(cant.text(), self._proy.get('moneda', ''))
         except (TypeError, ValueError):
             q = 0
         if not q or q <= 0:
@@ -5365,7 +5367,7 @@ class _RequerimientosPanel(QWidget):
         ct = txt(REQ_REQ); cant = None
         if ct:
             try:
-                cant = parse_num(ct)
+                cant = parse_num(ct, self._proy.get('moneda', ''))
             except (TypeError, ValueError):
                 cant = None
         return {'recurso_id': rid, 'descripcion': txt(REQ_DESC),
@@ -5904,10 +5906,10 @@ def _fmt_fecha(iso):
     return str(iso)
 
 
-def _m(metrado, dec):
+def _m(metrado, dec, moneda=None):
     if metrado is None:
         return ""
-    return f"{metrado:,.{dec}f}"
+    return fmt_doc(metrado, dec, moneda=moneda or '')
 
 
 def _pct(pct):
