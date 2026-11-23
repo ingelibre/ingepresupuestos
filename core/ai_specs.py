@@ -597,7 +597,7 @@ def generar_spec_partida(partida_id: int, prompt_extra: str = None):
         'SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)
     ).fetchone()
     acu_items = conn.execute(
-        """SELECT ai.*, r.codigo, r.descripcion as rec_desc, r.tipo,
+        """SELECT ai.*, r.codigo, COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) as rec_desc, r.tipo,
                   r.unidad as rec_unidad, COALESCE(ai.precio, r.precio, 0) as precio
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=?""",
@@ -950,7 +950,7 @@ def generar_rendimiento_partida(partida_id: int):
         return None, None, 'Partida no encontrada.'
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
-        """SELECT ai.cuadrilla, r.descripcion as rec_desc, r.unidad as rec_unidad
+        """SELECT ai.cuadrilla, COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) as rec_desc, r.unidad as rec_unidad
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=? AND r.tipo='MO'""",
         (partida_id,)
@@ -1029,7 +1029,7 @@ def generar_cantidades_materiales(partida_id: int):
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
         """SELECT ai.id as acu_item_id, ai.cantidad, r.id as recurso_id,
-                  r.descripcion, r.tipo, r.unidad as rec_unidad,
+                  COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) AS descripcion, r.tipo, r.unidad as rec_unidad,
                   COALESCE(ai.precio, r.precio, 0) as precio
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=? AND r.tipo IN ('MAT','EQ')
@@ -1180,7 +1180,7 @@ def chat_acu_asistente(partida_id: int, historial: list, mensaje: str,
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
         """SELECT ai.cuadrilla, ai.cantidad, COALESCE(ai.precio, r.precio, 0) as precio,
-                  r.descripcion, r.tipo, r.unidad as rec_unidad
+                  COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) AS descripcion, r.tipo, r.unidad as rec_unidad
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=?""",
         (partida_id,)
