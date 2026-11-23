@@ -491,7 +491,7 @@ class DiferenciasDialog(_Base):
         c = get_db()
         try:
             nom = {r['id']: f"{r['item']}  {r['descripcion']}" for r in c.execute(
-                "SELECT p.id, p.item, p.descripcion FROM partidas p JOIN bim_modelos m "
+                "SELECT p.id, p.item, p.descripcion FROM partidas_ppto p JOIN bim_modelos m "
                 "ON m.proyecto_id=p.proyecto_id WHERE m.id=?", (self.modelo_id,))}
         finally:
             c.close()
@@ -774,7 +774,7 @@ class ModeloBimDialog(_Base):
         try:
             rows = c.execute(
                 "SELECT p.id, p.item, p.descripcion, p.unidad, p.metrado, p.sub_presupuesto_id, s.nombre AS sub "
-                "FROM partidas p LEFT JOIN sub_presupuestos s ON s.id=p.sub_presupuesto_id "
+                "FROM partidas_ppto p LEFT JOIN sub_presupuestos s ON s.id=p.sub_presupuesto_id "
                 "WHERE p.proyecto_id=? AND COALESCE(p.es_titulo,0)=0 "
                 "ORDER BY (p.sub_presupuesto_id IS NOT ?), s.orden, p.item", (self.pid, self.sub_id)).fetchall()
         finally:

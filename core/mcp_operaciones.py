@@ -1042,7 +1042,7 @@ class Operaciones:
 
     def link_elements(self, item_id: int, model_id: int, global_ids: list,
                       measure: str | None = None, factor: float = 1.0,
-                      unlink: bool = False):
+                      unlink: bool = False, replace_manual: bool = False):
         from core.database import get_db
         conn = get_db()
         try:
@@ -1055,6 +1055,7 @@ class Operaciones:
         bim = self._bim()
         self._modelo_del_proyecto(model_id, pid)
         ids = list(dict.fromkeys(global_ids))
+        omitidos = []
         if unlink:
             self._externa('link_elements', pid, lambda:
                           bim.desvincular(item_id, model_id, ids))
@@ -1063,8 +1064,17 @@ class Operaciones:
             faltan = [g for g in ids if g not in hay]
             if faltan:
                 raise ErrorMCP("el modelo no tiene: " + ", ".join(faltan[:20]))
-            self._externa('link_elements', pid, lambda: bim.vincular(
-                item_id, model_id, ids, medida=measure, factor=factor))
+            def accion():
+                try:
+                    return bim.vincular(item_id, model_id, ids, medida=measure,
+                                        factor=factor,
+                                        **({'reemplazar_manual': True}
+                                           if replace_manual else {}))
+                except ValueError as e:
+                    raise ErrorMCP(str(e)) from e
+            res = self._externa('link_elements', pid, accion)
+            if isinstance(res, dict):
+                omitidos = _plano(res.get('omitidos') or [])
         conn = get_db()
         try:
             q = conn.execute("SELECT metrado FROM partidas WHERE id=?",
@@ -1072,7 +1082,8 @@ class Operaciones:
         finally:
             conn.close()
         return {"item_id": item_id, "quantity": q,
-                "links": len(bim.vinculos_partida(item_id))}
+                "links": len(bim.vinculos_partida(item_id)),
+                "skipped": omitidos}
 
     def elementos_a_mostrar(self, item_id: int | None = None,
                             global_ids: list | None = None) -> list[str]:

@@ -896,6 +896,8 @@ def vincular(partida_id: int, modelo_id: int, global_ids, medida: str | None = N
         m = c.execute("SELECT proyecto_id FROM bim_modelos WHERE id=?", (modelo_id,)).fetchone()
         if not p or p['es_titulo']:
             raise ValueError(tr("Elige una partida (no un título)."))
+        if p['es_subanalisis']:
+            raise ValueError(tr("Elige una partida del presupuesto (no una sub-partida)."))
         if not m or m['proyecto_id'] != p['proyecto_id']:
             raise ValueError(tr("El modelo no es de este proyecto."))
         if c.execute("SELECT 1 FROM acero_detalle WHERE partida_id=? LIMIT 1", (partida_id,)).fetchone():
@@ -1124,7 +1126,7 @@ def aplicar(modelo_id: int, modelo_nuevo: ModeloBim, partidas=None, *, nuevos=No
 
 def _id_por_item(conn, pid) -> dict:
     return {r['item']: r['id'] for r in conn.execute(
-        "SELECT id, item FROM partidas WHERE proyecto_id=?", (pid,))}
+        "SELECT id, item FROM partidas_ppto WHERE proyecto_id=?", (pid,))}
 
 
 def crear_proyecto(modelo: ModeloBim, ruta: str = '', propuestas=None) -> int:
@@ -1151,7 +1153,7 @@ def anadir_partidas(pid: int, modelo: ModeloBim, ruta: str = '', propuestas=None
     with _tx() as c:
         mid = registrar_modelo(pid, modelo, ruta, c)
         mx = 0
-        for (it,) in c.execute("SELECT item FROM partidas WHERE proyecto_id=? AND "
+        for (it,) in c.execute("SELECT item FROM partidas_ppto WHERE proyecto_id=? AND "
                                "sub_presupuesto_id IS ?", (pid, sub_id)):
             cab = str(it or '').split('.')[0]
             mx = max(mx, int(cab)) if cab.isdigit() else mx

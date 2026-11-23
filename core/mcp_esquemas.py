@@ -245,10 +245,13 @@ HERRAMIENTAS: list[dict] = [
      "description": "Vincula elementos del modelo a una partida: cada uno es "
                     "una fila de su planilla. `measure` elige la cantidad "
                     "(NetSideArea…); sin ella, el metrado del elemento. "
-                    "`unlink: true` los desvincula.",
+                    "`unlink: true` los desvincula. Los que no se pudieron "
+                    "vincular salen en `skipped` con el motivo. Un metrado "
+                    "escrito a mano solo se reemplaza con replace_manual.",
      "inputSchema": _obj({"item_id": _PART, "model_id": _MODELO,
                           "global_ids": _GLOBALES, "measure": _TXT,
-                          "factor": {"type": "number"}, "unlink": _BOOL},
+                          "factor": {"type": "number"}, "unlink": _BOOL,
+                          "replace_manual": _BOOL},
                          ("item_id", "model_id", "global_ids"))},
     {"name": "show_in_model", "lee": True,
      "description": "Selecciona en el IngeTrazo abierto los elementos de una "

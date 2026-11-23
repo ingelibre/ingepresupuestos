@@ -468,7 +468,7 @@ def test_bim_que_falla_a_medias_se_restaura(ops, bim):
     bim.crear()
     mid = ops.bim_apply(PID, 'ingetrazo', _takeoff=TAKE)["model_id"]
     h = huella()
-    with pytest.raises(ValueError):
+    with pytest.raises(ErrorMCP):
         ops.link_elements(partida(), mid, ["A", "ROMPE"])
     assert huella() == h
     assert ops.pila.resumen()['herramienta'] == 'bim_apply'
