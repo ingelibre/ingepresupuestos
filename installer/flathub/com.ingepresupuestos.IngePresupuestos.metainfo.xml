@@ -89,7 +89,7 @@
   </branding>
 
   <releases>
-    <release version="3.2.0" date="2026-11-25">
+    <release version="3.2.0" date="2026-11-23">
       <description>
         <p>Gracias a los usuarios por sus reportes y pedidos. Nuevo: sub-partidas; modelo BIM con lector IFC que respeta unidades y vincula elementos con partidas, y vista 3D (beta); lectura directa de IngeTrazo 0.6.3.3 o posterior; conexión con asistentes de IA por MCP, apagada por defecto; 20 complementos: ocho países, metrados de acero, ladrillos, tierras, concreto y zapatas, y reportes; temas de reportes; Deshacer y Rehacer; recuperación de la contraseña sin internet; corte a fin de mes; importación de los análisis de S10. Errores corregidos: los reportes no seguían los separadores de la moneda; los montos muy grandes fallaban; el XML de MS Project perdía predecesoras; abrir la planilla de acero modificaba el presupuesto; en Windows parte del ACU se veía pixelada. Al actualizar: en proyectos que nunca abrieron su pestaña «Pie», el reporte ahora incluye gastos generales, utilidad e impuesto.</p>
       </description>

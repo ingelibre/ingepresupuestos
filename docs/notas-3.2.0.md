@@ -1,6 +1,4 @@
-# IngePresupuestos 3.2.0 — borrador de notas de versión
-
-> Borrador. Sin publicar; falta probar y revisar.
+# IngePresupuestos 3.2.0
 
 ## Lo principal
 
