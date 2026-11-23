@@ -872,7 +872,7 @@ class Operaciones:
                                              autorizar=autorizar)
         except mcp_deshacer.EditadoDespues as e:
             err = ErrorMCP(f"{e}. Solo el usuario puede deshacerlo igualmente: "
-                           "en la app, menú Archivo, deshacer lo último de la IA")
+                           "en la app, menú IA, deshacer lo último de la IA")
             err.editado = True
             raise err from None
         except LookupError as e:

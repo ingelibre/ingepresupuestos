@@ -9,7 +9,7 @@ presupuestos **con la aplicación abierta**; lo que hace se ve en la ventana.
 Está apagada por defecto.
 
 1. Inicia sesión en IngePresupuestos.
-2. **Configuración → Conexión con IA (MCP)**, o **Archivo → Conexión con IA
+2. **Configuración → Conexión con IA (MCP)**, o **IA → Conexión con IA
    (MCP)…** dentro de un proyecto. Marca **Conexión encendida**.
 3. Elige tu cliente en **Conectar con**, pulsa **Copiar** y pega donde se indica.
    La línea ya es la de tu instalación:
@@ -57,7 +57,7 @@ Gantt con las opciones de la pestaña Cronograma.
 
 Cada cambio es una sola transacción: si algo falla, no queda nada a medias.
 Antes de cambiar, la app guarda el estado del proyecto (hasta 20 cambios, en la
-carpeta de datos, `deshacer_ia/`). **Deshacer lo último de la IA** (menú Archivo
+carpeta de datos, `deshacer_ia/`). **Deshacer lo último de la IA** (menú IA
 o la ventana de conexión) lo devuelve con los mismos identificadores.
 
 Si editaste el proyecto después, avisa: deshacer también perdería lo tuyo. Solo

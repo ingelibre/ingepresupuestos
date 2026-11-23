@@ -10191,12 +10191,6 @@ class ProyectoView(QWidget):
         a_itz = QAction(tr("Traer de IngeTrazo abierto…"), self)
         a_itz.triggered.connect(self._traer_de_ingetrazo)
         menu.addAction(a_itz)
-        a_mcp = QAction(tr("Conexión con IA (MCP)") + "…", self)
-        a_mcp.triggered.connect(self._abrir_mcp)
-        menu.addAction(a_mcp)
-        a_undo_ia = QAction(tr("Deshacer lo último de la IA"), self)
-        a_undo_ia.triggered.connect(self._deshacer_ia)
-        menu.addAction(a_undo_ia)
 
         menu.addSeparator()
 
@@ -11660,8 +11654,8 @@ class ProyectoView(QWidget):
         return menu
 
     def _build_ia_menu(self):
-        """QMenu del botón "IA ▾" del topbar. Reúne Validador, Asistente y
-        la pantalla de Configuración de proveedores/API keys."""
+        """QMenu del botón "IA ▾" del topbar. Reúne Validador, Asistente,
+        la conexión MCP y la Configuración de proveedores/API keys."""
         from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction
         menu = QMenu(self)
@@ -11673,6 +11667,15 @@ class ProyectoView(QWidget):
         a_asis = QAction(tr("Asistente del proyecto"), self)
         a_asis.triggered.connect(self._abrir_asistente_ia)
         menu.addAction(a_asis)
+
+        menu.addSeparator()
+
+        a_mcp = QAction(tr("Conexión con IA (MCP)") + "…", self)
+        a_mcp.triggered.connect(self._abrir_mcp)
+        menu.addAction(a_mcp)
+        a_undo_ia = QAction(tr("Deshacer lo último de la IA"), self)
+        a_undo_ia.triggered.connect(self._deshacer_ia)
+        menu.addAction(a_undo_ia)
 
         menu.addSeparator()
 
