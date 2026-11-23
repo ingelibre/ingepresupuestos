@@ -701,6 +701,9 @@ def init_db():
         # Color «post-it» de la card del dashboard (hex). Vacío = hereda el
         # color de su portafolio; ver utils.theme.color_postit.
         ('proy_color',    "ALTER TABLE proyectos ADD COLUMN color TEXT DEFAULT ''"),
+        # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,
+        # 'cal' = fin de mes calendario (issue #52).
+        ('corte_mes',     "ALTER TABLE proyectos ADD COLUMN corte_mes TEXT DEFAULT ''"),
         # Art. 4: varias fórmulas polinómicas por obra.
         ('fm_formula_id',  "ALTER TABLE formula_monomios ADD COLUMN formula_id INTEGER"),
         ('fmiu_formula_id',"ALTER TABLE formula_monomio_iu ADD COLUMN formula_id INTEGER"),
