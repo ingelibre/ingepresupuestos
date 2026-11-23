@@ -7192,6 +7192,10 @@ class ProyectoView(QWidget):
         # criterio que Copiar); lo que se imprime son las partidas reales,
         # que son las que tienen ACU/metrado/spec.
         pids_impr = self._pids_imprimibles(seleccionados)
+        if item is not None and len(pids_impr) == 1 and n_sel == 1:
+            menu.addSeparator()
+            menu.addAction(tr("Modelo BIM") + "…",
+                           lambda: self._abrir_modelo_bim(pids_impr[0]))
         if pids_impr:
             menu.addSeparator()
             _n = len(pids_impr)
@@ -9859,6 +9863,10 @@ class ProyectoView(QWidget):
         a_db.triggered.connect(self._archivo_exportar_db)
         menu.addAction(a_db)
 
+        a_bim = QAction(tr("Modelo BIM") + "…", self)
+        a_bim.triggered.connect(lambda: self._abrir_modelo_bim())
+        menu.addAction(a_bim)
+
         a_imp = QAction(tr("Importar") + "…", self)
         a_imp.triggered.connect(self.ir_a_importar.emit)
         menu.addAction(a_imp)
@@ -9897,6 +9905,21 @@ class ProyectoView(QWidget):
             self.addAction(act)
 
         return menu
+
+    def _abrir_modelo_bim(self, partida_id=None, takeoff=None, ruta=''):
+        """«Modelo BIM…». `takeoff`: dict de IngeTrazo a incorporar al abrir."""
+        from views.bim_dialog import ModeloBimDialog
+        dlg = ModeloBimDialog(self.pid, partida_id or getattr(self, '_partida_actual_id', None),
+                              editable=bool(self._ed_presupuesto),
+                              sub_id=self._sub_ppto_id, parent=self)
+        if takeoff is not None and self._ed_presupuesto:
+            QTimer.singleShot(0, lambda: dlg.recibir_takeoff(takeoff, ruta))
+        dlg.exec()
+        if dlg.cambio:
+            self._volver_de_metrados()
+            if getattr(self, '_partida_actual_id', None) is not None:
+                self.cargar_acu(self._partida_actual_id)
+        dlg.deleteLater()
 
     def _guardar_como_plantilla(self):
         """Guarda la estructura del presupuesto (o de un sub-presupuesto) como
