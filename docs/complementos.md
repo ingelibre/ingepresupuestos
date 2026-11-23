@@ -47,6 +47,11 @@ Si algo va mal, arranca con `--sin-complementos` (o con la variable
 | `pais-argentina` | datos | pesos, CUIT, IVA, «rubro» por «título» y el sitio para importar tu índice CAC. **No** trae valores del CAC |
 | `apu-chile` | código | APU en bloques A–D, sin cuadrilla ni rendimiento, en pesos enteros |
 | `reporte-ejemplo` | código | el reporte propio más pequeño posible |
+| `apu-mexico` | código | matriz de precio unitario con indirectos, financiamiento, utilidad y cargos en cascada; porcentajes por proyecto, en 0 al empezar |
+| `ajustar-total` | código | acción: escala precios del proyecto para llegar a un total, con vista previa |
+| `impuesto-materiales` | código | reporte del impuesto sobre materiales por partida y total |
+| `presupuesto-con-datos` | código | presupuesto con los datos del proyecto en la primera página |
+| `zapatas` | código | acción: metrado de zapatas por dimensiones y armado, sin precios |
 | `tema-sobrio`, `tema-propuesta` | datos | dos temas de reportes |
 
 ## Tu primer complemento
