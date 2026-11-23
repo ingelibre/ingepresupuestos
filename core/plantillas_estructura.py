@@ -46,16 +46,16 @@ def _subarboles_proyecto(conn, pid: int, sub_ppto_id='__all__') -> list:
     sub-presupuesto (`None` = el que no tiene sub-presupuesto; o su id)."""
     if sub_ppto_id == '__all__':
         rows = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? AND nivel=1 "
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? AND nivel=1 "
             "ORDER BY sub_presupuesto_id, item", (pid,)).fetchall()
     elif sub_ppto_id is None:
         rows = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? "
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? "
             "AND sub_presupuesto_id IS NULL AND nivel=1 ORDER BY item",
             (pid,)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? "
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? "
             "AND sub_presupuesto_id=? AND nivel=1 ORDER BY item",
             (pid, sub_ppto_id)).fetchall()
     subarboles = []

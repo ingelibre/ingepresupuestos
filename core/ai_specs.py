@@ -597,7 +597,7 @@ def generar_spec_partida(partida_id: int, prompt_extra: str = None):
         'SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)
     ).fetchone()
     acu_items = conn.execute(
-        """SELECT ai.*, r.codigo, r.descripcion as rec_desc, r.tipo,
+        """SELECT ai.*, r.codigo, COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) as rec_desc, r.tipo,
                   r.unidad as rec_unidad, COALESCE(ai.precio, r.precio, 0) as precio
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=?""",
@@ -775,12 +775,12 @@ def generar_memoria_descriptiva(proyecto_id: int, prompt_extra: str = None,
         conn.close()
         return None, 'Proyecto no encontrado.'
     titulos = conn.execute(
-        "SELECT item, descripcion FROM partidas "
+        "SELECT item, descripcion FROM partidas_ppto "
         "WHERE proyecto_id=? AND es_titulo=1 AND item NOT LIKE '%.%' ORDER BY item",
         (proyecto_id,)
     ).fetchall()
     n_part = conn.execute(
-        "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+        "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
         (proyecto_id,)
     ).fetchone()[0]
     conn.close()
@@ -950,7 +950,7 @@ def generar_rendimiento_partida(partida_id: int):
         return None, None, 'Partida no encontrada.'
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
-        """SELECT ai.cuadrilla, r.descripcion as rec_desc, r.unidad as rec_unidad
+        """SELECT ai.cuadrilla, COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) as rec_desc, r.unidad as rec_unidad
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=? AND r.tipo='MO'""",
         (partida_id,)
@@ -1029,7 +1029,7 @@ def generar_cantidades_materiales(partida_id: int):
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
         """SELECT ai.id as acu_item_id, ai.cantidad, r.id as recurso_id,
-                  r.descripcion, r.tipo, r.unidad as rec_unidad,
+                  COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) AS descripcion, r.tipo, r.unidad as rec_unidad,
                   COALESCE(ai.precio, r.precio, 0) as precio
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=? AND r.tipo IN ('MAT','EQ')
@@ -1180,7 +1180,7 @@ def chat_acu_asistente(partida_id: int, historial: list, mensaje: str,
     proyecto  = conn.execute('SELECT * FROM proyectos WHERE id=?', (partida['proyecto_id'],)).fetchone()
     acu_items = conn.execute(
         """SELECT ai.cuadrilla, ai.cantidad, COALESCE(ai.precio, r.precio, 0) as precio,
-                  r.descripcion, r.tipo, r.unidad as rec_unidad
+                  COALESCE((SELECT sp.descripcion FROM partidas sp WHERE sp.id=ai.sub_partida_id), r.descripcion) AS descripcion, r.tipo, r.unidad as rec_unidad
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
            WHERE ai.partida_id=?""",
         (partida_id,)
@@ -1392,7 +1392,7 @@ def generar_specs_proyecto(proyecto_id: int):
 
     conn = get_db()
     partidas = conn.execute(
-        'SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0 ORDER BY item',
+        'SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 ORDER BY item',
         (proyecto_id,)
     ).fetchall()
     proyecto = conn.execute('SELECT * FROM proyectos WHERE id=?', (proyecto_id,)).fetchone()
@@ -1480,12 +1480,12 @@ def _resumen_proyecto(conn, proyecto_id: int) -> str:
         """SELECT item, descripcion, unidad, metrado, precio_unitario,
                   (COALESCE(metrado,0) * COALESCE(precio_unitario,0)) AS parcial,
                   CASE WHEN especificaciones IS NULL OR especificaciones='' THEN 0 ELSE 1 END AS tiene_spec
-           FROM partidas WHERE proyecto_id=? AND es_titulo=0
+           FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0
            ORDER BY parcial DESC LIMIT 50""",
         (proyecto_id,)
     ).fetchall()
     n_partidas_total = conn.execute(
-        'SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0', (proyecto_id,)
+        'SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0', (proyecto_id,)
     ).fetchone()[0]
     n_sin_spec = sum(1 for x in partidas if not x['tiene_spec'])
 
@@ -1494,8 +1494,8 @@ def _resumen_proyecto(conn, proyecto_id: int) -> str:
         """SELECT r.tipo, r.descripcion, r.unidad,
                   COALESCE(ai.precio, r.precio, 0) AS precio,
                   SUM(ai.cantidad * p.metrado) AS cant_total
-           FROM acu_items ai
-             JOIN partidas p ON p.id=ai.partida_id
+           FROM acu_hojas ai
+             JOIN partidas_ppto p ON p.id=ai.partida_id
              JOIN recursos r ON r.id=ai.recurso_id
            WHERE p.proyecto_id=? AND SUBSTR(r.unidad,1,1)!='%'
            GROUP BY r.id
@@ -1673,7 +1673,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
 
     # Partidas sin metrado o con metrado 0
     sin_metrado = conn.execute(
-        """SELECT item, descripcion FROM partidas
+        """SELECT item, descripcion FROM partidas_ppto
            WHERE proyecto_id=? AND es_titulo=0
              AND (metrado IS NULL OR metrado=0)
            LIMIT 20""",
@@ -1687,7 +1687,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
 
     # Partidas sin ACU
     sin_acu = conn.execute(
-        """SELECT p.item, p.descripcion FROM partidas p
+        """SELECT p.item, p.descripcion FROM partidas_ppto p
            WHERE p.proyecto_id=? AND p.es_titulo=0
              AND NOT EXISTS (SELECT 1 FROM acu_items ai WHERE ai.partida_id=p.id)
            LIMIT 20""",
@@ -1701,7 +1701,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
 
     # Partidas sin especificaciones
     sin_spec = conn.execute(
-        """SELECT COUNT(*) FROM partidas
+        """SELECT COUNT(*) FROM partidas_ppto
            WHERE proyecto_id=? AND es_titulo=0
              AND (especificaciones IS NULL OR especificaciones='')""",
         (proyecto_id,)
@@ -1739,7 +1739,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
     # ── Reglas mecánicas adicionales ─────────────────────────────────────
     # Partidas con descripción vacía
     sin_desc = conn.execute(
-        """SELECT COUNT(*) FROM partidas
+        """SELECT COUNT(*) FROM partidas_ppto
            WHERE proyecto_id=? AND es_titulo=0
              AND (descripcion IS NULL OR TRIM(descripcion)='')""",
         (proyecto_id,)
@@ -1751,7 +1751,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
 
     # Partidas con precio unitario 0 (riesgo de costo total cero)
     pu_cero = conn.execute(
-        """SELECT item FROM partidas
+        """SELECT item FROM partidas_ppto
            WHERE proyecto_id=? AND es_titulo=0
              AND (precio_unitario IS NULL OR precio_unitario=0)
              AND (metrado IS NOT NULL AND metrado>0)
@@ -1810,7 +1810,7 @@ def validar_proyecto(proyecto_id: int) -> tuple[str, str]:
 
     # Cronograma: tareas sin duración o duración > plazo
     cron_sin_dur = conn.execute(
-        """SELECT p.item FROM partidas p
+        """SELECT p.item FROM partidas_ppto p
            JOIN cronograma_partidas cp ON cp.partida_id = p.id
            WHERE p.proyecto_id=? AND p.es_titulo=0
              AND (cp.duracion IS NULL OR cp.duracion=0)
@@ -2400,7 +2400,7 @@ def _proyecto_similar(nombre: str, notas: str = '', excluir_pid=None):
     conn = get_db()
     rows = conn.execute(
         "SELECT pr.id, pr.nombre FROM proyectos pr WHERE EXISTS "
-        "(SELECT 1 FROM partidas p WHERE p.proyecto_id=pr.id AND p.es_titulo=0)"
+        "(SELECT 1 FROM partidas_ppto p WHERE p.proyecto_id=pr.id AND p.es_titulo=0)"
         + (" AND pr.id != ?" if excluir_pid else ""),
         (excluir_pid,) if excluir_pid else ()
     ).fetchall()
@@ -2448,7 +2448,7 @@ def _estructura_referencia(nombre: str, notas: str = '', excluir_pid=None,
     pid, nm = sim
     conn = get_db()
     rows = conn.execute(
-        "SELECT item, descripcion, unidad, es_titulo FROM partidas "
+        "SELECT item, descripcion, unidad, es_titulo FROM partidas_ppto "
         "WHERE proyecto_id=? ORDER BY COALESCE(sub_presupuesto_id,0), id",
         (pid,)
     ).fetchall()

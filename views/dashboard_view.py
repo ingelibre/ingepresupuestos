@@ -290,6 +290,7 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
     map_part = {}
     pcols2 = [c for c in cols_of('partidas')
               if c not in ('id', 'proyecto_id', 'sub_presupuesto_id')]
+    # sub-partidas: incluidas (no es un listado del presupuesto).
     for r in conn.execute("SELECT * FROM partidas WHERE proyecto_id=? ORDER BY id",
                           (pid,)).fetchall():
         d = dict(r)
@@ -309,6 +310,8 @@ def _clonar_proyecto(conn, pid: int, opts: set) -> int:
             for r in conn.execute(f"SELECT * FROM {tabla} WHERE partida_id=?",
                                   (old_part,)).fetchall():
                 d = dict(r)
+                if d.get('sub_partida_id'):
+                    d['sub_partida_id'] = map_part.get(d['sub_partida_id'])
                 try:
                     conn.execute(
                         f"INSERT INTO {tabla} ({','.join(cs)},partida_id) "
@@ -1524,7 +1527,7 @@ class _ListView(QWidget):
         conn = get_db()
         try:
             cnt_rows = conn.execute(
-                "SELECT proyecto_id, COUNT(*) AS n FROM partidas "
+                "SELECT proyecto_id, COUNT(*) AS n FROM partidas_ppto "
                 "WHERE es_titulo=0 GROUP BY proyecto_id"
             ).fetchall()
             count_por_proy = {r['proyecto_id']: r['n'] for r in cnt_rows}
@@ -2402,7 +2405,7 @@ class DashboardView(QWidget):
         try:
             conn = get_db()
             count_por_proy = {r['proyecto_id']: r['n'] for r in conn.execute(
-                "SELECT proyecto_id, COUNT(*) AS n FROM partidas "
+                "SELECT proyecto_id, COUNT(*) AS n FROM partidas_ppto "
                 "WHERE es_titulo=0 GROUP BY proyecto_id")}
             conn.close()
         except Exception:

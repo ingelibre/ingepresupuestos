@@ -1125,7 +1125,7 @@ def exportar_acus(proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     partidas = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
         (proyecto_id,)
     ).fetchall()
 
@@ -1193,7 +1193,17 @@ def exportar_acus(proyecto_id):
     fmt_money = '[$-0409]#,##0.00'
     fmt_4 = '#,##0.0000'
 
-    for partida in partidas:
+    # Los análisis de las sub-partidas usadas van al final (issue #23).
+    from core.subpartidas import usadas_en
+    en_subs = False
+    for partida in [*partidas, *usadas_en(conn, [p['id'] for p in partidas])]:
+        if partida['es_subanalisis'] and not en_subs:
+            en_subs = True
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=N)
+            c_h2 = ws.cell(r, 1, 'Análisis de sub-partidas')
+            c_h2.font = Font(name='Inter', bold=True, size=14, color=_h2_color)
+            ws.row_dimensions[r].height = 22
+            r += 1
         # Usar `get_acu_items` (la misma fuente que usa el PDF) para que
         # los `parcial` de items con unidad `%MO`/`%MAT` se calculen como
         # porcentaje del subtotal del tipo base, NO como `cantidad * precio`.
@@ -1461,7 +1471,7 @@ def exportar_insumos(proyecto_id, por_sub: bool = False):
             _bloques = []
             for _s in _subs:
                 _ids = [x['id'] for x in _conn2.execute(
-                    "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+                    "SELECT id FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
                     "AND sub_presupuesto_id IS ?", (proyecto_id, _s['id'])
                 ).fetchall()]
                 _ins_s = _get_ins_part(_conn2, _ids) if _ids else []
@@ -1724,12 +1734,12 @@ def _hoja_metrados(wb, proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     todas    = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
     ).fetchall()
     # Excluir partidas con acero (exclusivas de la hoja de acero)
     acero_ids = {r['partida_id'] for r in conn.execute(
         "SELECT DISTINCT partida_id FROM acero_detalle WHERE partida_id IN "
-        "(SELECT id FROM partidas WHERE proyecto_id=?)", (proyecto_id,)
+        "(SELECT id FROM partidas_ppto WHERE proyecto_id=?)", (proyecto_id,)
     ).fetchall()}
     # Solo partidas HOJA (no títulos) que no tengan acero
     partidas = [p for p in todas
@@ -1797,7 +1807,7 @@ def _hoja_metrados(wb, proyecto_id):
             try:
                 for _row in _conn_s.execute(
                     "SELECT p.id, COALESCE(s.nombre, ?) AS nom "
-                    "FROM partidas p LEFT JOIN sub_presupuestos s "
+                    "FROM partidas_ppto p LEFT JOIN sub_presupuestos s "
                     "  ON s.id = p.sub_presupuesto_id "
                     "WHERE p.proyecto_id=?",
                     ((proyecto['sub_presupuesto'] or 'Principal'), proyecto_id)
@@ -1970,11 +1980,11 @@ def _hoja_acero_metrados(wb, proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     todas    = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
     ).fetchall()
     acero_ids = {r['partida_id'] for r in conn.execute(
         "SELECT DISTINCT partida_id FROM acero_detalle WHERE partida_id IN "
-        "(SELECT id FROM partidas WHERE proyecto_id=?)", (proyecto_id,)
+        "(SELECT id FROM partidas_ppto WHERE proyecto_id=?)", (proyecto_id,)
     ).fetchall()}
     if not acero_ids:
         conn.close()
@@ -2125,7 +2135,7 @@ def _hoja_especificaciones(wb, proyecto_id):
     conn     = get_db()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     partidas = conn.execute(
-        """SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0
+        """SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0
            AND especificaciones IS NOT NULL AND especificaciones != ''
            ORDER BY item""", (proyecto_id,)
     ).fetchall()
@@ -2626,15 +2636,20 @@ def exportar_reporte_completo(proyecto_id):
     ra = _xlsx_encabezado(ws_a, proyecto, 'ANÁLISIS DE COSTOS UNITARIOS', Na)
 
     partidas_hoja = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
         (proyecto_id,)
     ).fetchall()
 
-    for partida in partidas_hoja:
+    from core.subpartidas import usadas_en
+    for partida in [*partidas_hoja,
+                    *usadas_en(conn, [p['id'] for p in partidas_hoja])]:
         items_acu = conn.execute(
-            """SELECT ai.*, r.codigo, r.descripcion as rdesc, r.tipo, r.unidad,
+            """SELECT ai.*, COALESCE(sp.item, r.codigo) AS codigo,
+                      COALESCE(sp.descripcion, r.descripcion) AS rdesc, r.tipo,
+                      COALESCE(sp.unidad, r.unidad) AS unidad,
                       COALESCE(ai.precio, r.precio, 0) as precio
                FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
+               LEFT JOIN partidas sp ON sp.id = ai.sub_partida_id
                WHERE ai.partida_id=?
                ORDER BY """ + ORDEN_ACU_SQL, (partida['id'],)
         ).fetchall()
@@ -2722,7 +2737,7 @@ def exportar_reporte_completo(proyecto_id):
                   AVG(COALESCE(ai.precio, r.precio, 0)) as precio,
                   SUM(ai.cantidad * p.metrado) as cantidad_total,
                   SUM(ai.cantidad * p.metrado * COALESCE(ai.precio, r.precio, 0)) as parcial
-           FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
+           FROM acu_hojas ai JOIN recursos r ON r.id=ai.recurso_id
            JOIN partidas p ON p.id=ai.partida_id
            WHERE p.proyecto_id=? AND p.es_titulo=0 AND SUBSTR(r.unidad,1,1)!='%'
            GROUP BY r.id
@@ -3087,17 +3102,22 @@ def exportar_pdf(proyecto_id):
     story.append(Spacer(1, 0.2*cm))
 
     partidas_hoja = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
         (proyecto_id,)
     ).fetchall()
 
     col_acu = [2.0*cm, 6.5*cm, 1.0*cm, 1.8*cm, 1.8*cm, 2.0*cm, 2.9*cm]
 
-    for partida in partidas_hoja:
+    from core.subpartidas import usadas_en
+    for partida in [*partidas_hoja,
+                    *usadas_en(conn, [p['id'] for p in partidas_hoja])]:
         items_acu = conn.execute(
-            """SELECT ai.*, r.codigo, r.descripcion as rdesc, r.tipo, r.unidad,
+            """SELECT ai.*, COALESCE(sp.item, r.codigo) AS codigo,
+                      COALESCE(sp.descripcion, r.descripcion) AS rdesc, r.tipo,
+                      COALESCE(sp.unidad, r.unidad) AS unidad,
                       COALESCE(ai.precio, r.precio, 0) as precio
                FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
+               LEFT JOIN partidas sp ON sp.id = ai.sub_partida_id
                WHERE ai.partida_id=?
                ORDER BY """ + ORDEN_ACU_SQL, (partida['id'],)
         ).fetchall()
@@ -3192,7 +3212,7 @@ def exportar_pdf(proyecto_id):
                   AVG(COALESCE(ai.precio, r.precio, 0)) as precio,
                   SUM(ai.cantidad * p.metrado) as cantidad_total,
                   SUM(ai.cantidad * p.metrado * COALESCE(ai.precio, r.precio, 0)) as parcial
-           FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id
+           FROM acu_hojas ai JOIN recursos r ON r.id=ai.recurso_id
            JOIN partidas p ON p.id=ai.partida_id
            WHERE p.proyecto_id=? AND p.es_titulo=0 AND SUBSTR(r.unidad,1,1)!='%'
            GROUP BY r.id
@@ -3294,7 +3314,7 @@ def exportar_pdf(proyecto_id):
     story.append(Spacer(1, 0.2*cm))
 
     all_partidas = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
     ).fetchall()
 
     col_met_det = [7.0*cm, 1.5*cm, 1.5*cm, 1.8*cm, 1.8*cm, 1.8*cm, 2.6*cm]
@@ -3530,7 +3550,7 @@ def exportar_pdf(proyecto_id):
     # 6. ESPECIFICACIONES TÉCNICAS (si existen)
     # ══════════════════════════════════════════════════════════════════════════
     partidas_spec = conn.execute(
-        """SELECT * FROM partidas WHERE proyecto_id=? AND es_titulo=0
+        """SELECT * FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0
            AND especificaciones IS NOT NULL AND especificaciones != ''
            ORDER BY item""", (proyecto_id,)
     ).fetchall()
@@ -3622,6 +3642,7 @@ def exportar_proyecto_db(proyecto_id: int, dest_path: str) -> str:
             tup, ph = _insert(proy)
             conn_dst.execute(f"INSERT INTO proyectos VALUES ({ph})", tup)
 
+            # sub-partidas: incluidas (no es un listado del presupuesto).
             partidas = conn_src.execute(
                 "SELECT * FROM partidas WHERE proyecto_id=?", (proyecto_id,)
             ).fetchall()

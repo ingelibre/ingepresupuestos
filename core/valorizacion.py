@@ -156,7 +156,7 @@ def get_valorizacion_detalle(val_id: int) -> tuple[list[dict], dict]:
         pid = val['proyecto_id']
         numero = val['numero']
         partidas = conn.execute(
-            "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (pid,)
+            "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (pid,)
         ).fetchall()
         # Metrados ejecutados del proyecto hasta este período, con su número de
         # valorización (para separar «anterior» de «actual»).

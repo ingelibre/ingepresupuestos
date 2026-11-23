@@ -109,6 +109,11 @@ class RecursoSelectorDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._tab_buscar(), tr("Buscar en catálogo"))
         self.tabs.addTab(self._tab_nuevo(),  tr("Crear nuevo recurso"))
+        from views.subpartidas_tab import SubpartidasTab
+        self.tab_subs = SubpartidasTab(self.part_id, self._proyecto_id)
+        self.tab_subs.cambio.connect(self._hubo_cambio_en_subs)
+        self.tab_subs.doble_clic.connect(self._agregar)
+        self.tabs.addTab(self.tab_subs, tr("Sub-partidas"))
         vl.addWidget(self.tabs)
 
         # Barra inferior: contador + botones
@@ -425,7 +430,7 @@ class RecursoSelectorDialog(QDialog):
         query  = ("SELECT r.*, EXISTS("
                   "  SELECT 1 FROM acu_items ai JOIN partidas p ON p.id = ai.partida_id"
                   "  WHERE ai.recurso_id = r.id AND p.proyecto_id = ?) AS usado"
-                  " FROM recursos r WHERE 1=1")
+                  " FROM recursos r WHERE COALESCE(r.codigo,'') != 'SUBPARTIDA'")
         params = [self._proyecto_id]
         if tipo:
             query += " AND r.tipo=?"
@@ -592,8 +597,21 @@ class RecursoSelectorDialog(QDialog):
 
     # ── Agregar ────────────────────────────────────────────────────────────────
 
+    # Crear, renombrar o borrar una sub-partida se graba al momento: aunque
+    # después se cancele el diálogo, quien lo abrió tiene que refrescar.
+    subs_cambiadas = False
+
+    def _hubo_cambio_en_subs(self):
+        self.subs_cambiadas = True
+
     def _agregar(self):
-        if self.tabs.currentIndex() == 0:
+        if self.tabs.currentWidget() is self.tab_subs:
+            motivo = self.tab_subs.agregar()
+            if motivo:
+                QMessageBox.warning(self, tr("Sub-partidas"), motivo)
+            else:
+                self.accept()
+        elif self.tabs.currentIndex() == 0:
             self._agregar_existentes()
         else:
             self._agregar_nuevo()

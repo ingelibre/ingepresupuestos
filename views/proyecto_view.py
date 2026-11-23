@@ -37,7 +37,7 @@ from core.config import DB_PATH
 from widgets.num_item import NumItem
 from core.database import (
     get_db, _r2, _rn, _recalcular_pu, calcular_totales,
-    get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
+    get_acu_hojas, get_acu_items, get_insumos_proyecto, get_insumos_para_partidas,
     _siguiente_codigo_inei,
     get_decimales_ppto, get_decimales_metrado, get_decimales_cant_acu,
     parcial_wysiwyg,
@@ -415,7 +415,7 @@ class _SeleccionarRecursoDialog(QDialog):
             " FROM acu_items ai"
             " JOIN recursos r ON r.id = ai.recurso_id"
             " JOIN partidas p ON p.id = ai.partida_id"
-            " WHERE p.proyecto_id=? AND r.id != ?"
+            " WHERE p.proyecto_id=? AND r.id != ? AND ai.sub_partida_id IS NULL"
             " ORDER BY r.descripcion",
             (self._proyecto_id, self._excluir)
         ).fetchall()
@@ -760,6 +760,8 @@ class _InputCellDelegate(QStyledItemDelegate):
                 return False
         tipo = self._tipo(index)
         col  = index.column()
+        if row in getattr(view, '_acu_subs', {}):
+            return col == 4     # sub-partida: el precio sale de su análisis
         if getattr(view, '_acu_partida_global', False):
             # Partida global (glb/est/serv): sin cuadrilla; cantidad y
             # precio directos en todos los tipos.
@@ -1188,7 +1190,7 @@ class _PresupuestoTree(QTreeWidget):
         if pid is None or sub_id is None:
             return 0
         row = conn.execute(
-            "SELECT COUNT(*) FROM partidas "
+            "SELECT COUNT(*) FROM partidas_ppto "
             "WHERE proyecto_id=? AND nivel=1 AND ("
             "  sub_presupuesto_id IS NULL OR "
             "  sub_presupuesto_id IN ("
@@ -1906,6 +1908,13 @@ class ProyectoView(QWidget):
         self._recalcular_estado_flags()
         self._sub_ppto_id: int | None = None
         self._partida_actual_id: int | None = None
+        # Sub-partidas en el panel ACU: de dónde se abrió la que se está
+        # viendo, {fila: id} de las líneas, {fila: id} de su desglose y
+        # cuáles están desplegadas.
+        self._acu_volver_a: int | None = None
+        self._acu_subs: dict[int, int] = {}
+        self._acu_hojas_sub: dict[int, int] = {}
+        self._acu_subs_abiertas: set[int] = set()
         # Partida cuyas filas están cargadas en el panel Metrados/Acero. Puede
         # diferir de _partida_actual_id: el panel solo se recarga con el tab
         # Metrados visible, así que los guardados deben escribir a esta partida.
@@ -2087,19 +2096,19 @@ class ProyectoView(QWidget):
         conn = get_db()
         if all_subs:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0",
                 (self.pid,)
             ).fetchall()
         elif self._sub_ppto_id is None:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 AND sub_presupuesto_id IS NULL",
                 (self.pid,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT metrado, precio_unitario FROM partidas "
+                "SELECT metrado, precio_unitario FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 AND sub_presupuesto_id=?",
                 (self.pid, self._sub_ppto_id)
             ).fetchall()
@@ -2808,6 +2817,18 @@ class ProyectoView(QWidget):
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(10, 0, 8, 0)
         hl.setSpacing(8)
+
+        self._btn_volver_sub = QPushButton("‹")
+        self._btn_volver_sub.setToolTip(tr("Volver a la partida"))
+        self._btn_volver_sub.setCursor(QCursor(Qt.PointingHandCursor))
+        self._btn_volver_sub.setFixedSize(24, 24)
+        self._btn_volver_sub.setStyleSheet(
+            f"QPushButton {{ color:{SLATE_700}; background:white; font-size:14px;"
+            f" border:1px solid {SILVER_300}; border-radius:4px; padding:0;"
+            f" min-height:22px; max-height:22px; }}")
+        self._btn_volver_sub.clicked.connect(self._volver_de_subpartida)
+        self._btn_volver_sub.hide()
+        hl.addWidget(self._btn_volver_sub, 0, Qt.AlignVCenter)
 
         self.lbl_acu_titulo = _LabelElidido(tr("Seleccione una partida"))
         self.lbl_acu_titulo.setStyleSheet(
@@ -5301,7 +5322,7 @@ class ProyectoView(QWidget):
         try:
             conn = get_db()
             n = conn.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=?",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=?",
                 (self.pid,)).fetchone()[0]
             conn.close()
         except Exception:
@@ -5323,12 +5344,12 @@ class ProyectoView(QWidget):
         conn = get_db()
         if self._sub_ppto_id is None:
             rows = conn.execute(
-                "SELECT * FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id IS NULL ORDER BY item",
+                "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id IS NULL ORDER BY item",
                 (self.pid,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id=? ORDER BY item",
+                "SELECT * FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id=? ORDER BY item",
                 (self.pid, self._sub_ppto_id)
             ).fetchall()
         # IDs de partidas con planilla de metrados
@@ -5604,6 +5625,9 @@ class ProyectoView(QWidget):
     def _acu_en_blanco(self):
         """Panel ACU como al abrir el presupuesto: sin partida."""
         self._partida_actual_id = None
+        self._acu_volver_a = None
+        self._btn_volver_sub.hide()
+        self._acu_subs, self._acu_hojas_sub = {}, {}
         self.tbl_acu.setRowCount(0)
         self.lbl_acu_titulo.setText(tr("Seleccione una partida"))
         self.inp_rend.setText("")
@@ -5617,7 +5641,17 @@ class ProyectoView(QWidget):
         if not partida:
             return
 
+        # Sub-partida (issue #23): se edita en este panel, pero no tiene
+        # metrado ni planilla; «‹» vuelve a la partida desde la que se abrió.
+        es_sub = bool(partida['es_subanalisis'])
+        if not es_sub:
+            self._acu_volver_a = None
+        self._btn_volver_sub.setVisible(es_sub and bool(self._acu_volver_a))
+        self._acu_subs, self._acu_hojas_sub = {}, {}
+
         titulo = f"{partida['item']}  {partida['descripcion']}"
+        if es_sub:
+            titulo = tr("Sub-partida {titulo}").format(titulo=titulo)
         self.lbl_acu_titulo.setText(titulo)
         self.lbl_spec_titulo.setText(titulo)
         self.lbl_met_titulo.setText(titulo)
@@ -5654,7 +5688,6 @@ class ProyectoView(QWidget):
 
         conn = get_db()
         items, totales_tipo = get_acu_items(conn, part_id)
-        conn.close()
 
         self._acu_loading = True
         self.tbl_acu.setRowCount(0)
@@ -5736,7 +5769,21 @@ class ProyectoView(QWidget):
             inei = _celda_inei(it)
             inei.setBackground(_NEUTRAL_BG)
             self.tbl_acu.setItem(r, _COL_INEI_ACU, inei)
+            if it['sub_partida_id']:
+                sid = it['sub_partida_id']
+                self._acu_subs[r] = sid
+                celda = self.tbl_acu.item(r, 1)
+                celda.setData(Qt.UserRole, it['descripcion'] or '')
+                celda.setToolTip(tr("Sub-partida: clic para ver su desglose, "
+                                    "doble clic para abrir su análisis."))
+                self._pintar_flecha_sub(r, sid in self._acu_subs_abiertas)
+                for c in (3, 5):
+                    celda = self.tbl_acu.item(r, c)
+                    celda.setFlags(celda.flags() & ~Qt.ItemIsEditable)
+                    celda.setToolTip(tr("El precio sale del análisis de la sub-partida."))
+                self._filas_desglose_sub(conn, sid)
 
+        conn.close()
         self._acu_loading = False
 
         # Actualizar subtotales y barras
@@ -5746,7 +5793,7 @@ class ProyectoView(QWidget):
         self.lbl_pu.setText(fmt(pu, self._moneda, dec))
 
         # Cargar metrados si el tab es visible
-        if self.tabs.currentIndex() == 2:
+        if self.tabs.currentIndex() == 2 and not es_sub:
             self.cargar_metrados(part_id)
 
         # Reaplicar bloqueo de flags si el estado lo requiere
@@ -5754,7 +5801,7 @@ class ProyectoView(QWidget):
             self._strip_table_editable_flags(self.tbl_acu)
 
         # Tuxia: chequear si la partida tiene problemas (sin metrado/ACU)
-        if hasattr(self, '_tuxia') and self._tuxia is not None:
+        if hasattr(self, '_tuxia') and self._tuxia is not None and not es_sub:
             QTimer.singleShot(150, lambda pid=part_id: self._tuxia_check_partida(pid))
 
     def _partidas_bajo_titulo(self, tree_item) -> list[int]:
@@ -6074,9 +6121,10 @@ class ProyectoView(QWidget):
         """Actualiza acu_items.precio en el proyecto y recalcula partidas afectadas."""
         try:
             conn = get_db()
+            # sub-partidas: incluidas (no es un listado del presupuesto).
             conn.execute(
                 """UPDATE acu_items SET precio=?
-                   WHERE recurso_id=?
+                   WHERE recurso_id=? AND sub_partida_id IS NULL
                    AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
                 (nuevo_precio, recurso_id, self.pid)
             )
@@ -6360,7 +6408,7 @@ class ProyectoView(QWidget):
         self._limpiar_resaltado_insumo()
         conn = get_db()
         ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT ai.partida_id FROM acu_items ai "
+            "SELECT DISTINCT ai.partida_id FROM acu_hojas ai "
             "JOIN partidas p ON p.id = ai.partida_id "
             "WHERE ai.recurso_id=? AND p.proyecto_id=?",
             (recurso_id, self.pid)).fetchall()]
@@ -6606,12 +6654,19 @@ class ProyectoView(QWidget):
         conn = get_db()
         dm = get_decimales_metrado()
         rows = conn.execute(
-            "SELECT p.id, p.metrado FROM partidas p"
+            "SELECT p.id, p.metrado FROM partidas_ppto p"
             " WHERE p.proyecto_id=? AND p.es_titulo=0" + cond_sub,
             (self.pid, *par_sub)).fetchall()
         tot = {'MO': 0.0, 'MAT': 0.0, 'EQ': 0.0, 'SC': 0.0}
+        cache_sub: dict = {}
         for r in rows:
-            _, tt = get_acu_items(conn, r['id'])
+            # Con las sub-partidas abiertas en sus insumos, como el Resumen
+            # del PDF y del Word (que suman `get_insumos_proyecto`).
+            tt: dict = {}
+            for it in get_acu_hojas(conn, r['id'], cache_sub):
+                k = it['tipo'] if it['tipo'] in tot else (
+                    'EQ' if (it['unidad'] or '').startswith('%') else 'MAT')
+                tt[k] = tt.get(k, 0.0) + (it['parcial'] or 0)
             m = round(r['metrado'] or 0, dm)
             for k, v in tt.items():
                 tot[k] = tot.get(k, 0.0) + (v or 0) * m
@@ -6660,7 +6715,7 @@ class ProyectoView(QWidget):
         top5 = conn.execute(
             f"""SELECT item, descripcion,
                        ROUND(ROUND(COALESCE(metrado,0), {_dm}) * COALESCE(precio_unitario,0), {_dec}) as total
-               FROM partidas p WHERE proyecto_id=? AND es_titulo=0""" + cond_sub + """
+               FROM partidas_ppto p WHERE proyecto_id=? AND es_titulo=0""" + cond_sub + """
                ORDER BY total DESC LIMIT 5""",
             (self.pid, *par_sub)
         ).fetchall()
@@ -6800,6 +6855,7 @@ class ProyectoView(QWidget):
 
     def recalcular(self):
         conn = get_db()
+        # sub-partidas: incluidas (no es un listado del presupuesto).
         partidas = conn.execute(
             "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0", (self.pid,)
         ).fetchall()
@@ -7058,6 +7114,8 @@ class ProyectoView(QWidget):
             else:
                 self.cargar_insumos(None)
         elif idx == 2 and self._partida_actual_id:  # Metrados
+            if self._acu_volver_a:      # una sub-partida no lleva planilla
+                self._volver_de_subpartida()
             self._cargar_metrados_auto(self._partida_actual_id)
         elif idx == 4:  # Resumen
             self.cargar_resumen()
@@ -7636,10 +7694,10 @@ class ProyectoView(QWidget):
         new_id = cur.lastrowid
         for ai in conn.execute("SELECT * FROM acu_items WHERE partida_id=?", (part_id,)).fetchall():
             conn.execute(
-                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio, orden)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO acu_items (partida_id, recurso_id, cuadrilla, cantidad, precio, orden,"
+                " sub_partida_id) VALUES (?,?,?,?,?,?,?)",
                 (new_id, ai['recurso_id'], ai['cuadrilla'], ai['cantidad'], ai['precio'],
-                 ai['orden'])
+                 ai['orden'], ai['sub_partida_id'])
             )
         conn.commit()
         conn.close()
@@ -8051,6 +8109,9 @@ class ProyectoView(QWidget):
 
     def _on_acu_cell_clicked(self, row, col):
         """Un clic en una celda editable abre el editor inline (no con Ctrl/Shift)."""
+        if col in (0, 1) and row in self._acu_subs:
+            self._alternar_subpartida(row)
+            return
         # Bloqueo defensivo por estado: no abrir editor si el presupuesto
         # no es editable en este estado.
         if not self._ed_presupuesto:
@@ -8065,6 +8126,11 @@ class ProyectoView(QWidget):
             return
         if self._acu_row_ids[row] == -1:
             return
+        if row in self._acu_subs:
+            if col == 4:
+                idx = self.tbl_acu.model().index(row, col)
+                QTimer.singleShot(0, lambda: self.tbl_acu.edit(idx))
+            return
         if getattr(self, '_acu_partida_global', False):
             # Partida global: cantidad directa en todos los tipos, sin cuadrilla
             tipos_editables = {4: {'MO', 'MAT', 'EQ', 'SC'},
@@ -8078,8 +8144,79 @@ class ProyectoView(QWidget):
         idx = self.tbl_acu.model().index(row, col)
         QTimer.singleShot(0, lambda: self.tbl_acu.edit(idx))
 
+    # ── Sub-partidas en el panel (issue #23) ──────────────────────────────
+
+    def _alternar_subpartida(self, row: int):
+        """Abre o cierra el desglose de la línea."""
+        sid = self._acu_subs[row]
+        abrir = sid not in self._acu_subs_abiertas
+        (self._acu_subs_abiertas.add if abrir else self._acu_subs_abiertas.discard)(sid)
+        # La misma sub-partida puede estar en dos líneas del mismo ACU.
+        for r, s in self._acu_subs.items():
+            if s == sid:
+                self._pintar_flecha_sub(r, abrir)
+        for r, s in self._acu_hojas_sub.items():
+            if s == sid:
+                self.tbl_acu.setRowHidden(r, not abrir)
+
+    def _pintar_flecha_sub(self, row: int, abierta: bool):
+        it = self.tbl_acu.item(row, 1)
+        it.setText(("▾  " if abierta else "▸  ") + (it.data(Qt.UserRole) or ''))
+
+    def _filas_desglose_sub(self, conn, sub_id: int):
+        """Las hojas de la sub-partida, solo lectura, debajo de su línea: sus
+        cantidades son POR UNIDAD de la sub-partida."""
+        dec = get_decimales_ppto()
+        for h in get_acu_items(conn, sub_id)[0]:
+            r = self.tbl_acu.rowCount()
+            self.tbl_acu.insertRow(r)
+            self.tbl_acu.setRowHeight(r, 22)
+            self._acu_row_ids.append(-1)
+            self._acu_hojas_sub[r] = sub_id
+            tipo = h['tipo'] or 'MAT'
+            for c, v in enumerate((
+                    '', f"        {tipo} · {h['descripcion'] or ''}", h['unidad'] or '',
+                    self._texto_cuadrilla(tipo, h['unidad'], h['cuadrilla'] or 0),
+                    f"{h['cantidad'] or 0:.{get_decimales_cant_acu(tipo)}f}",
+                    f"{h['precio'] or 0:.{dec}f}",
+                    fmt(h['parcial'] or 0, self._moneda, dec),
+                    (h['indice_inei'] or ''))):
+                cell = QTableWidgetItem(v)
+                cell.setFlags(Qt.ItemIsEnabled)
+                cell.setForeground(QColor(SLATE_500))
+                if c >= 3:
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                cell.setToolTip(tr("Insumo de la sub-partida, por unidad de ella. "
+                                   "Ábrala para editarlo."))
+                self.tbl_acu.setItem(r, c, cell)
+            self.tbl_acu.setRowHidden(r, sub_id not in self._acu_subs_abiertas)
+
+    def _abrir_subpartida(self, sub_id: int):
+        """Carga el análisis de la sub-partida en el panel; «‹» vuelve."""
+        if self._spec_modificada and self._partida_actual_id:
+            self._guardar_spec()
+        if self._partida_actual_id != sub_id:
+            self._acu_volver_a = self._partida_actual_id
+        self.cargar_acu(sub_id)
+
+    def _volver_de_subpartida(self):
+        if self._spec_modificada and self._partida_actual_id:
+            self._guardar_spec()
+        if self._acu_volver_a:
+            self.cargar_acu(self._acu_volver_a)
+
+    def _editar_ficha_subpartida(self, sub_id: int):
+        if not self._require_editable(N_("editar insumos")):
+            return
+        from views.subpartidas_tab import FichaSubpartidaDialog
+        if FichaSubpartidaDialog(self.pid, sub_id, self).exec() == QDialog.Accepted:
+            self.cargar_acu(self._partida_actual_id)
+
     def _editar_celda_acu(self, index):
         col = index.column()
+        if index.row() in self._acu_subs and col != 4:
+            self._abrir_subpartida(self._acu_subs[index.row()])
+            return
         if col not in (3, 4, 5):
             return
         row = index.row()
@@ -8104,6 +8241,9 @@ class ProyectoView(QWidget):
         if not row_data:
             conn.close()
             return
+        if row_data['sub_partida_id'] and col != 4:
+            conn.close()
+            return      # el precio de una sub-partida sale de su análisis
         part_id = row_data['partida_id']
         rend    = row_data['rendimiento'] or 1
         proy    = conn.execute("SELECT jornada_laboral FROM proyectos WHERE id=?",
@@ -8131,9 +8271,10 @@ class ProyectoView(QWidget):
         elif col == 5:  # precio — actualiza todo el recurso en el proyecto
             rid  = row_data['recurso_id']
             poid = row_data['proy_id']
+            # sub-partidas: incluidas (no es un listado del presupuesto).
             conn.execute(
                 """UPDATE acu_items SET precio=? WHERE recurso_id=?
-                   AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
+                   AND sub_partida_id IS NULL AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
                 (valor, rid, poid)
             )
             afectadas = conn.execute(
@@ -8164,7 +8305,13 @@ class ProyectoView(QWidget):
                       self._acu_row_ids[row] != -1)
         if tiene_item:
             acu_id = self._acu_row_ids[row]
-            menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
+            sid = self._acu_subs.get(row)
+            if sid:
+                menu.addAction(tr("Abrir sub-partida"), lambda: self._abrir_subpartida(sid))
+                menu.addAction(tr("Editar sub-partida…"),
+                               lambda: self._editar_ficha_subpartida(sid))
+            else:
+                menu.addAction(tr("Editar"), lambda: self._editar_recurso_de_acu(acu_id))
             menu.addSeparator()
             self.tbl_acu.selectRow(row)
             menu.addAction(tr("Subir") + "  Alt+↑", lambda: self._mover_insumo_acu(-1))
@@ -8240,10 +8387,14 @@ class ProyectoView(QWidget):
             return
         conn = get_db()
         row = conn.execute(
-            "SELECT recurso_id, partida_id FROM acu_items WHERE id=?", (acu_id,)
+            "SELECT recurso_id, partida_id, sub_partida_id FROM acu_items WHERE id=?", (acu_id,)
         ).fetchone()
         if not row:
             conn.close()
+            return
+        if row['sub_partida_id']:
+            conn.close()
+            self._editar_ficha_subpartida(row['sub_partida_id'])
             return
         recurso_id = row['recurso_id']
         part_id    = row['partida_id']
@@ -8270,6 +8421,14 @@ class ProyectoView(QWidget):
     def _actualizar_arbol_partida(self, part_id: int):
         """Actualiza P.U. y Parcial del ítem en el árbol después de un cambio en ACU."""
         if part_id not in self._id_to_item:
+            # Una sub-partida no está en el árbol, pero su cambio ya llegó a
+            # los precios de las partidas que la usan.
+            conn = get_db()
+            from core.subpartidas import es_subpartida
+            sub = es_subpartida(conn, part_id)
+            conn.close()
+            if sub:
+                self.recargar_partidas()
             return
         conn = get_db()
         p = conn.execute(
@@ -8299,8 +8458,8 @@ class ProyectoView(QWidget):
                 continue
             acu_id = self._acu_row_ids[r]
             row = conn.execute(
-                "SELECT recurso_id, cuadrilla, cantidad, COALESCE(precio,0) as precio "
-                "FROM acu_items WHERE id=?", (acu_id,)
+                "SELECT recurso_id, cuadrilla, cantidad, COALESCE(precio,0) as precio,"
+                " sub_partida_id FROM acu_items WHERE id=?", (acu_id,)
             ).fetchone()
             if row:
                 items.append(dict(row))
@@ -8330,10 +8489,22 @@ class ProyectoView(QWidget):
         rend    = partida['rendimiento'] or 1
         es_global = _partida_global(partida['unidad'])
 
+        sin_pegar = 0   # sub-partidas que no caben aquí
         for it in self._acu_clipboard:
             rec = conn.execute("SELECT tipo, unidad FROM recursos WHERE id=?",
                                (it['recurso_id'],)).fetchone()
             if not rec:
+                continue
+            if it.get('sub_partida_id'):
+                from core.subpartidas import enlazar_copia
+                try:
+                    entro = enlazar_copia(conn, self._partida_actual_id,
+                                          it['sub_partida_id'], it['cantidad'] or 0,
+                                          partida['proyecto_id'])
+                except ValueError:
+                    entro = False
+                if not entro:
+                    sin_pegar += 1
                 continue
             cuad = it['cuadrilla'] or 0
             cant = it['cantidad'] or 0
@@ -8360,6 +8531,9 @@ class ProyectoView(QWidget):
         self._actualizar_arbol_partida(self._partida_actual_id)
         self.actualizar_total()
         self.cargar_insumos()
+        if sin_pegar:
+            QMessageBox.information(self, tr("Pegar"), tr(
+                "Una sub-partida no puede contener otra sub-partida."))
 
     def _actualizar_lbl_clipboard(self):
         """Avisa en la barra de estado, como al copiar partidas. Antes era un
@@ -8505,9 +8679,10 @@ class ProyectoView(QWidget):
             return
         from views.recurso_selector_dialog import RecursoSelectorDialog
         dlg = RecursoSelectorDialog(self._partida_actual_id, self._proy, parent=self)
-        if dlg.exec():
+        if dlg.exec() or dlg.subs_cambiadas:
             self.cargar_acu(self._partida_actual_id)
             self.recargar_partidas()
+            self.actualizar_total()
             self.cargar_insumos()
 
     def _guardar_en_biblioteca(self):
@@ -8557,15 +8732,19 @@ class ProyectoView(QWidget):
         conn.execute("DELETE FROM biblioteca_acu_items WHERE cu_id=?", (cu_id,))
         acu_items = conn.execute(
             "SELECT a.recurso_id, a.cuadrilla, a.cantidad, "
-            "       COALESCE(a.precio, r.precio) AS precio "
+            "       COALESCE(a.precio, r.precio) AS precio, a.sub_partida_id "
             "FROM acu_items a JOIN recursos r ON r.id = a.recurso_id "
             "WHERE a.partida_id=?", (self._partida_actual_id,)
         ).fetchall()
+        # La biblioteca no tiene sub-partidas: ahí la línea entra aplanada.
+        from core.subpartidas import recurso_equivalente
         for it in acu_items:
+            rid_bib = (recurso_equivalente(conn, it['sub_partida_id'])
+                       if it['sub_partida_id'] else it['recurso_id'])
             conn.execute(
                 "INSERT INTO biblioteca_acu_items (cu_id, recurso_id, cuadrilla, cantidad, precio) "
                 "VALUES (?,?,?,?,?)",
-                (cu_id, it['recurso_id'], it['cuadrilla'], it['cantidad'], it['precio'])
+                (cu_id, rid_bib, it['cuadrilla'], it['cantidad'], it['precio'])
             )
         conn.commit()
         conn.close()
@@ -10474,7 +10653,7 @@ class ProyectoView(QWidget):
             _, totales = calcular_totales(self.pid)
             conn_s = _gdb()
             n_part = conn_s.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
                 (self.pid,)
             ).fetchone()[0]
             # Proyecto vacío → ofrecer sugerir partidas (IA o plantilla)
@@ -10494,7 +10673,7 @@ class ProyectoView(QWidget):
                 )
                 return
             top = conn_s.execute(
-                "SELECT item, descripcion FROM partidas "
+                "SELECT item, descripcion FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 "
                 "ORDER BY (COALESCE(metrado,0) * COALESCE(precio_unitario,0)) DESC "
                 "LIMIT 1",
@@ -10551,12 +10730,12 @@ class ProyectoView(QWidget):
             # Inspeccionar conteos rápidos en BD
             conn = get_db()
             n_sin_metr = conn.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? "
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? "
                 "AND es_titulo=0 AND (metrado IS NULL OR metrado=0)",
                 (self.pid,)
             ).fetchone()[0]
             n_sin_acu = conn.execute(
-                "SELECT COUNT(*) FROM partidas p WHERE p.proyecto_id=? "
+                "SELECT COUNT(*) FROM partidas_ppto p WHERE p.proyecto_id=? "
                 "AND p.es_titulo=0 AND NOT EXISTS "
                 "(SELECT 1 FROM acu_items WHERE partida_id=p.id)",
                 (self.pid,)
@@ -10618,7 +10797,7 @@ class ProyectoView(QWidget):
                    FROM acu_items ai
                      JOIN partidas p ON p.id = ai.partida_id
                      JOIN recursos r ON r.id = ai.recurso_id
-                   WHERE p.proyecto_id = ?
+                   WHERE p.proyecto_id = ? AND ai.sub_partida_id IS NULL
                      AND SUBSTR(r.unidad,1,1) != '%'
                    GROUP BY ai.recurso_id
                    HAVING variantes > 1
@@ -10658,7 +10837,7 @@ class ProyectoView(QWidget):
             # comparando contra la cuenta guardada por proyecto
             conn_xp = get_db()
             cnt_total = conn_xp.execute(
-                "SELECT COUNT(*) FROM partidas WHERE proyecto_id=?",
+                "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=?",
                 (self.pid,)
             ).fetchone()[0]
             conn_xp.close()
@@ -11801,7 +11980,7 @@ class ProyectoView(QWidget):
             return
         conn = get_db()
         n_part = conn.execute(
-            "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND sub_presupuesto_id=?",
+            "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND sub_presupuesto_id=?",
             (self.pid, sub_id)
         ).fetchone()[0]
         otros = conn.execute(
@@ -12381,7 +12560,7 @@ class _WorkerEspecsTodo(QThread):
             from core.database import get_db as _get_db
             conn = _get_db()
             partidas = conn.execute(
-                "SELECT id, item, descripcion, especificaciones FROM partidas "
+                "SELECT id, item, descripcion, especificaciones FROM partidas_ppto "
                 "WHERE proyecto_id=? AND es_titulo=0 ORDER BY item",
                 (self.proyecto_id,)
             ).fetchall()

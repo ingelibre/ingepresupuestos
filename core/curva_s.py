@@ -150,7 +150,7 @@ def curva_s_comparada(proyecto_id: int, base: str = 'mes') -> dict:
         proy = conn.execute("SELECT * FROM proyectos WHERE id=?",
                             (proyecto_id,)).fetchone()
         partidas = [dict(p) for p in conn.execute(
-            "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item",
+            "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item",
             (proyecto_id,)).fetchall()]
         cmap = get_cronograma_map(conn, proyecto_id)
     finally:

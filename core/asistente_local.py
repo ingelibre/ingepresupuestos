@@ -363,25 +363,25 @@ def analizar_proyecto(proyecto_id: int) -> str:
 
     # Conteos básicos
     n_part = conn.execute(
-        "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+        "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
         (proyecto_id,)
     ).fetchone()[0]
     n_tit = conn.execute(
-        "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=1",
+        "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=1",
         (proyecto_id,)
     ).fetchone()[0]
     n_sin_metrado = conn.execute(
-        "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+        "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
         "AND (metrado IS NULL OR metrado=0)",
         (proyecto_id,)
     ).fetchone()[0]
     n_sin_acu = conn.execute(
-        "SELECT COUNT(*) FROM partidas p WHERE p.proyecto_id=? AND p.es_titulo=0 "
+        "SELECT COUNT(*) FROM partidas_ppto p WHERE p.proyecto_id=? AND p.es_titulo=0 "
         "AND NOT EXISTS (SELECT 1 FROM acu_items WHERE partida_id=p.id)",
         (proyecto_id,)
     ).fetchone()[0]
     n_sin_spec = conn.execute(
-        "SELECT COUNT(*) FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+        "SELECT COUNT(*) FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
         "AND (especificaciones IS NULL OR TRIM(especificaciones)='')",
         (proyecto_id,)
     ).fetchone()[0]
@@ -394,7 +394,7 @@ def analizar_proyecto(proyecto_id: int) -> str:
     top = conn.execute(
         "SELECT item, descripcion, "
         "ROUND(COALESCE(metrado,0) * COALESCE(precio_unitario,0), 2) as parcial "
-        "FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+        "FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
         "ORDER BY parcial DESC LIMIT 3",
         (proyecto_id,)
     ).fetchall()
@@ -493,8 +493,8 @@ def top_insumos(proyecto_id: int, n: int = 10) -> str:
         """SELECT r.tipo, r.descripcion, r.unidad,
                   COALESCE(ai.precio, r.precio, 0) AS pu,
                   SUM(ai.cantidad * p.metrado) AS cant
-           FROM acu_items ai
-             JOIN partidas p ON p.id=ai.partida_id
+           FROM acu_hojas ai
+             JOIN partidas_ppto p ON p.id=ai.partida_id
              JOIN recursos r ON r.id=ai.recurso_id
            WHERE p.proyecto_id=? AND SUBSTR(r.unidad,1,1)!='%'
            GROUP BY r.id
@@ -525,7 +525,7 @@ def top_partidas(proyecto_id: int, n: int = 10) -> str:
         """SELECT item, descripcion,
                   ROUND(COALESCE(metrado,0) * COALESCE(precio_unitario,0), 2) as parcial,
                   unidad, metrado, precio_unitario
-           FROM partidas WHERE proyecto_id=? AND es_titulo=0
+           FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0
            ORDER BY parcial DESC LIMIT ?""",
         (proyecto_id, n)
     ).fetchall()
@@ -548,18 +548,18 @@ def pendientes(proyecto_id: int) -> str:
         return f"{TUX_TIP}\n\nAbre un proyecto primero."
     conn = get_db()
     sin_m = conn.execute(
-        "SELECT item, descripcion FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+        "SELECT item, descripcion FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
         "AND (metrado IS NULL OR metrado=0) ORDER BY item LIMIT 30",
         (proyecto_id,)
     ).fetchall()
     sin_acu = conn.execute(
-        "SELECT p.item, p.descripcion FROM partidas p WHERE p.proyecto_id=? AND p.es_titulo=0 "
+        "SELECT p.item, p.descripcion FROM partidas_ppto p WHERE p.proyecto_id=? AND p.es_titulo=0 "
         "AND NOT EXISTS (SELECT 1 FROM acu_items WHERE partida_id=p.id) "
         "ORDER BY p.item LIMIT 30",
         (proyecto_id,)
     ).fetchall()
     sin_spec = conn.execute(
-        "SELECT item, descripcion FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+        "SELECT item, descripcion FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
         "AND (especificaciones IS NULL OR TRIM(especificaciones)='') "
         "ORDER BY item LIMIT 30",
         (proyecto_id,)
@@ -687,7 +687,7 @@ def detectar_insumos_duplicados(proyecto_id: int,
         FROM acu_items ai
         JOIN recursos  r ON r.id = ai.recurso_id
         JOIN partidas  p ON p.id = ai.partida_id
-        WHERE p.proyecto_id = ? AND p.es_titulo = 0
+        WHERE p.proyecto_id = ? AND p.es_titulo = 0 AND ai.sub_partida_id IS NULL
         ORDER BY r.unidad, r.descripcion, p.item
         """,
         (proyecto_id,)

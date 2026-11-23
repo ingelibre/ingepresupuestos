@@ -93,7 +93,7 @@ def calcular_desde_acu(proyecto_id: int) -> dict:
     rows = conn.execute(
         """SELECT r.tipo, SUM(ai.cantidad * p.metrado * COALESCE(ai.precio, r.precio, 0))
                  AS parcial_total
-           FROM acu_items ai
+           FROM acu_hojas ai
            JOIN recursos r ON r.id = ai.recurso_id
            JOIN partidas p ON p.id = ai.partida_id
            WHERE p.proyecto_id=? AND p.es_titulo=0
@@ -114,12 +114,13 @@ def calcular_desde_acu(proyecto_id: int) -> dict:
                            THEN ai.cantidad * COALESCE(ai.precio, r.precio, 0)
                            ELSE 0 END) AS mo_cu,
                   SUM(CASE WHEN LOWER(r.unidad)='%mo'
-                           THEN ai.cantidad ELSE 0 END) AS pct_mo
-           FROM acu_items ai
+                           THEN ai.cantidad / CASE WHEN ai.factor THEN ai.factor ELSE 1 END
+                           ELSE 0 END) AS pct_mo
+           FROM acu_hojas ai
            JOIN recursos r ON r.id = ai.recurso_id
            JOIN partidas p ON p.id = ai.partida_id
            WHERE p.proyecto_id=? AND p.es_titulo=0
-           GROUP BY p.id""",
+           GROUP BY p.id, ai.linea_sub""",
         (proyecto_id,)
     ).fetchall()
     for row in pct_rows:
@@ -412,13 +413,13 @@ def _partidas_de_formula(conn, proyecto_id: int, subs: list) -> list[int]:
     if subs:
         marcas = ','.join('?' * len(subs))
         filas = conn.execute(
-            f"SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0 "
+            f"SELECT id FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
             f"AND sub_presupuesto_id IN ({marcas})",
             [proyecto_id, *subs]
         ).fetchall()
     else:
         filas = conn.execute(
-            "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+            "SELECT id FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
             (proyecto_id,)
         ).fetchall()
     return [r['id'] for r in filas]
@@ -455,7 +456,7 @@ def desglose_de_iu(proyecto_id: int, codigo: str,
         indices = {r['id']: (r['indice_inei'] or '').strip()
                    for r in conn.execute("SELECT id, indice_inei FROM recursos")}
         partidas = {r['id']: dict(r) for r in conn.execute(
-            "SELECT id, item, descripcion, unidad, metrado FROM partidas "
+            "SELECT id, item, descripcion, unidad, metrado FROM partidas_ppto "
             "WHERE proyecto_id=?", (proyecto_id,))}
     finally:
         conn.close()

@@ -263,6 +263,37 @@ def get_db():
     conn.create_function("mo_rank", 1, _orden_mo, deterministic=True)
     return conn
 
+# ── Sub-partidas (issue #23): vistas SQL ─────────────────────────────────────
+# `partidas_ppto` = las partidas DEL PRESUPUESTO (sin las sub-partidas). Todo
+#   listado por proyecto lee de acá; `partidas` a secas queda para buscar por
+#   id y para escribir. Un solo filtro en vez de 60 `AND es_subanalisis=0`
+#   (lo vigila tests/test_subpartidas.py).
+# `acu_hojas` = los ACU con las sub-partidas ya abiertas en sus insumos, para
+#   las consultas que multiplican `acu_items` por el metrado sin pasar por
+#   `get_acu_hojas`. `factor` = cantidad de la sub-partida en el padre (1 en
+#   una línea propia); `origen_id` = partida cuyo rendimiento manda.
+_VISTAS_SUBPARTIDAS = (
+    ('partidas_ppto',
+     "SELECT * FROM partidas WHERE COALESCE(es_subanalisis, 0) = 0"),
+    ('acu_hojas',
+     "SELECT id, partida_id, recurso_id, cuadrilla, cantidad, precio, orden,"
+     "       1.0 AS factor, partida_id AS origen_id, 0 AS linea_sub"
+     "  FROM acu_items WHERE sub_partida_id IS NULL"
+     " UNION ALL "
+     "SELECT h.id, ai.partida_id, h.recurso_id, h.cuadrilla,"
+     "       h.cantidad * ai.cantidad, h.precio, h.orden,"
+     "       ai.cantidad, ai.sub_partida_id, ai.id"
+     "  FROM acu_items ai JOIN acu_items h ON h.partida_id = ai.sub_partida_id"
+     " WHERE ai.sub_partida_id IS NOT NULL"),
+)
+
+
+def crear_vistas_subpartidas(conn):
+    for nombre, sql in _VISTAS_SUBPARTIDAS:
+        conn.execute(f"DROP VIEW IF EXISTS {nombre}")
+        conn.execute(f"CREATE VIEW {nombre} AS {sql}")
+
+
 def init_db():
     conn = get_db()
     conn.executescript('''
@@ -670,6 +701,10 @@ def init_db():
         # Orden manual dentro de su grupo MO/MAT/EQ/SC (issue #12). NULL = el
         # de siempre (jerarquía de MO, luego descripción).
         ('acu_orden',         "ALTER TABLE acu_items ADD COLUMN orden INTEGER"),
+        # Sub-partidas (issue #23): una partida que no está en el presupuesto y
+        # entra como línea SC en el ACU de otras. Ver `core/subpartidas.py`.
+        ('es_subanalisis', "ALTER TABLE partidas ADD COLUMN es_subanalisis INTEGER DEFAULT 0"),
+        ('sub_partida_id', "ALTER TABLE acu_items ADD COLUMN sub_partida_id INTEGER REFERENCES partidas(id)"),
         ('sub_presupuesto_id', "ALTER TABLE partidas ADD COLUMN sub_presupuesto_id INTEGER REFERENCES sub_presupuestos(id) ON DELETE SET NULL"),
         ('portafolio_id', "ALTER TABLE proyectos ADD COLUMN portafolio_id INTEGER REFERENCES portafolios(id) ON DELETE SET NULL"),
         ('fecha_inicio',  "ALTER TABLE proyectos ADD COLUMN fecha_inicio TEXT DEFAULT ''"),
@@ -925,6 +960,8 @@ def init_db():
         except Exception:
             pass
 
+    crear_vistas_subpartidas(conn)
+
     # ── Trigger: actualizar modificado_en automáticamente ────────────────
     for trg in [
         """CREATE TRIGGER IF NOT EXISTS trg_proy_upd AFTER UPDATE ON proyectos WHEN NEW.modificado_en IS OLD.modificado_en OR NEW.modificado_en IS NULL
@@ -967,6 +1004,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_partidas_sub         ON partidas(sub_presupuesto_id)",
         "CREATE INDEX IF NOT EXISTS idx_acu_items_partida    ON acu_items(partida_id)",
         "CREATE INDEX IF NOT EXISTS idx_acu_items_recurso    ON acu_items(recurso_id)",
+        "CREATE INDEX IF NOT EXISTS idx_acu_items_sub        ON acu_items(sub_partida_id)"
+        " WHERE sub_partida_id IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_metrados_partida     ON metrados_detalle(partida_id)",
         "CREATE INDEX IF NOT EXISTS idx_acero_partida        ON acero_detalle(partida_id)",
         "CREATE INDEX IF NOT EXISTS idx_pie_proyecto         ON pie_rubros(proyecto_id)",
@@ -1034,7 +1073,7 @@ def init_db():
                 # Orden AGRUPADO por subpresupuesto (Principal/NULL primero,
                 # luego cada subpresupuesto por `orden`), dentro por item.
                 partidas = [dict(r) for r in conn.execute(
-                    """SELECT p.* FROM partidas p
+                    """SELECT p.* FROM partidas_ppto p
                        LEFT JOIN sub_presupuestos s ON s.id = p.sub_presupuesto_id
                        WHERE p.proyecto_id=?
                        ORDER BY (CASE WHEN p.sub_presupuesto_id IS NULL THEN 0 ELSE 1 END),
@@ -1126,7 +1165,7 @@ def set_config(clave, valor):
 def calcular_totales(proyecto_id):
     conn = get_db()
     partidas = conn.execute(
-        "SELECT * FROM partidas WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
+        "SELECT * FROM partidas_ppto WHERE proyecto_id=? ORDER BY item", (proyecto_id,)
     ).fetchall()
     proyecto = conn.execute("SELECT * FROM proyectos WHERE id=?", (proyecto_id,)).fetchone()
     conn.close()
@@ -1257,10 +1296,15 @@ def _pu_desde_items(items) -> float:
     return _rn(cu, _DECIMALES_PPTO)
 
 
-def _recalcular_pu(conn, part_id: int) -> float:
+def _recalcular_pu(conn, part_id: int, _vistos: frozenset = frozenset()) -> float:
     """Recalcula precio_unitario de una partida sumando todos los parciales del ACU.
     Actualiza partidas.precio_unitario en la misma conexión (sin commit).
-    Retorna el nuevo precio unitario."""
+    Retorna el nuevo precio unitario.
+
+    Si la partida es una sub-partida (issue #23), su nuevo costo se lleva a
+    las líneas que la usan y se recalculan esas partidas: la cascada vive acá
+    para que los llamadores no tengan que saber que existe. `_vistos` corta
+    un ciclo que se hubiera colado por un archivo ajeno."""
     items = conn.execute(
         """SELECT ai.cantidad, COALESCE(ai.precio, r.precio, 0) as precio, r.unidad, r.tipo
            FROM acu_items ai JOIN recursos r ON r.id=ai.recurso_id WHERE ai.partida_id=?""",
@@ -1268,6 +1312,14 @@ def _recalcular_pu(conn, part_id: int) -> float:
     ).fetchall()
     cu = _pu_desde_items(items)
     conn.execute("UPDATE partidas SET precio_unitario=? WHERE id=?", (cu, part_id))
+    vistos = _vistos | {part_id}
+    padres = [r[0] for r in conn.execute(
+        "SELECT DISTINCT partida_id FROM acu_items WHERE sub_partida_id=?", (part_id,))]
+    if padres:
+        conn.execute("UPDATE acu_items SET precio=? WHERE sub_partida_id=?", (cu, part_id))
+        for padre in padres:
+            if padre not in vistos:
+                _recalcular_pu(conn, padre, vistos)
     return cu
 
 
@@ -1285,12 +1337,13 @@ def partidas_pu_inconsistente(conn, pid: int) -> list[dict]:
     rows = conn.execute(
         """SELECT ai.partida_id, ai.cantidad,
                   COALESCE(ai.precio, r.precio, 0) AS precio, r.unidad, r.tipo,
-                  p.item, p.descripcion, p.precio_unitario
+                  p.item, p.descripcion, p.precio_unitario,
+                  p.es_subanalisis, ai.sub_partida_id
            FROM acu_items ai
              JOIN partidas p ON p.id = ai.partida_id
              JOIN recursos r ON r.id = ai.recurso_id
            WHERE p.proyecto_id = ? AND p.es_titulo = 0
-           ORDER BY ai.partida_id""",
+           ORDER BY COALESCE(p.es_subanalisis, 0) DESC, ai.partida_id""",
         (pid,)
     ).fetchall()
     grupos: dict[int, list] = {}
@@ -1299,8 +1352,15 @@ def partidas_pu_inconsistente(conn, pid: int) -> list[dict]:
         grupos.setdefault(x['partida_id'], []).append(x)
         meta[x['partida_id']] = x
     out = []
+    cu_sub: dict[int, float] = {}   # costo real de cada sub-partida
     for part_id, items in grupos.items():
+        if any(x['sub_partida_id'] for x in items):
+            # El precio de la línea es derivado: manda el costo del hijo.
+            items = [dict(x, precio=cu_sub.get(x['sub_partida_id'], x['precio']))
+                     for x in items]
         cu = _pu_desde_items(items)
+        if meta[part_id]['es_subanalisis']:
+            cu_sub[part_id] = cu
         guardado = meta[part_id]['precio_unitario'] or 0
         # Tolerancia 0.02: PowerCost/Delphin/S10 suman parciales sin redondear
         # cada uno — ±1-2 céntimos de PU es criterio de redondeo entre
@@ -1340,11 +1400,14 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
     """
     items = conn.execute(
         """SELECT ai.id, ai.recurso_id, ai.cuadrilla, ai.cantidad,
-                  r.codigo, r.descripcion, r.tipo, r.unidad, r.indice_inei,
+                  COALESCE(sp.item, r.codigo) AS codigo,
+                  COALESCE(sp.descripcion, r.descripcion) AS descripcion, r.tipo,
+                  COALESCE(sp.unidad, r.unidad) AS unidad, r.indice_inei,
                   COALESCE(ai.precio, r.precio, 0) as precio,
-                  r.precio as precio_catalogo
+                  r.precio as precio_catalogo, ai.sub_partida_id
            FROM acu_items ai
            JOIN recursos r ON r.id = ai.recurso_id
+           LEFT JOIN partidas sp ON sp.id = ai.sub_partida_id
            WHERE ai.partida_id = ?
            ORDER BY """ + ORDEN_ACU_SQL,
         (part_id,)
@@ -1375,6 +1438,47 @@ def get_acu_items(conn, part_id: int) -> list[dict]:
     return result, totales_tipo
 
 
+def get_acu_hojas(conn, part_id: int, _cache: dict | None = None) -> list[dict]:
+    """El ACU con las sub-partidas abiertas en sus insumos (issue #23): lo que
+    de verdad se compra y se contrata. Sin sub-partidas es exactamente
+    `get_acu_items`.
+
+    La cantidad de cada hoja es la suya por la de la sub-partida; el parcial
+    de la línea se reparte entre las hojas a prorrata de SUS parciales, así
+    que la suma no cambia y el costo directo sigue cuadrando. Una sub-partida
+    sin análisis útil queda como línea, para no perder su monto."""
+    items, _ = get_acu_items(conn, part_id)
+    if not any(it['sub_partida_id'] for it in items):
+        return items
+    _cache = {} if _cache is None else _cache
+    out = []
+    for it in items:
+        sid = it['sub_partida_id']
+        if not sid or sid == part_id:
+            out.append(it)
+            continue
+        if sid not in _cache:
+            _cache[sid] = get_acu_items(conn, sid)[0]
+        hojas = _cache[sid]
+        suma = sum(h['parcial'] or 0 for h in hojas)
+        if suma <= 0:
+            out.append(it)
+            continue
+        for h in hojas:
+            h = dict(h)
+            h['parcial'] = it['parcial'] * ((h['parcial'] or 0) / suma)
+            h['cantidad'] = (h['cantidad'] or 0) * (it['cantidad'] or 0)
+            h['de_subpartida'] = sid
+            out.append(h)
+    return out
+
+
+def _clave_insumo(it):
+    """Las líneas de sub-partida comparten recurso: cada una va por su cuenta."""
+    sid = it.get('sub_partida_id')
+    return ('sub', sid) if sid else it['recurso_id']
+
+
 def get_insumos_para_partidas(conn, partida_ids: list[int],
                               detallar_partidas: bool = False) -> list[dict]:
     """Devuelve insumos agrupados por recurso para una lista de partidas hoja.
@@ -1393,6 +1497,7 @@ def get_insumos_para_partidas(conn, partida_ids: list[int],
     reparto, que es la que garantiza que todo cuadre con el costo directo.
     """
     insumos: dict[int, dict] = {}
+    cache_sub: dict = {}
     for pid_p in partida_ids:
         meta = conn.execute(
             "SELECT metrado, precio_unitario FROM partidas WHERE id=?",
@@ -1402,17 +1507,17 @@ def get_insumos_para_partidas(conn, partida_ids: list[int],
             continue
         metrado = float(meta['metrado'] or 0)
         pu      = float(meta['precio_unitario'] or 0)
-        items, _ = get_acu_items(conn, pid_p)
+        items = get_acu_hojas(conn, pid_p, cache_sub)
         # Total de la partida para el CD (mismo cálculo que `calcular_totales`).
         partida_total = parcial_wysiwyg(metrado, pu) if (metrado and pu) else 0.0
         # Suma de parciales unitarios desde get_acu_items (incluye % calculados).
         sum_p = sum((it.get('parcial') or 0) for it in items)
 
         for it in items:
-            rid = it['recurso_id']
+            rid = _clave_insumo(it)
             if rid not in insumos:
                 insumos[rid] = {
-                    'recurso_id': rid,
+                    'recurso_id': it['recurso_id'],
                     'codigo':      it.get('codigo')      or '',
                     'descripcion': it.get('descripcion') or '',
                     'tipo':        it.get('tipo')        or 'MAT',
@@ -1484,7 +1589,7 @@ def get_insumos_proyecto(conn, pid: int) -> list[dict]:
     """Devuelve insumos totales del proyecto agrupados por recurso.
     INCLUYE overhead `%MO`/`%MAT` (ver `get_insumos_para_partidas`)."""
     rows = conn.execute(
-        "SELECT id FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+        "SELECT id FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
         (pid,)
     ).fetchall()
     return get_insumos_para_partidas(conn, [r['id'] for r in rows])
@@ -1534,7 +1639,7 @@ def pool_partidas_rag(conn) -> list[dict]:
     ):
         _considerar(r['descripcion'], r['unidad'] or '', 'bib', r['id'])
     for r in conn.execute(
-        "SELECT p.id, p.descripcion, p.unidad FROM partidas p "
+        "SELECT p.id, p.descripcion, p.unidad FROM partidas_ppto p "
         "WHERE p.es_titulo = 0 AND p.descripcion IS NOT NULL AND p.descripcion != '' "
         "AND EXISTS (SELECT 1 FROM acu_items a WHERE a.partida_id = p.id)"
     ):
@@ -1550,7 +1655,7 @@ def firma_pool_rag(conn) -> str:
     bn, bx = conn.execute(
         "SELECT COUNT(*), COALESCE(MAX(id),0) FROM biblioteca_cu").fetchone()
     pn, px = conn.execute(
-        "SELECT COUNT(*), COALESCE(MAX(id),0) FROM partidas WHERE es_titulo=0"
+        "SELECT COUNT(*), COALESCE(MAX(id),0) FROM partidas_ppto WHERE es_titulo=0"
     ).fetchone()
     return f"{bn}:{bx}:{pn}:{px}"
 
@@ -1577,7 +1682,7 @@ def acu_de_pool(conn, origen: str, ref_id: int) -> dict | None:
     if not p:
         return None
     items = conn.execute(
-        "SELECT recurso_id, cuadrilla, cantidad, precio "
+        "SELECT recurso_id, cuadrilla, cantidad, precio, sub_partida_id "
         "FROM acu_items WHERE partida_id=?", (ref_id,)).fetchall()
     return {'rendimiento': p['rendimiento'],
             'costo_unitario': p['precio_unitario'],
@@ -1604,6 +1709,13 @@ def copiar_items_acu(conn, partida_id: int, items, *, proyecto_id: int,
         it = dict(it)
         rid = it.get('recurso_id')
         if rid is None:
+            continue
+        if it.get('sub_partida_id'):
+            from core.subpartidas import enlazar_copia
+            if enlazar_copia(conn, partida_id, it['sub_partida_id'],
+                             it.get('cantidad') or 0, proyecto_id,
+                             solo_estructura=solo_estructura):
+                n += 1
             continue
         precio = precio_recurso_en_proyecto(conn, proyecto_id, rid)
         if precio is None:
@@ -1639,7 +1751,7 @@ def precios_inconsistentes(conn, pid: int) -> dict[int, dict]:
            FROM acu_items ai
              JOIN partidas p ON p.id = ai.partida_id
              JOIN recursos r ON r.id = ai.recurso_id
-           WHERE p.proyecto_id = ?
+           WHERE p.proyecto_id = ? AND ai.sub_partida_id IS NULL
              AND SUBSTR(COALESCE(r.unidad, ''), 1, 1) != '%'""",
         (pid,)
     ).fetchall()
@@ -1673,7 +1785,7 @@ def unificar_precio_recurso(conn, pid: int, recurso_id: int, precio: float) -> l
     """
     conn.execute(
         """UPDATE acu_items SET precio=?
-           WHERE recurso_id=?
+           WHERE recurso_id=? AND sub_partida_id IS NULL
              AND partida_id IN (SELECT id FROM partidas WHERE proyecto_id=?)""",
         (precio, recurso_id, pid)
     )
@@ -1715,7 +1827,7 @@ def precios_desactualizados(conn, pid: int) -> list[dict]:
            FROM acu_items ai
              JOIN partidas p ON p.id = ai.partida_id
              JOIN recursos r ON r.id = ai.recurso_id
-           WHERE p.proyecto_id = ?
+           WHERE p.proyecto_id = ? AND ai.sub_partida_id IS NULL
              AND SUBSTR(COALESCE(r.unidad, ''), 1, 1) != '%'
              AND COALESCE(r.precio, 0) > 0""",
         (pid,)
@@ -1783,6 +1895,7 @@ def precio_recurso_en_proyecto(conn, pid: int, recurso_id: int):
              JOIN partidas p ON p.id = ai.partida_id
              JOIN recursos r ON r.id = ai.recurso_id
            WHERE p.proyecto_id = ? AND ai.recurso_id = ?
+             AND ai.sub_partida_id IS NULL
              AND SUBSTR(COALESCE(r.unidad, ''), 1, 1) != '%'
            GROUP BY eff ORDER BY n DESC, eff DESC LIMIT 1""",
         (pid, recurso_id)

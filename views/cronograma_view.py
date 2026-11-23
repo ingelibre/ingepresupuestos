@@ -31,7 +31,7 @@ from PySide6.QtPrintSupport import QPrinter
 from core.database import (
     get_db, calcular_totales, parcial_wysiwyg, get_decimales_ppto,
     get_decimales_metrado,
-    get_acu_items,
+    _clave_insumo, get_acu_hojas,
 )
 from core.cronograma import (
     cpm, get_cronograma_map, distribuir_periodos,
@@ -275,7 +275,7 @@ class CronogramaView(QWidget):
         # subpresupuesto por `orden`), dentro por item — espejo del árbol del
         # presupuesto y base de la numeración estilo MS Project.
         self._partidas = [dict(r) for r in conn.execute(
-            """SELECT p.* FROM partidas p
+            """SELECT p.* FROM partidas_ppto p
                LEFT JOIN sub_presupuestos s ON s.id = p.sub_presupuesto_id
                WHERE p.proyecto_id=?
                ORDER BY (CASE WHEN p.sub_presupuesto_id IS NULL THEN 0 ELSE 1 END),
@@ -11009,6 +11009,7 @@ class InsumosWidget(QWidget):
         # partida (= su contribución al CD) → sum(montos) coincide con CD.
         conn = get_db()
         recursos = {}
+        cache_sub: dict = {}
         for p in partidas:
             if p['es_titulo']:
                 continue
@@ -11019,7 +11020,7 @@ class InsumosWidget(QWidget):
             ini = t.get('ES', ini)
             metrado = p['metrado'] or 0
             pu      = p['precio_unitario'] or 0
-            items, _ = get_acu_items(conn, p['id'])
+            items = get_acu_hojas(conn, p['id'], cache_sub)
             partida_total = parcial_wysiwyg(metrado, pu) if (metrado and pu) else 0.0
             sum_p = sum((it.get('parcial') or 0) for it in items)
             for it in items:
@@ -11042,7 +11043,7 @@ class InsumosWidget(QWidget):
                         segs_, ini, dur, qty_tot, n_periods, self._period_days)
                 else:
                     weekly_qty = [0.0] * n_periods
-                rid = it['recurso_id']
+                rid = _clave_insumo(it)
                 if rid not in recursos:
                     recursos[rid] = {
                         'codigo': it.get('codigo')      or '',

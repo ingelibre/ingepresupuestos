@@ -1185,11 +1185,20 @@ def _html_acus(pid: int, proy: dict, items: list) -> str:
 
     parts = ['<h2>Análisis de Costos Unitarios</h2>']
 
+    # Los análisis de las sub-partidas usadas van al final (issue #23).
+    from core.subpartidas import usadas_en
+    subs = [{'partida': dict(f)} for f in usadas_en(
+        conn, [e['partida']['id'] for e in items])]
+
     cnt = 0
-    for entry in items:
+    en_subs = False
+    for entry in [*items, *subs]:
         p = entry['partida']
         if p.get('es_titulo'):
             continue
+        if p.get('es_subanalisis') and not en_subs:
+            en_subs = True
+            parts.append('<h2>Análisis de sub-partidas</h2>')
         cnt += 1
         acu_items, totales_tipo = get_acu_items(conn, p['id'])
         cu = sum(totales_tipo.values())
@@ -2456,20 +2465,22 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
     # cronograma aunque su monto distribuido sea ≠ 0.
     # Distribución proporcional al `parcial_wysiwyg` de cada partida (=
     # contribución al CD) → garantiza que `sum(montos)` = CD exactamente.
-    from core.database import parcial_wysiwyg as _pw
+    from core.database import (_clave_insumo, get_acu_hojas,
+                               parcial_wysiwyg as _pw)
     conn = get_db()
     partidas_db = conn.execute(
-        "SELECT id, metrado, precio_unitario FROM partidas "
+        "SELECT id, metrado, precio_unitario FROM partidas_ppto "
         "WHERE proyecto_id=? AND es_titulo=0",
         (pid,)
     ).fetchall()
 
     insumos = {}
+    cache_sub: dict = {}
     for p_row in partidas_db:
         partida_id = p_row['id']
         metrado    = float(p_row['metrado'] or 0)
         pu         = float(p_row['precio_unitario'] or 0)
-        items, _ = get_acu_items(conn, partida_id)
+        items = get_acu_hojas(conn, partida_id, cache_sub)
         partida_total = _pw(metrado, pu) if (metrado and pu) else 0.0
         sum_p = sum((it.get('parcial') or 0) for it in items)
         c = cron.get(partida_id, {})
@@ -2478,7 +2489,7 @@ def _html_cronograma_adquisiciones_v2(pid: int, proy: dict, items: list, *,
         t_cpm = tasks_cpm.get(partida_id, {})
         ini   = t_cpm.get('ES') or (c.get('inicio_dia') or 1)
         for it in items:
-            rid = it['recurso_id']
+            rid = _clave_insumo(it)
             # Reparto proporcional del partida_total entre items.
             if sum_p > 0:
                 ratio = (it.get('parcial') or 0) / sum_p
@@ -2816,9 +2827,9 @@ def _html_cronograma_adquisiciones_legacy(pid: int, proy: dict, items: list, *,
         """SELECT ai.partida_id, r.id as recurso_id, r.codigo, r.descripcion,
                   r.tipo, r.unidad, COALESCE(ai.precio, r.precio, 0) as precio,
                   ai.cantidad as cant_unit, p.metrado
-           FROM acu_items ai
+           FROM acu_hojas ai
            JOIN recursos r ON r.id = ai.recurso_id
-           JOIN partidas p ON p.id = ai.partida_id
+           JOIN partidas_ppto p ON p.id = ai.partida_id
            WHERE p.proyecto_id = ? AND SUBSTR(r.unidad, 1, 1) != '%'
            ORDER BY r.tipo,
                     CASE WHEN r.tipo='MO' THEN mo_rank(r.descripcion) ELSE 0 END,
@@ -3172,7 +3183,7 @@ def _html_insumos(pid: int, proy: dict, por_sub: bool = False) -> str:
                 _bloques = []
                 for _s in _subs:
                     _ids = [r['id'] for r in _conn.execute(
-                        "SELECT id FROM partidas WHERE proyecto_id=? "
+                        "SELECT id FROM partidas_ppto WHERE proyecto_id=? "
                         "AND es_titulo=0 AND sub_presupuesto_id IS ?",
                         (pid, _s['id'])
                     ).fetchall()]
@@ -5207,7 +5218,7 @@ def _anexar_fichas_especificaciones(pid: int, out_path: str,
     conn = get_db()
     try:
         partidas = conn.execute(
-            """SELECT id FROM partidas
+            """SELECT id FROM partidas_ppto
                WHERE proyecto_id=? AND es_titulo=0
                  AND COALESCE(spec_adjuntos, '') != ''
                ORDER BY item""", (pid,)).fetchall()

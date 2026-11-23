@@ -182,7 +182,7 @@ def _insumos_presupuesto_filas(proyecto_id: int) -> list[dict]:
             "SELECT r.id AS recurso_id, r.descripcion, r.unidad, r.tipo, "
             "r.categoria AS cat_override, r.indice_inei AS indice, "
             "SUM(ai.cantidad * COALESCE(p.metrado, 0)) AS cantidad "
-            "FROM acu_items ai "
+            "FROM acu_hojas ai "
             "JOIN partidas p ON p.id = ai.partida_id "
             "JOIN recursos r ON r.id = ai.recurso_id "
             "WHERE p.proyecto_id=? AND p.es_titulo=0 AND r.tipo IN ('MAT','EQ','SC') "

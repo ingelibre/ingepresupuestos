@@ -46,9 +46,9 @@ class InsumosTable(QWidget):
                    SUM(ai.cantidad * p.metrado) AS cantidad,
                    COALESCE(MAX(ai.precio), r.precio, 0) AS precio,
                    SUM(ai.cantidad * p.metrado * COALESCE(ai.precio, r.precio, 0)) AS parcial
-            FROM acu_items ai
+            FROM acu_hojas ai
             JOIN recursos r ON ai.recurso_id = r.id
-            JOIN partidas p ON ai.partida_id = p.id
+            JOIN partidas_ppto p ON ai.partida_id = p.id
             WHERE p.proyecto_id = ? AND SUBSTR(r.unidad, 1, 1) != '%'
             GROUP BY r.id
             ORDER BY CASE r.tipo WHEN 'MO' THEN 1 WHEN 'EQ' THEN 2 ELSE 3 END, r.descripcion

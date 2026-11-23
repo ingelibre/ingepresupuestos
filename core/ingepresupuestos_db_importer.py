@@ -41,15 +41,19 @@ def listar_proyectos_db(filepath: str) -> list[dict]:
                     f"La BD no tiene la tabla '{t}'. ¿Es realmente una BD de "
                     f"ingePresupuestos?"
                 )
+        # Sub-partidas: no son partidas del presupuesto (archivos 3.2+).
+        sin_subs = (" AND COALESCE(es_subanalisis,0)=0" if 'es_subanalisis' in
+                    {c[1] for c in src.execute("PRAGMA table_info(partidas)")}
+                    else "")
         rows = src.execute(
             "SELECT p.id AS id_ppto, p.nombre, p.cliente, p.ubicacion, "
             "       p.costo_al AS fecha, "
             "       COALESCE(pf.nombre, '') AS portafolio_nombre, "
             "       COALESCE(pf.color, '#667885') AS portafolio_color, "
             "       (SELECT COUNT(*) FROM partidas WHERE proyecto_id=p.id "
-            "        AND es_titulo=0) AS n_partidas, "
+            f"        AND es_titulo=0{sin_subs}) AS n_partidas, "
             "       (SELECT SUM(COALESCE(metrado,0) * COALESCE(precio_unitario,0)) "
-            "        FROM partidas WHERE proyecto_id=p.id AND es_titulo=0) AS cd "
+            f"        FROM partidas WHERE proyecto_id=p.id AND es_titulo=0{sin_subs}) AS cd "
             "FROM proyectos p "
             "LEFT JOIN portafolios pf ON pf.id = p.portafolio_id "
             "ORDER BY p.nombre"
@@ -314,7 +318,8 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
 
     # ── 5. ACU_ITEMS ──────────────────────────────────────────────────
     cols_acu = _cols_comunes(conn, 'src', 'acu_items',
-                              excluir={'id', 'partida_id', 'recurso_id'})
+                              excluir={'id', 'partida_id', 'recurso_id',
+                                      'sub_partida_id'})
     src_cols_acu = [c[0] for c in conn.execute(
         "SELECT * FROM src.acu_items WHERE 1=0"
     ).description]
@@ -328,8 +333,11 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
         new_rec_id = map_recurso.get(d['recurso_id'])
         if not new_part_id or not new_rec_id:
             continue
-        cols_insert = list(cols_acu) + ['partida_id', 'recurso_id']
-        vals = [d.get(c) for c in cols_acu] + [new_part_id, new_rec_id]
+        cols_insert = list(cols_acu) + ['partida_id', 'recurso_id',
+                                        'sub_partida_id']
+        # La sub-partida viaja como una partida más: se apunta a la copia.
+        vals = [d.get(c) for c in cols_acu] + [
+            new_part_id, new_rec_id, map_partida.get(d.get('sub_partida_id'))]
         ph = ",".join("?" * len(cols_insert))
         conn.execute(
             f"INSERT INTO acu_items ({','.join(cols_insert)}) VALUES ({ph})",
@@ -403,7 +411,7 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
     # con sus items.
     for r in conn.execute(
         "SELECT id, descripcion, unidad, rendimiento, precio_unitario "
-        "FROM partidas WHERE proyecto_id=? AND es_titulo=0",
+        "FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0",
         (pid_dst,)
     ).fetchall():
         new_part_id = r[0]
@@ -441,10 +449,12 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
                 (desc, und, float(r[3] or 1.0), float(r[4] or 0))
             )
             cu_id = cur.lastrowid
+        # La biblioteca no tiene sub-partidas: ahí la línea entra aplanada.
+        from core.subpartidas import recurso_equivalente
         # Copiar items (con precio efectivo: COALESCE precio-proyecto / catálogo)
         for ai in conn.execute(
             "SELECT a.recurso_id, a.cuadrilla, a.cantidad, "
-            "       COALESCE(a.precio, r.precio) AS precio "
+            "       COALESCE(a.precio, r.precio) AS precio, a.sub_partida_id "
             "FROM acu_items a JOIN recursos r ON r.id = a.recurso_id "
             "WHERE a.partida_id=?",
             (new_part_id,)
@@ -452,7 +462,7 @@ def _do_import(conn: sqlite3.Connection, pid_origen: int) -> int:
             conn.execute(
                 "INSERT INTO biblioteca_acu_items "
                 "(cu_id, recurso_id, cuadrilla, cantidad, precio) VALUES (?,?,?,?,?)",
-                (cu_id, ai[0], float(ai[1] or 0), float(ai[2] or 0),
+                (cu_id, recurso_equivalente(conn, ai[4]) if ai[4] else ai[0], float(ai[1] or 0), float(ai[2] or 0),
                  ai[3] if ai[3] is not None else None)
             )
 

@@ -29,6 +29,7 @@ def _db_seed():
         os.close(fd)
         shutil.copy(SEED, _tmpdb)
         d.DB_PATH = _tmpdb
+        d.init_db()     # el seed viaja sin migrar; la app siempre migra al abrir
     return d.get_db()
 
 

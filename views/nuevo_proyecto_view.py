@@ -1147,7 +1147,7 @@ class NuevoProyectoView(QWidget):
             try:
                 conn2 = get_db()
                 row = conn2.execute(
-                    "SELECT especificaciones FROM partidas "
+                    "SELECT especificaciones FROM partidas_ppto "
                     "WHERE proyecto_id=? AND item='00' LIMIT 1",
                     (proyecto_id,)
                 ).fetchone()
@@ -1270,6 +1270,7 @@ class NuevoProyectoView(QWidget):
                     from core.database import (_recalcular_pu, _rn,
                         get_decimales_cant_acu, recurso_por_hora,
                         recurso_por_dia, partida_global)
+                    # sub-partidas: incluidas (no es un listado del presupuesto).
                     partidas = conn.execute(
                         "SELECT id, rendimiento, unidad FROM partidas WHERE proyecto_id=?",
                         (self._proyecto_id,)

@@ -316,7 +316,7 @@ class AgregarTituloDialog(QDialog):
 
     def _siguiente_item(self, conn) -> str:
         existing = {r[0] for r in conn.execute(
-            "SELECT item FROM partidas WHERE proyecto_id=?", (self.pid,)
+            "SELECT item FROM partidas_ppto WHERE proyecto_id=?", (self.pid,)
         ).fetchall()}
 
         ctx      = self._contexto_item

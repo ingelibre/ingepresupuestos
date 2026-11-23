@@ -236,6 +236,7 @@ class ProyectoFormDialog(QDialog):
                 if jornada_nueva != _jornada_vieja:
                     from core.database import (_rn, get_decimales_cant_acu,
                         recurso_por_hora, recurso_por_dia, partida_global)
+                    # sub-partidas: incluidas (no es un listado del presupuesto).
                     partidas = conn.execute(
                         "SELECT id, rendimiento, unidad FROM partidas WHERE proyecto_id=?",
                         (self.proyecto_id,)
