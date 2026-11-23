@@ -9,6 +9,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# `ingepresupuestos --mcp`: servidor MCP por stdio. Va ANTES de importar Qt y
+# de abrir la base: es un proceso solo-stdlib que habla con la app abierta.
+if __name__ == "__main__" and "--mcp" in sys.argv[1:]:
+    from core.mcp_stdio import main as _mcp_main
+    raise SystemExit(_mcp_main())
+
 # Backend Qt: por defecto Qt elige (xcb en Xorg, wayland en Wayland). Si el
 # usuario exporta INGEPPTO_FORCE_XCB=1, se fuerza xcb (compat con la versión
 # anterior — útil si algún WM raro tiene un bug en Wayland nativo).

@@ -48,6 +48,8 @@ apps:
       - desktop-legacy
       - home
       - network
+      # Conexión MCP: la app escucha en 127.0.0.1.
+      - network-bind
       - removable-media
     environment:
       QT_QPA_PLATFORM: xcb

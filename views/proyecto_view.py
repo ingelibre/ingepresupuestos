@@ -10148,6 +10148,18 @@ class ProyectoView(QWidget):
 
         menu.addSeparator()
 
+        a_itz = QAction(tr("Traer de IngeTrazo abierto…"), self)
+        a_itz.triggered.connect(self._traer_de_ingetrazo)
+        menu.addAction(a_itz)
+        a_mcp = QAction(tr("Conexión con IA (MCP)") + "…", self)
+        a_mcp.triggered.connect(self._abrir_mcp)
+        menu.addAction(a_mcp)
+        a_undo_ia = QAction(tr("Deshacer lo último de la IA"), self)
+        a_undo_ia.triggered.connect(self._deshacer_ia)
+        menu.addAction(a_undo_ia)
+
+        menu.addSeparator()
+
         a_cfg = QAction(tr("Configuración"), self)
         a_cfg.triggered.connect(self.ir_a_configuracion.emit)
         menu.addAction(a_cfg)
@@ -10166,6 +10178,24 @@ class ProyectoView(QWidget):
             self.addAction(act)
 
         return menu
+
+    def _traer_de_ingetrazo(self):
+        if not self._require_editable(N_('traer el metrado de IngeTrazo')):
+            return
+        from views.ingetrazo_traer import traer_de_ingetrazo
+        traer_de_ingetrazo(self, self.pid)
+
+    def _abrir_mcp(self):
+        from views.mcp_dialog import DialogoMCP
+        DialogoMCP(self.window(), self).exec()
+
+    def _deshacer_ia(self):
+        ventana = self.window()
+        if not hasattr(ventana, 'stack'):
+            return
+        from views.mcp_dialog import deshacer_con_aviso
+        from views.mcp_puente import puente_de
+        deshacer_con_aviso(self, puente_de(ventana))
 
     def _guardar_como_plantilla(self):
         """Guarda la estructura del presupuesto (o de un sub-presupuesto) como
