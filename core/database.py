@@ -679,6 +679,8 @@ def init_db():
     ''')
     from core.bim_modelo import TABLAS_SQL as _bim_sql
     conn.executescript(_bim_sql)
+    from core.titulos import TABLA_SQL as _titulos_sql
+    conn.executescript(_titulos_sql)
     conn.commit()
     # Migración: agregar columnas nuevas si no existen (SQLite no soporta IF NOT EXISTS en ALTER)
     for col, ddl in [
