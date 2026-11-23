@@ -1,0 +1,25 @@
+{
+  "esquema": 1,
+  "id": "pu-con-indirectos",
+  "nombre": "Precios con indirectos incluidos",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Presupuesto con el pie repartido dentro de cada precio unitario, sin mostrar los porcentajes, con el mismo total. El residuo del redondeo sale en una línea y el impuesto puede quedar aparte. Es un reporte: no cambia el presupuesto.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Prices including overhead",
+      "descripcion": "Budget with the footer spread over each unit price, without showing percentages, with the same total. The rounding residue gets its own line and the tax may be left separate. It is a report: it does not change the budget."
+    },
+    "pt_BR": {
+      "nombre": "Preços com indiretos incluídos",
+      "descripcion": "Orçamento com o fechamento distribuído em cada preço unitário, sem mostrar os percentuais, com o mesmo total. O resíduo do arredondamento sai em uma linha e o imposto pode ficar à parte. É um relatório: não altera o orçamento."
+    }
+  }
+}
