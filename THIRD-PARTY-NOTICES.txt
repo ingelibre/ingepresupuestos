@@ -32,6 +32,14 @@ otorgan al Usuario sobre estos componentes.
   ESTA CONDICIÓN ES OBLIGATORIA. No cambiar el empaquetado a "onefile" sin
   adquirir previamente una licencia comercial de Qt.
 
+  Excepción — Qt Quick 3D (visor BIM): GPL-3.0
+  Copyright (C) The Qt Company Ltd. y colaboradores
+  Qt Quick 3D no se ofrece bajo LGPL, solo bajo GPL-3.0 o licencia comercial
+  de Qt. Es compatible con la GPL-3.0-or-later de IngePresupuestos; el
+  conjunto distribuido se rige por la GPL versión 3. Incluye componentes de
+  terceros con licencias permisivas (Apache-2.0, BSD-3-Clause, MIT, CC0):
+  https://doc.qt.io/qt-6/qtquick3d-index.html#licenses-and-attributions
+
 
 2. Bibliotecas de Python
 -------------------------
@@ -162,6 +170,28 @@ otorgan al Usuario sobre estos componentes.
   modificación de su contenido.
 
 
+10. Geometría IFC (visor BIM)
+------------------------------
+
+  IfcOpenShell — LGPL-3.0-or-later
+  Copyright (C) IfcOpenShell contributors
+  https://github.com/IfcOpenShell/IfcOpenShell
+
+  Open CASCADE Technology 7.8 — LGPL-2.1 con la excepción de Open CASCADE 1.0
+  Copyright (C) OPEN CASCADE SAS
+  https://github.com/Open-Cascade-SAS/OCCT
+  El visor usa las facilidades de Open CASCADE Technology (aviso que pide la
+  propia excepción).
+
+  Boost — BSL-1.0 · https://www.boost.org
+  lark — MIT · https://github.com/lark-parser/lark
+
+  Se distribuyen sin modificar, como bibliotecas separadas y reemplazables
+  dentro de _internal/ifcopenshell/ (en Flatpak, en site-packages/ifcopenshell).
+  No se incluyen los núcleos CGAL ni manifold, ni los exportadores COLLADA,
+  glTF, STEP o SVG que trae el paquete original.
+
+
 ---------------------------------------------------------------------------
 Consultas sobre estos avisos: ing.sumari@gmail.com
-Última revisión: agosto de 2026 — revisar en cada cambio de dependencias.
+Última revisión: noviembre de 2026 — revisar en cada cambio de dependencias.

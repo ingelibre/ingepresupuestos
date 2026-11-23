@@ -14,6 +14,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 if __name__ == "__main__" and "--mcp" in sys.argv[1:]:
     from core.mcp_stdio import main as _mcp_main
     raise SystemExit(_mcp_main())
+# Proceso auxiliar del visor BIM: el binario se vuelve a lanzar a sí mismo para
+# convertir un IFC en mallas (core/bim_geometria.py). Antes de importar Qt y de
+# tocar la base de datos: no es la app.
+if len(sys.argv) == 4 and sys.argv[1] == '--bim-geometria':
+    from core.bim_geometria import proceso_hijo
+    proceso_hijo(sys.argv[2:])       # termina el proceso
 
 # Backend Qt: por defecto Qt elige (xcb en Xorg, wayland en Wayland). Si el
 # usuario exporta INGEPPTO_FORCE_XCB=1, se fuerza xcb (compat con la versión

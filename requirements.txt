@@ -22,3 +22,8 @@ access-parser>=0.0.6
 # es pip: se baja de R2 al build (gitignored). scikit-learn NO se incluye (solo
 # se usó para PREPARAR el modelo reducido, no en runtime).
 model2vec>=0.8.0
+# Geometría del visor BIM (views/bim_visor.py). Opcional en ejecución: si falta,
+# la app funciona y el visor lo explica. Wheels para Windows, macOS (arm64 y
+# x86_64) y manylinux, Python 3.10 a 3.15.
+ifcopenshell>=0.9.0
+numpy>=2.0

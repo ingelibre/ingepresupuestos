@@ -77,6 +77,8 @@ modules:
       #    (empaquetado) y pyodbc (solo Windows — en Linux usamos mdbtools).
       - grep -vE '^\s*(pyinstaller|pyodbc)\b' requirements.txt > reqs.txt
       - pip3 install --prefix=${FLATPAK_DEST} --no-warn-script-location -r reqs.txt
+      #    IfcOpenShell (visor BIM): solo las piezas que se usan.
+      - sh installer/flatpak/podar-ifcopenshell.sh ${FLATPAK_DEST}/lib/python3*/site-packages
       # 2. Código y datos de la app — se instala el FUENTE .py.
       #    Software libre GPL-3.0-or-later: NO usar compileall -b ni borrar
       #    los .py.
