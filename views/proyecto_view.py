@@ -2166,6 +2166,7 @@ class ProyectoView(QWidget):
         QShortcut(QKeySequence("Ctrl+Y"),       self, self._historial.rehacer)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._historial.rehacer)
         QShortcut(QKeySequence("Ctrl+H"),       self, self._buscar_reemplazar)
+        QShortcut(QKeySequence("Ctrl+R"),       self, self._abrir_centro_reportes)
         QShortcut(QKeySequence("Delete"),    self, self._supr_partida_seleccionada)
         QShortcut(QKeySequence("Escape"),    self, self._deseleccionar)
         QShortcut(QKeySequence("F1"),        self, self._mostrar_atajos)
@@ -2299,7 +2300,8 @@ class ProyectoView(QWidget):
         _tbtn(_tr("Inicio"),      lambda: self.ir_a_proyectos.emit(), sep_after=True)
         _tbtn(f"{_tr('Archivo')} ▾", None, sep_after=True, menu=self._build_archivo_menu())
         _tbtn(f"{_tr('Editar')} ▾", None, menu=self._build_editar_menu())
-        _tbtn(_tr("Reportes"),    self._abrir_centro_reportes, sep_after=True)
+        _tbtn(f"{_tr('Reportes')} ▾", None, sep_after=True,
+              menu=self._build_reportes_menu())
         _tbtn(_tr("Metrados"),    self._ir_metrados)
         _tbtn(f"{_tr('Cronogramas')} ▾", None, menu=self._build_cronograma_menu())
         _tbtn(f"{_tr('Control de Obra')} ▾", None, menu=self._build_control_obra_menu())
@@ -7055,6 +7057,7 @@ class ProyectoView(QWidget):
                     ('Ctrl+N',             tr('Nuevo proyecto')),
                     ('Ctrl+O',             tr('Abrir otro proyecto')),
                     ('Ctrl+P',             tr('Imprimir reporte')),
+                    ('Ctrl+R',             tr('Centro de Reportes')),
                 ]),
                 (tr('Cronograma — Gantt'), [
                     (tr('Ctrl + rueda'),       tr('Zoom horizontal (acercar/alejar)')),
@@ -10752,6 +10755,58 @@ class ProyectoView(QWidget):
     # ══════════════════════════════════════════════════════════════════════════
     # Centro de Reportes — vista anclada (page del root_stack)
     # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_reportes_menu(self):
+        """QMenu del botón "Reportes ▾": el Centro y, de un clic, cada reporte
+        ya elegido en él (con su vista previa; aquí no se exporta nada)."""
+        from PySide6.QtWidgets import QMenu
+        from core.pdf_reports import REPORT_TYPES
+        nombres = {c: t for c, t, _d in REPORT_TYPES}
+        menu = QMenu(self)
+
+        def _a(m, codigo):
+            a = m.addAction(tr(nombres[codigo]).replace('&', '&&'))
+            a.triggered.connect(lambda *_: self._abrir_reporte(codigo))
+            return a
+        menu.addAction(tr("Centro de Reportes") + "…\tCtrl+R").triggered.connect(
+            lambda *_: self._abrir_centro_reportes())
+        menu.addSeparator()
+        for c in ('presupuesto', 'acus', 'insumos', 'metrados', 'especificaciones'):
+            _a(menu, c)
+        menu.addSeparator()
+        sub = menu.addMenu(tr("Cronograma"))
+        for c in ('cronograma', 'cronograma_valorizado', 'cronograma_adquisiciones',
+                  'cronograma_curva_s'):
+            _a(sub, c)
+        mas = menu.addMenu(tr("Más reportes"))
+        for c in ('resumen', 'memoria_descriptiva', 'gastos_generales'):
+            _a(mas, c)
+        a_sub = _a(mas, 'insumos_sub')
+        _a(mas, 'presupuesto_cerrado')
+        menu.addSeparator()
+        _a(menu, 'completo')
+        compl = menu.addMenu(tr("Complementos"))
+
+        def _al_abrir():
+            conn = get_db()
+            a_sub.setVisible(conn.execute(
+                "SELECT 1 FROM sub_presupuestos WHERE proyecto_id=?",
+                (self.pid,)).fetchone() is not None)
+            conn.close()
+            from views.complementos_menu import menu_complementos
+            compl.clear()
+            hay = menu_complementos(self, self.window(), self.pid, compl,
+                                    tipos=('reporte',)) is not None
+            compl.menuAction().setVisible(hay)
+        menu.aboutToShow.connect(_al_abrir)
+        return menu
+
+    def _abrir_reporte(self, codigo: str):
+        self._reportes_view_para_generar()
+        self._root_stack.setCurrentIndex(
+            self._root_stack.indexOf(self._reportes_view))
+        QTimer.singleShot(0, self._reportes_view,
+                          lambda: self._reportes_view._on_card_clicked(codigo))
 
     def _abrir_centro_reportes(self):
         # Puede existir ya, creada por Ctrl+P sin vista previa; `cargar()`

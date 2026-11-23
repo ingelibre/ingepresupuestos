@@ -439,3 +439,31 @@ def test_metrados_borrar_filas_y_botones(vista, cual):
     des.click()
     girar()
     assert limpio() == f
+
+
+def test_menu_reportes_abre_el_centro_con_el_reporte(vista, monkeypatch):
+    from core.pdf_reports import REPORT_TYPES
+    v = vista
+    v._reportes_view_para_generar()
+    pedidos = []
+    monkeypatch.setattr(v._reportes_view, '_regenerar_preview',
+                        lambda *a, **k: pedidos.append(v._reportes_view._tipo_actual))
+    m = v._build_reportes_menu()
+    m.aboutToShow.emit()
+    from PySide6.QtWidgets import QMenu
+    menus = [m] + [x for x in m.findChildren(QMenu) if x.title() != 'Complementos']
+    acciones = [a for x in menus for a in x.actions()
+                if not a.isSeparator() and x.actions() and a.text()
+                and a.text() not in [y.title() for y in m.findChildren(QMenu)]]
+    for a in acciones[1:]:
+        a.trigger()
+        girar(.1)
+        assert v._root_stack.currentWidget() is v._reportes_view
+    assert sorted(set(pedidos)) == sorted(c for c, _t, _d in REPORT_TYPES)
+    assert pasos(v) == []
+    # insumos_sub, solo con sub-presupuestos; complementos, solo si hay
+    hay = sql("SELECT COUNT(*) FROM sub_presupuestos WHERE proyecto_id=?", PID)[0][0]
+    a_sub = next(a for a in acciones if a.text() == 'Insumos por Sub-presupuesto')
+    assert a_sub.isVisible() == bool(hay)
+    compl = next(x for x in m.findChildren(QMenu) if x.title() == 'Complementos')
+    assert not compl.menuAction().isVisible()

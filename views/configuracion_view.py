@@ -913,6 +913,7 @@ class ConfiguracionView(QWidget):
             ("Ctrl+Z", tr("Deshacer")),
             ("Ctrl+Y", tr("Rehacer")),
             ("Ctrl+H", tr("Buscar y reemplazar")),
+            ("Ctrl+R", tr("Centro de Reportes")),
             ("F5", tr("Recalcular")),
             ("F2", tr("Editar partida")),
             ("F1", tr("Atajos de teclado")),

@@ -178,10 +178,12 @@ def ejecutar_validador(padre, cargado, registro, pid) -> bool:
     return _proteger(padre, cargado, registro, hacer)
 
 
-def menu_complementos(padre, ventana, pid: int, menu=None) -> QMenu | None:
+def menu_complementos(padre, ventana, pid: int, menu=None,
+                      tipos=('accion', 'reporte', 'importador', 'validador')
+                      ) -> QMenu | None:
     """El menú para el proyecto `pid` (o `menu`, ya creado, lleno con él);
     None si no hay nada que mostrar."""
-    cs = [c for c in cargador.cargados() if c.registros]
+    cs = [c for c in cargador.cargados() if any(c.de(t) for t in tipos)]
     if not cs:
         return None
     menu = menu if menu is not None else QMenu(tr("Complementos"), padre)
@@ -194,19 +196,19 @@ def menu_complementos(padre, ventana, pid: int, menu=None) -> QMenu | None:
 
     for c in cs:
         sub = menu.addMenu(c.nombre.replace('&', '&&')) if len(cs) > 1 else menu
-        for r in c.de('accion'):
+        for r in c.de('accion') if 'accion' in tipos else ():
             entrada(sub, r.titulo, r.extra['ayuda'],
                     lambda c=c, r=r: ejecutar_accion(padre, ventana, c, r, pid))
-        for r in c.de('reporte'):
+        for r in c.de('reporte') if 'reporte' in tipos else ():
             for f in r.extra['formatos']:
                 entrada(sub, f"{r.titulo} ({'PDF' if f == 'pdf' else 'Excel'})",
                         r.extra['ayuda'],
                         lambda c=c, r=r, f=f: ejecutar_reporte(padre, c, r, pid, f))
-        for r in c.de('importador'):
+        for r in c.de('importador') if 'importador' in tipos else ():
             entrada(sub, tr("Importar: {que}…").format(que=r.titulo),
                     r.extra['ayuda'],
                     lambda c=c, r=r: ejecutar_importador(padre, ventana, c, r, pid))
-        for r in c.de('validador'):
+        for r in c.de('validador') if 'validador' in tipos else ():
             entrada(sub, tr("Revisar: {que}").format(que=r.titulo),
                     r.extra['ayuda'],
                     lambda c=c, r=r: ejecutar_validador(padre, c, r, pid))
