@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "dosificacion-concreto",
+  "nombre": "Dosificación de concreto",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Materiales por m³ y por tanda por volúmenes absolutos, y la proporción en volumen, a partir de los datos que pones tú. Sin tablas de resistencia: no sustituye un diseño de mezcla en laboratorio.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "metrados",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Concrete proportioning",
+      "descripcion": "Materials per m³ and per batch by absolute volumes, and the volume ratio, from the data you enter. No strength tables: it does not replace a laboratory mix design."
+    },
+    "pt_BR": {
+      "nombre": "Dosagem de concreto",
+      "descripcion": "Materiais por m³ e por betonada por volumes absolutos, e a proporção em volume, a partir dos dados que você põe. Sem tabelas de resistência: não substitui uma dosagem em laboratório."
+    }
+  }
+}
