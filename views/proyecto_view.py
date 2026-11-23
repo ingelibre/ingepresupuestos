@@ -2306,7 +2306,7 @@ class ProyectoView(QWidget):
         _tbtn(f"{_tr('Cronogramas')} ▾", None, menu=self._build_cronograma_menu())
         _tbtn(f"{_tr('Control de Obra')} ▾", None, menu=self._build_control_obra_menu())
         _tbtn(_tr("Fórmula Polinómica"), self._ir_formula)
-        _tbtn(_tr("Pie"), self._ir_pie)
+        _tbtn(f"{_tr('Pie')} ▾", None, menu=self._build_pie_menu())
         _tbtn("BIM ▾", None, sep_after=True, menu=self._build_bim_menu())
         _tbtn(f"{_tr('IA')} ▾", None, menu=self._build_ia_menu())
         _tbtn(f"{_tr('Complementos')} ▾", None,
@@ -11959,9 +11959,106 @@ class ProyectoView(QWidget):
         self._root_stack.setCurrentIndex(idx)
         QTimer.singleShot(0, self._formula_view.cargar)
 
-    def _ir_pie(self):
+    def _ir_pie(self, rubro: str | None = None):
+        if rubro:
+            self._pie_rubro_actual = rubro
         self._root_stack.setCurrentIndex(1)
         QTimer.singleShot(0, self.cargar_pie)
+
+    def _pie_rubros_menu(self) -> tuple[list, list]:
+        """(con detalle activos, los que se pueden agregar): [(código, nombre)].
+        Por agregar = los apagados del proyecto y los de su país que le faltan."""
+        from core.pie import lineas_por_defecto
+        conn = get_db()
+        proy = conn.execute("SELECT * FROM proyectos WHERE id=?",
+                            (self.pid,)).fetchone()
+        filas = conn.execute("SELECT codigo, nombre, activo, tipo FROM pie_rubros"
+                             " WHERE proyecto_id=? ORDER BY orden", (self.pid,)).fetchall()
+        conn.close()
+        defecto = [(c, n, a, t) for c, n, _p, a, _o, t, _m in lineas_por_defecto(proy)]
+        filas = [tuple(f) for f in filas]
+        if filas:
+            hay = {f[0] for f in filas}
+            faltan = [(c, n, 0, t) for c, n, _a, t in defecto if c not in hay]
+        else:                           # aún sin sembrar: se siembra al abrirlo
+            filas, faltan = defecto, []
+        det = [f for f in filas + faltan if f[3] == 'rubro']
+        return ([(c, n) for c, n, a, _t in det if a],
+                [(c, n) for c, n, a, _t in det if not a])
+
+    def _pie_agregar_rubro(self, codigo: str):
+        if not self._require_editable(N_("editar el pie"), nivel='pie'):
+            return
+        from core.pie import lineas_por_defecto
+        conn = get_db()
+        try:
+            proy = conn.execute("SELECT * FROM proyectos WHERE id=?",
+                                (self.pid,)).fetchone()
+            if not conn.execute("SELECT 1 FROM pie_rubros WHERE proyecto_id=?",
+                                (self.pid,)).fetchone():
+                with self._historial.sin_anotar():
+                    self._pie_crear_rubros_default(proy)
+            if not conn.execute(
+                    "UPDATE pie_rubros SET activo=1 WHERE proyecto_id=? AND codigo=?",
+                    (self.pid, codigo)).rowcount:
+                # Lo quitaron: vuelve a su sitio entre las líneas del país.
+                defecto = lineas_por_defecto(proy)
+                k = next((i for i, l in enumerate(defecto) if l[0] == codigo), None)
+                if k is None:
+                    return
+                despues = [l[0] for l in defecto[k + 1:]]
+                orden = conn.execute(
+                    "SELECT MIN(orden) FROM pie_rubros WHERE proyecto_id=? AND codigo"
+                    f" IN ({','.join('?' * len(despues)) or 'NULL'})",
+                    (self.pid, *despues)).fetchone()[0]
+                if orden is None:
+                    orden = 1 + (conn.execute(
+                        "SELECT MAX(orden) FROM pie_rubros WHERE proyecto_id=?",
+                        (self.pid,)).fetchone()[0] or 0)
+                conn.execute("UPDATE pie_rubros SET orden=orden+1 WHERE"
+                             " proyecto_id=? AND orden>=?", (self.pid, orden))
+                c, n, pct, _a, _o, t, mp = defecto[k]
+                conn.execute(
+                    "INSERT INTO pie_rubros (proyecto_id, codigo, nombre, pct, activo,"
+                    " orden, tipo, mostrar_pct) VALUES (?,?,?,?,1,?,?,?)",
+                    (self.pid, c, n, pct, orden, t, mp))
+            conn.commit()
+        finally:
+            conn.close()
+        self._ir_pie(codigo)
+
+    def _build_pie_menu(self):
+        """QMenu del botón "Pie ▾": se llena al abrirlo con los rubros del
+        proyecto y los que se le pueden agregar."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+
+        def _llenar():
+            for x in menu.findChildren(QMenu):
+                x.deleteLater()
+            menu.clear()
+            activos, otros = self._pie_rubros_menu()
+            if not activos and otros and self._ed_pie:
+                cod, nom = otros[0]
+                menu.addAction(
+                    tr("Agregar {rubro}…").format(rubro=nom.replace('&', '&&'))
+                ).triggered.connect(lambda *_, c=cod: self._pie_agregar_rubro(c))
+                menu.addSeparator()
+            menu.addAction(tr("Pie de presupuesto") + "…").triggered.connect(
+                lambda *_: self._ir_pie())
+            if activos:
+                menu.addSeparator()
+            for cod, nom in activos:
+                menu.addAction(nom.replace('&', '&&') + "…").triggered.connect(
+                    lambda *_, c=cod: self._ir_pie(c))
+            if otros and self._ed_pie:
+                menu.addSeparator()
+                sub = menu.addMenu(tr("Agregar rubro"))
+                for cod, nom in otros:
+                    sub.addAction(nom.replace('&', '&&')).triggered.connect(
+                        lambda *_, c=cod: self._pie_agregar_rubro(c))
+        menu.aboutToShow.connect(_llenar)
+        return menu
 
     # ═════════════════════════════��════════════════════════════════════════════
     # Sub-presupuestos

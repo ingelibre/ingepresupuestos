@@ -491,3 +491,64 @@ def test_menu_metrados_hoja_y_acero(vista):
     hoja.trigger()
     girar()
     assert v._metrados_view._content_stack.currentIndex() == 0
+
+
+def test_menu_pie_agrega_el_rubro_y_se_deshace(vista):
+    from PySide6.QtWidgets import QMenu
+    v = vista
+
+    def menu():
+        m = v._build_pie_menu()
+        m.aboutToShow.emit()
+        subs = {x.title(): x for x in m.findChildren(QMenu)}
+        return m, [a for a in m.actions() if not a.isSeparator()], subs
+
+    def activo(c):
+        r = sql("SELECT activo FROM pie_rubros WHERE proyecto_id=? AND codigo=?", PID, c)
+        return bool(r and r[0][0])
+    # sin sembrar: no escribe nada por mirar
+    sql("DELETE FROM pie_rubros WHERE proyecto_id=?", PID)
+    girar()
+    n0 = len(pasos(v))
+    _m, acts, _s = menu()
+    assert sql("SELECT COUNT(*) FROM pie_rubros WHERE proyecto_id=?", PID) == [(0,)]
+    v._ir_pie()
+    girar()
+    todos = [r[0] for r in sql("SELECT codigo FROM pie_rubros WHERE proyecto_id=?"
+                               " AND tipo='rubro' ORDER BY orden", PID)]
+    # ninguno activo: «Agregar …» va arriba
+    sql("UPDATE pie_rubros SET activo=0 WHERE proyecto_id=?", PID)
+    girar()
+    n0 = len(pasos(v))
+    _m, acts, subs = menu()
+    assert acts[0].text().startswith('Agregar ')
+    assert len(subs['Agregar rubro'].actions()) == len(todos)
+    acts[0].trigger()
+    girar()
+    assert activo(todos[0]) and v._pie_rubro_actual == todos[0]
+    assert v._root_stack.currentIndex() == 1 and len(pasos(v)) == n0 + 1
+    _m, acts, _s = menu()
+    assert acts[0].text() == 'Pie de presupuesto…' and len(acts) >= 2
+    v._historial.deshacer()
+    girar()
+    assert not activo(todos[0])
+    # quitado del todo: vuelve a su sitio
+    orden = [r[0] for r in sql("SELECT codigo FROM pie_rubros WHERE proyecto_id=?"
+                               " ORDER BY orden", PID)]
+    sql("DELETE FROM pie_rubros WHERE proyecto_id=? AND codigo=?", PID, todos[0])
+    v._pie_agregar_rubro(todos[0])
+    girar()
+    assert activo(todos[0])
+    assert [r[0] for r in sql("SELECT codigo FROM pie_rubros WHERE proyecto_id=?"
+                              " ORDER BY orden", PID)] == orden
+
+
+def test_menu_pie_en_solo_lectura_no_ofrece_agregar(vista):
+    v = vista
+    v._ir_pie()
+    girar()
+    sql("UPDATE pie_rubros SET activo=0 WHERE proyecto_id=?", PID)
+    v._ed_pie = False
+    m = v._build_pie_menu()
+    m.aboutToShow.emit()
+    assert [a.text() for a in m.actions() if not a.isSeparator()] == ['Pie de presupuesto…']
