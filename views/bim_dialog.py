@@ -26,10 +26,11 @@ from core import bim_modelo as bim
 from core.config import puede_editar
 from core.database import get_db, get_decimales_metrado
 from utils.formatting import norm_busqueda, parse_num
+from utils.auth import usuario_actual
 from utils.i18n import N_, tr
 from utils.theme import BTN_PRIMARY_SS, btn_secondary
-
 from views.aviso_precios_dialog import moneda_de_proyecto
+
 SLATE_700, SLATE_500, SLATE_100 = "#2E3C52", "#485A6C", "#E2E8F0"
 SILVER_100, WHITE, ROJO = "#F8F9FA", "#FFFFFF", "#B71C1C"
 FILTRO = "IFC / IngeTrazo (*.ifc *.json)"
@@ -359,7 +360,12 @@ class ImportarBimDialog(_Base):
             self.cmb.addItem(tr("Crear un proyecto nuevo"), None)
             c = get_db()
             try:
-                for r in c.execute("SELECT id, nombre, estado FROM proyectos ORDER BY id DESC"):
+                # Los mismos proyectos que le muestra el Inicio
+                u = usuario_actual()
+                ajeno = u is not None and not u.es_admin
+                for r in c.execute("SELECT id, nombre, estado FROM proyectos WHERE ? OR usuario_id=? "
+                                   "OR usuario_id IS NULL ORDER BY id DESC",
+                                   (not ajeno, u.id if u else None)):
                     if not puede_editar(r['estado'] or 'elaboracion', 'presupuesto'):
                         continue
                     self.cmb.addItem(tr("Añadir a: {p}").format(p=r['nombre']), r['id'])

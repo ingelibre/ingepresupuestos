@@ -220,3 +220,16 @@ def test_gasto_general_de_siete_cifras_no_pierde_digitos(uy, conn):  # noqa: F81
               for r in range(t.rowCount()) if t.item(r, 4) and t.item(r, 0)
               and t.item(r, 0).text() == 'x']
     assert textos and pv.parse_num(textos[-1], UY) == 1234567.89
+
+
+def test_importar_bim_no_ofrece_proyectos_de_otro_usuario(vista, conn, monkeypatch):  # noqa: F811
+    import utils.auth as auth
+    from models.usuario import Usuario
+    from views.bim_dialog import ImportarBimDialog
+    conn.execute("INSERT OR IGNORE INTO usuarios (id,nombre,username,email,password_hash,rol)"
+                 " VALUES (77,'t','t77','t77@x','h','usuario'),(78,'u','t78','t78@x','h','usuario')")
+    conn.execute("UPDATE proyectos SET usuario_id=78 WHERE id=?", (vista.x['pid'],))
+    conn.commit()
+    for uid, ve in ((77, False), (78, True)):
+        monkeypatch.setattr(auth, '_usuario_actual', Usuario(id=uid, rol='usuario'))
+        assert (ImportarBimDialog(_modelo(2), 'x').cmb.findData(vista.x['pid']) >= 0) == ve
