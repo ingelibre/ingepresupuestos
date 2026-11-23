@@ -239,8 +239,8 @@ def test_main_atiende_el_proceso_auxiliar_sin_abrir_la_app(tmp_path):
 
 
 @con_ifc
-def test_un_modelo_enorme_se_recorta_sin_caerse(tmp_path):
-    """Cortar el iterador a medias reventaba al cerrar el intérprete."""
+def test_un_modelo_enorme_se_recorta_con_aviso(tmp_path):
+    """Al pasar del tope se corta el iterador y queda lo leído, con aviso."""
     import subprocess
     f, d = tmp_path / 'casa.ifc', tmp_path / 'd'
     _ifc(f)
