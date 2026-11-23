@@ -191,7 +191,7 @@ FORMATOS = [
             ("presupuesto", "Presupuesto.xlsx", True,
              "Estructura con partidas y precios."),
             ("acus",        "ACUs.xlsx",        False,
-             "Análisis de costos."),
+             "Reporte «Análisis de precios unitarios» de S10."),
             ("insumos",     "Insumos.xlsx",     False,
              "Catálogo de recursos."),
         ],
@@ -457,6 +457,16 @@ class _ImportWorker(QThread):
                         if "acus" in f else {})
                 recursos = (importer.import_s10_insumos(f["insumos"])
                             if "insumos" in f else None)
+                if partidas:
+                    # Empareja los ACU con sus partidas y SIEMPRE dice qué
+                    # pasó con ellos (#51: se perdían sin avisar).
+                    from core.s10_acus import guardar_presupuesto_s10
+                    self.progreso.emit("Guardando en base de datos…")
+                    pid, resumen = guardar_presupuesto_s10(
+                        info, partidas, list(acus.values()), recursos,
+                        eligio_acus="acus" in f)
+                    self.finished_ok.emit(pid, resumen)
+                    return
 
             elif self.formato == "pdf_powercost":
                 self.progreso.emit("Extrayendo texto del PDF…")
@@ -1239,10 +1249,23 @@ class ImportarView(QWidget):
         self.bar.setVisible(False)
         self.lbl_estado.setText("")
         self._worker = None
-        QMessageBox.information(
-            self, "Importación completa",
-            f"Proyecto importado correctamente.\n\n{resumen}"
-        )
+        if resumen.count("\n") > 12:
+            # Con muchos avisos el cuadro no cabría en la pantalla: van en el
+            # detalle desplegable, completos y copiables.
+            from utils.i18n import tr
+            cabeza, _sep, detalle = resumen.partition("\n\n")
+            box = QMessageBox(QMessageBox.Warning, "Importación completa",
+                              f"Proyecto importado correctamente.\n\n{cabeza}",
+                              QMessageBox.Ok, self)
+            box.setInformativeText(
+                tr("Hay avisos sobre lo importado. Revísalos en los detalles."))
+            box.setDetailedText(detalle)
+            box.exec()
+        else:
+            QMessageBox.information(
+                self, "Importación completa",
+                f"Proyecto importado correctamente.\n\n{resumen}"
+            )
         self.proyecto_importado.emit(pid)
         self._aplicar_formato(self._formato_id)
 
