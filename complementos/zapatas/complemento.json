@@ -1,0 +1,12 @@
+{
+  "esquema": 1,
+  "id": "zapatas",
+  "nombre": "Zapatas: metrado por dimensiones",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #27)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Con las dimensiones y el armado de una zapata aislada calcula excavación, concreto, encofrado y acero, enseña las fórmulas y agrega el título y las partidas con su metrado, sin precios. No diseña ni verifica la estructura.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/27",
+  "api_version": 2,
+  "codigo": "complemento.py"
+}
