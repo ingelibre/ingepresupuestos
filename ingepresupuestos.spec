@@ -66,6 +66,8 @@ datas = [
     ('resources/i18n/*.json',                'resources/i18n'),
     # Mapa QML (QtLocation/OSM) para marcar la ubicación del proyecto.
     ('resources/map.qml',                    'resources'),
+    # Escena 3D del visor BIM (views/bim_visor.py).
+    ('resources/bim_visor.qml',              'resources'),
     # Repositorio de proveedores de tiles propio (calle OSM + satélite Esri,
     # sin API key). Reemplaza el servicio hospedado de Qt, ya descontinuado.
     ('resources/osm_providers/street',       'resources/osm_providers'),
@@ -147,6 +149,9 @@ hiddenimports = [
     'PySide6.QtPositioning',
     'PySide6.QtQml',
     'PySide6.QtQuick',
+    # Visor BIM: la escena QML importa QtQuick3D y Python crea las mallas.
+    'PySide6.QtQuick3D',
+    'PySide6.QtQuickWidgets',
     # RAG Fase 2 — model2vec (embeddings estáticos, sin PyTorch) + sus deps que
     # se cargan dinámicamente. El modelo se bundlea como data (ver más abajo).
     'model2vec',
@@ -190,6 +195,26 @@ _modelo_rag = ROOT / 'resources' / 'models' / 'potion-multilingual-128M'
 if _modelo_rag.is_dir():
     datas.append((str(_modelo_rag), 'resources/models/potion-multilingual-128M'))
 
+# ── IfcOpenShell (geometría del visor BIM) ───────────────────────────────────
+# Opcional: sin él la app funciona y el visor explica que falta. Carga sus
+# núcleos con dlopen, así que PyInstaller no los ve; se listan SOLO los que el
+# visor usa (esquemas, conversión y OpenCASCADE) y PyInstaller trae sus
+# dependencias. Quedan fuera los de exportar (COLLADA, glTF, STEP, SVG…), CGAL,
+# wgpu y los datos de ifcopenshell.util/api/express: de 203 MB a unos 60.
+binaries = []
+import importlib.util as _ilu
+_ifc = _ilu.find_spec('ifcopenshell')
+if _ifc is not None:
+    _ifc_dir = Path(_ifc.origin).parent
+    for _patron in ('ifcopenshell_parse_schema_*', 'ifcopenshell_geometry_mapping_*',
+                    'ifcopenshell_geometry_kernel_opencascade*',
+                    'ifcopenshell_document_rdb*'):
+        for _f in sorted(_ifc_dir.glob(_patron)):
+            if _f.suffix in ('.so', '.dll', '.dylib'):
+                binaries.append((str(_f), 'ifcopenshell'))
+    hiddenimports += ['ifcopenshell', 'ifcopenshell.geom',
+                      'ifcopenshell.util.mvd_info', 'ifcopenshell.util.schema']
+
 # ── Exclusiones — reducen tamaño del binario ────────────────────────────────
 excludes = [
     'tkinter',          # no usado, viene con Python por defecto
@@ -198,12 +223,16 @@ excludes = [
     'pandas',           # no usado
     'IPython',
     'jupyter',
+    # IfcOpenShell: partes que el visor no usa.
+    'ifcopenshell.api',
+    'ifcopenshell.express',
+    'shapely',
 ]
 
 a = Analysis(
     ['main.py'],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
