@@ -84,6 +84,36 @@ def test_colombia_fija_sus_valores_por_defecto():
         _borrar_pais()
 
 
+def test_brasil_reales_cnpj_y_bdi_sin_impuestos_sorpresa():
+    from core.pie import calcular_pie, lineas_por_defecto
+    _borrar_pais()
+    assert paises.detectar_pais('BR') == 'BR'
+    paises.aplicar_pais('BR')
+    try:
+        assert d.get_config('moneda_defecto') == 'Reales'
+        assert cfg.MONEDAS['Reales'] == {'simbolo': 'R$', 'sep_miles': '.', 'sep_dec': ','}
+        assert paises.etiqueta_tributaria() == 'CNPJ'
+        assert paises.impuesto() == ('Impostos', 0.0)
+        lineas = lineas_por_defecto({'igv_pct': 0.0, 'gf_pct': 10, 'utilidad_pct': 5})
+        assert [x[1] for x in lineas] == ['BDI', 'Subtotal', 'Impostos']
+        conn = d.get_db()
+        pid = conn.execute("INSERT INTO proyectos (nombre) VALUES ('BR')").lastrowid
+        for x in lineas:
+            conn.execute("INSERT INTO pie_rubros (proyecto_id,codigo,nombre,pct,activo,"
+                         "orden,tipo,mostrar_pct) VALUES (?,?,?,?,?,?,?,?)", (pid, *x))
+        assert calcular_pie(conn, pid, 1000.0)[1] == 1000.0
+        conn.execute("UPDATE pie_rubros SET pct=25 WHERE proyecto_id=? AND codigo='GG'", (pid,))
+        assert calcular_pie(conn, pid, 1000.0)[1] == 1250.0
+        conn.rollback()
+        conn.close()
+        assert paises.indirectos_defecto() == (0.0, 0.0)
+        # El impuesto se sigue pudiendo editar.
+        paises.aplicar_pais('BR', imp_nombre='ISS', imp_pct=5)
+        assert paises.nombre_rubro_impuesto() == 'ISS (5%)'
+    finally:
+        _borrar_pais()
+
+
 def test_el_usuario_puede_corregir_cualquier_valor():
     _borrar_pais()
     paises.aplicar_pais('CO', moneda='Dólares', etiqueta='NIT/CC', imp_pct=0)

@@ -126,7 +126,7 @@ def es_impuesto(linea: dict) -> bool:
 def lineas_por_defecto(proy) -> list[tuple]:
     """(codigo, nombre, pct, activo, orden, tipo, mostrar_pct) del pie que
     se siembra la primera vez. Colombia usa AIU con IVA sobre la utilidad
-    (issue #10); el resto, gastos generales + utilidad + impuesto."""
+    (issue #10), Brasil un solo BDI (issue #21); el resto, gastos generales + utilidad + impuesto."""
     from core.paises import nombre_rubro_impuesto, pais_actual
     igv = proy['igv_pct'] if proy['igv_pct'] is not None else 18.0
     if pais_actual() == 'CO':
@@ -139,6 +139,16 @@ def lineas_por_defecto(proy) -> list[tuple]:
             ('SUB',  'Sub Total',           0,   1, 3, 'subtotal', 1),
             ('IGV',  f"{nombre_rubro_impuesto(igv)} sobre la utilidad",
                                             igv, 1, 4, 'pct_util', 0),
+        ]
+    if pais_actual() == 'BR':
+        # El BDI (Benefícios e Despesas Indiretas) es un solo % sobre el costo
+        # directo e incluye indirectos, lucro y tributos. Cada obra pone el
+        # suyo: sembrar 10 + 5 + 18 % como en el Perú inflaba el total.
+        from core.paises import impuesto
+        return [
+            ('GG',  'BDI',           0.0, 1, 0, 'pct_cd',   1),
+            ('SUB', 'Subtotal',      0,   1, 1, 'subtotal', 1),
+            ('IGV', impuesto()[0],   igv, 1, 2, 'pct_sub',  1),
         ]
     gf = proy['gf_pct'] or 10.0
     util = proy['utilidad_pct'] or 5.0

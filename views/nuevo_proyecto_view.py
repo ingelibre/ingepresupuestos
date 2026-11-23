@@ -1196,7 +1196,7 @@ class NuevoProyectoView(QWidget):
         self.btn_crear.setEnabled(False)
         jornada_nueva = int(self.inp_jorn.currentText() or 8)
 
-        from core.paises import impuesto as _impuesto
+        from core.paises import impuesto as _impuesto, indirectos_defecto as _indirectos
         conn = get_db()
         try:
             if self._proyecto_id is None:
@@ -1217,7 +1217,7 @@ class NuevoProyectoView(QWidget):
                         self.inp_sub.text().strip(),
                         self.inp_costo_al.text().strip(),
                         self.inp_plazo.value(),
-                        10.0, 5.0, _impuesto()[1],   # tasa del país (#9)
+                        *_indirectos(), _impuesto()[1],   # tasas del país (#9)
                         self.inp_grupo.text().strip(),
                         jornada_nueva,
                         self.cmb_moneda.currentData(),
