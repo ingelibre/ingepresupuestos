@@ -1,0 +1,26 @@
+{
+  "esquema": 1,
+  "id": "ladrillos",
+  "nombre": "Ladrillos y mortero",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Ladrillos por m² según aparejo, medidas y juntas, muros con vanos, mortero con su cemento y arena, y desperdicios por separado, con todas las cuentas. No diseña ni verifica el muro.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "metrados",
+    "reportes"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Bricks and mortar",
+      "descripcion": "Bricks per m² by bond, sizes and joints, walls with openings, mortar with its cement and sand, and separate waste, with every calculation. It does not design or check the wall."
+    },
+    "pt_BR": {
+      "nombre": "Tijolos e argamassa",
+      "descripcion": "Tijolos por m² segundo assentamento, medidas e juntas, paredes com vãos, argamassa com seu cimento e areia, e desperdícios em separado, com todas as contas. Não dimensiona nem verifica a parede."
+    }
+  }
+}
