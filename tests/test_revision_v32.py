@@ -147,6 +147,48 @@ def test_reemplazar_insumo_no_toca_las_lineas_de_subpartida(vista, conn, monkeyp
     assert _pu(conn, vista.x['b']) == pu
 
 
+# ── Más de 99 hermanas ──────────────────────────────────────────────────────
+
+def _modelo(n):
+    return bim.ModeloBim(nombre='ZZ', huella='zz', elementos=[
+        bim.ElementoBim(f'g{i:03d}', 'IfcWall', tipo=f'T{i:03d}', metrado=(1.0 + i, 'm2'))
+        for i in range(n)])
+
+
+def test_bim_proyecto_nuevo_con_mas_de_99_partidas(conn):           # noqa: F811
+    pid = bim.crear_proyecto(_modelo(105))
+    f = conn.execute("SELECT item, metrado FROM partidas WHERE proyecto_id=? AND es_titulo=0"
+                     " ORDER BY item", (pid,)).fetchall()
+    assert [x[1] for x in f] == [1.0 + i for i in range(105)]
+
+
+def test_bim_anadir_mas_de_99_partidas(vista, conn):                # noqa: F811
+    _m, ids = bim.anadir_partidas(vista.x['pid'], _modelo(105))
+    orden = [r[0] for r in conn.execute(
+        "SELECT id FROM partidas WHERE proyecto_id=? AND id>=? AND es_titulo=0 ORDER BY item",
+        (vista.x['pid'], ids[0]))]
+    assert orden == ids
+
+
+def test_mcp_add_items_mas_de_99_hermanas(vista, conn, tmp_path):   # noqa: F811
+    from core import mcp_deshacer
+    from core.mcp_operaciones import Operaciones
+    from models.usuario import Usuario
+    conn.execute("UPDATE proyectos SET estado='elaboracion' WHERE id=?", (vista.x['pid'],))
+    conn.execute("INSERT OR IGNORE INTO usuarios (id,nombre,username,email,password_hash,rol)"
+                 " VALUES (1,'t','t','t@x','h','admin')")
+    conn.commit()
+    ops = Operaciones(Usuario(id=1, rol='admin'), mcp_deshacer.Pila(tmp_path / 'pila'))
+    r = ops.add_items(vista.x['pid'], [{'description': 'ZZ T', 'title': True, 'item': '09'}] + [
+        {'description': f'ZZ {i}', 'unit': 'm', 'parent_item': '09'} for i in range(105)])
+    hechos = [x for x in r['added'] if not x['title']]
+    assert [x['item_id'] for x in sorted(hechos, key=lambda x: x['item'])] == \
+        [x['item_id'] for x in hechos]
+    assert dict(conn.execute("SELECT id, item FROM partidas WHERE proyecto_id=?",
+                             (vista.x['pid'],)).fetchall())[hechos[0]['item_id']] \
+        == hechos[0]['item'] == '09.001'
+
+
 def test_gasto_general_de_siete_cifras_no_pierde_digitos(uy, conn):  # noqa: F811
     """Con «:g» salía «1.23457e+06», que al duplicar la fila se leía 1.2345706."""
     pid = uy.x['pid']

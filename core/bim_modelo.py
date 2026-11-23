@@ -1124,8 +1124,13 @@ def aplicar(modelo_id: int, modelo_nuevo: ModeloBim, partidas=None, *, nuevos=No
 
 # ── Crear partidas desde el modelo ───────────────────────────────────────────
 
+def _clave_item(item) -> tuple:
+    return tuple(int(t) if t.isdecimal() else t for t in (item or '').split('.'))
+
+
 def _id_por_item(conn, pid) -> dict:
-    return {r['item']: r['id'] for r in conn.execute(
+    # Por números: con más de 99 hermanas «01.99» se guardó como «01.099».
+    return {_clave_item(r['item']): r['id'] for r in conn.execute(
         "SELECT id, item FROM partidas_ppto WHERE proyecto_id=?", (pid,))}
 
 
@@ -1141,7 +1146,7 @@ def crear_proyecto(modelo: ModeloBim, ruta: str = '', propuestas=None) -> int:
         ids = _id_por_item(c, pid)
         for p in props:
             if p['global_ids']:
-                vincular(ids[p['item']], mid, p['global_ids'], 'metrado', conn=c)
+                vincular(ids[_clave_item(p['item'])], mid, p['global_ids'], 'metrado', conn=c)
     return pid
 
 
@@ -1172,6 +1177,8 @@ def anadir_partidas(pid: int, modelo: ModeloBim, ruta: str = '', propuestas=None
             ids.append(part)
             if p['global_ids']:
                 vincular(part, mid, p['global_ids'], 'metrado', conn=c)
+        from core.database import igualar_codigos_hermanos
+        igualar_codigos_hermanos(c, pid)
     return mid, ids
 
 

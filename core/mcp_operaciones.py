@@ -614,6 +614,12 @@ class Operaciones:
                     d.update(unit=r['unidad'], quantity=r['metrado'],
                              unit_price=r['precio_unitario'])
                 hechos.append(d)
+            from core.database import igualar_codigos_hermanos
+            if igualar_codigos_hermanos(conn, project_id):
+                for d in hechos:
+                    d['item'] = conn.execute(
+                        "SELECT item FROM partidas WHERE id=?",
+                        (d['item_id'],)).fetchone()[0]
             return {"added": hechos}
         return self._escribir('add_items', project_id, 'presupuesto', cambio)
 
