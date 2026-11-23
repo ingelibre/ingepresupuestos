@@ -696,7 +696,8 @@ class FormatoReporteDialog(QDialog):
     def _pagina_presupuesto(self) -> QWidget:
         pagina, lay = self._pagina_base(
             tr("Presupuesto"),
-            tr("Qué más imprime el reporte de presupuesto (PDF y Excel)."))
+            tr("Qué más imprimen los reportes de presupuesto, costos unitarios e "
+               "insumos (PDF y Excel)."))
         lay.addWidget(self._section_title(tr("Columnas del precio unitario")))
         self.chk_desglose = {}
         for tipo, rotulo in (('MO', tr("Mano de obra")), ('MAT', tr("Materiales")),
@@ -718,6 +719,16 @@ class FormatoReporteDialog(QDialog):
         lay.addWidget(self._hint(tr(
             "Sale el texto, sin imágenes; el reporte de Especificaciones "
             "Técnicas las sigue llevando."
+        )))
+        lay.addWidget(self._section_title(tr("Herramientas manuales")))
+        self.chk_herr_monto = QCheckBox(
+            tr("Mostrar solo el monto, sin porcentaje ni precio unitario"))
+        self.chk_herr_monto.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(self.chk_herr_monto)
+        lay.addWidget(self._hint(tr(
+            "Las que se calculan como porcentaje de la mano de obra. Vale para "
+            "los costos unitarios, los insumos y la adquisición de insumos; "
+            "ningún cálculo cambia."
         )))
         lay.addStretch(1)
         return pagina
@@ -983,6 +994,7 @@ class FormatoReporteDialog(QDialog):
         for tipo, chk in self.chk_desglose.items():
             chk.setChecked(tipo in _cols)
         self.chk_ppto_spec.setChecked(pdf_reports.especificacion_en_ppto(f))
+        self.chk_herr_monto.setChecked(pdf_reports.herramientas_solo_monto(f))
         self._on_pie_toggled(self.chk_pie.isChecked())
         for casilla, clave in ((self.chk_pie_izq, 'rep_pie_izq_oculto'),
                                (self.chk_pie_cen, 'rep_pie_cen_oculto'),
@@ -1147,6 +1159,8 @@ class FormatoReporteDialog(QDialog):
             t for t, chk in self.chk_desglose.items() if chk.isChecked())
         self._formato['rep_ppto_especificacion'] = (
             '1' if self.chk_ppto_spec.isChecked() else '0')
+        self._formato['rep_herr_solo_monto'] = (
+            '1' if self.chk_herr_monto.isChecked() else '0')
         self._formato['rep_logo_escala']       = str(self.sld_logo.value())
         self._formato['rep_escala_texto']      = str(self.cmb_escala_texto.currentData())
         self._formato.update(self._margenes_actuales())

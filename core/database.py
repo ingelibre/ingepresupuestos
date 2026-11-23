@@ -1321,6 +1321,14 @@ def base_overhead(unidad) -> str:
     return 'MO'
 
 
+def es_herramienta_pct(tipo, unidad) -> bool:
+    """¿Es la línea de herramientas manuales, un % de la mano de obra?
+    (issue #42). La unidad manda; un % clasificado como mano de obra (leyes
+    sociales) no es herramienta."""
+    u = (unidad or '').strip()
+    return u.startswith('%') and tipo != 'MO' and base_overhead(u) == 'MO'
+
+
 def _pu_desde_items(items) -> float:
     """Suma el costo unitario a partir de filas (cantidad, precio, unidad, tipo)
     del ACU. Mismas reglas que la app: parciales redondeados a decimales de

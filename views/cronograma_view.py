@@ -11364,6 +11364,9 @@ class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
                 it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 self.tbl_r.setItem(rr, c, it)
 
+        from core.database import es_herramienta_pct
+        from core.pdf_reports import herramientas_solo_monto
+        solo_monto = herramientas_solo_monto()
         for r_idx, rec in enumerate(sorted_rec):
             # Si cambia el tipo, insertar fila de subtítulo del grupo
             if rec['tipo'] != last_tipo:
@@ -11377,11 +11380,14 @@ class InsumosWidget(_EscGlobalMixin, _PeriodosMixin, QWidget):
             cost_total = sum(rec['weekly'])
             qty_total  = sum(rec.get('weekly_qty', []))
             cant_txt = fmt_doc(qty_total, 2, moneda=moneda) if qty_total > 0 else ''
+            # El Excel se arma leyendo esta tabla (issue #42).
+            und_txt = ('' if solo_monto and es_herramienta_pct(rec['tipo'], rec['unidad'])
+                       else rec['unidad'])
             cells_left = [
                 (rec['tipo'],                  Qt.AlignCenter),
                 (rec['codigo'],                Qt.AlignLeft  | Qt.AlignVCenter),
                 (rec['desc'],                  Qt.AlignLeft  | Qt.AlignVCenter),
-                (rec['unidad'],                Qt.AlignCenter),
+                (und_txt,                      Qt.AlignCenter),
                 (cant_txt,                     Qt.AlignRight | Qt.AlignVCenter),
                 (fmt(cost_total, moneda),      Qt.AlignRight | Qt.AlignVCenter),
             ]
