@@ -64,7 +64,30 @@ Si algo va mal, arranca con `--sin-complementos` (o con la variable
 | `impuesto-materiales` | código | reporte del impuesto sobre materiales por partida y total |
 | `presupuesto-con-datos` | código | presupuesto con los datos del proyecto en la primera página |
 | `zapatas` | código | acción: metrado de zapatas por dimensiones y armado, sin precios |
+| `acero-facil` | código | acero de columnas y vigas con los estribos escritos como en el plano; va a la planilla de acero |
+| `movimiento-tierras` | código | excavación, secciones de corte y relleno, relleno y eliminación, con el balance |
+| `ladrillos` | código | ladrillos y mortero de muros con vanos |
+| `dosificacion-concreto` | código | materiales por m³ y por tanda por volúmenes absolutos, con los datos del usuario |
 | `tema-sobrio`, `tema-propuesta` | datos | dos temas de reportes |
+
+#### Acero fácil: cómo se escribe la distribución
+
+`[juegos][] Ø: n@s, n@s, R@s c/ext`. Todo es opcional menos los grupos.
+
+| Parte | Se admite |
+|---|---|
+| Ø | `3/8"`, `3/8`, `1"`, `1 3/8"`, `Ø8`, `8 mm`. Un número suelto no |
+| juegos | `2[]` o `2□`: estribos por posición |
+| grupo | `8@.10`, `8 a 0,10`, `8 c/10 cm`; sin unidad son metros (hasta 1) |
+| resto | `R@.20`, `resto a 0.20`; una vez y al final |
+| separador | coma, punto y coma, `+` o espacio |
+| extremos | `c/ext`, `c/e`, `cada extremo`, `ambos extremos`, `un extremo`; si no lo dice, manda la columna |
+
+Las distancias salen de la cara del apoyo. El resto se reparte en espacios
+iguales no mayores que `s` (hueco 1,10 a 0,20 = 6 espacios de 0,183: 5
+estribos). Dos estribos que coinciden en el centro son uno. Si los fijos no
+caben en la luz, o algo no se entiende, se dice y no se calcula. El peso es el
+de la tabla de la planilla de acero y, si el diámetro no está, π/4·d²·7850.
 
 ## Tu primer complemento
 
@@ -303,7 +326,11 @@ costo_directo total`, y `hojas()` (sin títulos).
   `Partida.especificacion` (texto) y `Partida.mediciones`
   (`LineaMetrado`: `descripcion unidades largo ancho alto parcial area kg_m`);
   `Presupuesto.auxiliares` (las sub-partidas) e `Insumo.auxiliar_id`
-- **`from ingepresupuestos import piezas`** (API 2): `numero` y `texto` para leer
+- **API 2**: `Metrado(filas, partida_id | nueva)`, `FilaMetrado(descripcion,
+  estructuras, elementos, veces, area, largo, ancho, alto, diametro, kg_m)` y
+  `api.acero_kg_m("1/2\"")` (la tabla de la planilla de acero; `None` si no está)
+- **`from ingepresupuestos import piezas`** (API 2): `metrar` y `reporte_metrado`
+  (formulario → cuentas → destino), `numero` y `texto` para leer
   ajustes, `pct`, `cuadrar`, `sumar_titulos`, `capitulos`, `recorrer`,
   `bloques_de`, `mediciones` (tabla de mediciones) e `impuesto_materiales`
 
@@ -324,6 +351,7 @@ paquete), `indice(clave)`, `avisar(texto)`, `preguntar(texto)`,
 | `editar.fijar_precio(recurso_id, precio)` | solo en este proyecto |
 | `editar.renombrar(partida_id, texto)` | |
 | `editar.fijar_precios({recurso_id: precio})` | API 2: varios, en un solo paso de deshacer |
+| `editar.agregar_metrados([Metrado…], ajustes=None)` | API 2: partidas nuevas, filas en las planillas (también de acero) y los ajustes, en un solo paso de deshacer. Nunca borra filas; se niega ante un metrado a mano, una planilla de otra clase o un modelo BIM |
 | `editar.simular_precios({recurso_id: precio})` | API 2: los `Totales(costo_directo, total)` que saldrían; no guarda |
 
 Cada llamada es una transacción: si falla no queda nada, y entra en
@@ -335,8 +363,10 @@ confirmación.
 muestra un formulario y devuelve `{clave: valor}`, o `None` si se cancela.
 `Dato(clave, titulo, tipo, valor, minimo, maximo, decimales, opciones, sufijo,
 ayuda)`; `tipo` es `numero`, `entero`,
-`texto`, `parrafo` (varias líneas), `opcion` o `si_no`.
-`ctx.guardar_ajustes({…})` guarda textos, números y sí/no (hasta 10 KB) **en el
+`texto`, `parrafo` (varias líneas), `opcion`, `si_no` o
+`tabla` (filas repetidas: `columnas=[Dato…]`; su valor es una lista de
+diccionarios).
+`ctx.guardar_ajustes({…})` guarda textos, números y sí/no (hasta 60 KB) **en el
 proyecto**: viajan con el `.db`, se deshacen y solo los ve tu complemento, en
 `ctx.ajustes` y `p.ajustes`. Compruébalos al leerlos: el `.db` pudo hacerlo otro.
 

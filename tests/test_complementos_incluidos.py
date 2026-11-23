@@ -19,7 +19,8 @@ RAIZ = Path(__file__).resolve().parent.parent
 NUEVOS = ('apu-mexico', 'ajustar-total', 'impuesto-materiales',
           'presupuesto-con-datos', 'zapatas', 'pais-brasil', 'pu-con-indirectos',
           'pais-espana', 'pais-argentina', 'pais-honduras', 'pais-dominicana',
-          'pais-italia')
+          'pais-italia', 'acero-facil', 'movimiento-tierras', 'ladrillos',
+          'dosificacion-concreto')
 #: Reportes que van en el idioma del país, no en el del programa.
 EN_SU_IDIOMA = {'pais-brasil', 'pais-italia'}
 
@@ -130,7 +131,9 @@ def test_tienen_todos_sus_textos_en_ingles_y_portugues(nombre):
 
 
 @pytest.mark.parametrize('nombre', [n for n in NUEVOS if n not in
-                                    ('zapatas', 'ajustar-total', 'pais-brasil')])
+                                    ('zapatas', 'ajustar-total', 'pais-brasil',
+                                     'acero-facil', 'movimiento-tierras', 'ladrillos',
+                                     'dosificacion-concreto')])
 def test_los_reportes_no_escriben(nombre, obra, admin, tmp_path):
     antes = contexto.presupuesto(obra[0], admin)
     _generar(_cargar(nombre), obra[0], admin, tmp_path)
