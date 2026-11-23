@@ -127,6 +127,11 @@ def expandir_hasta_nivel(root, nivel):
     _rec(root, 1)
 
 
+# Alto común de los pies: árbol del presupuesto, ACU, Insumos y Metrados.
+ALTO_PIE = 46
+ALTO_MANIJA_CHAT = 4
+
+
 class _FilaNivelMenu(QLabel):
     """Fila «Nivel n» del menú «≡», con el texto del COLOR del título de ese
     nivel (el mismo que pinta el árbol, `nivel_fg`), para que se sepa qué
@@ -2560,9 +2565,11 @@ class ProyectoView(QWidget):
         # Layout: [scroll horizontal con pestañas] [sep | CD: valor]
         # El scroll evita que muchas pestañas compriman el panel ACU/Insumos.
         self._tab_bar_frame = QFrame()
-        self._tab_bar_frame.setFixedHeight(34)
+        self._tab_bar_frame.setObjectName("barraSubPpto")
+        self._tab_bar_frame.setFixedHeight(ALTO_PIE)
         self._tab_bar_frame.setStyleSheet(
-            f"background:#EEF1F5; border:none;"
+            f"QFrame#barraSubPpto {{ background:#EEF1F5; border:none;"
+            f" border-top:2px solid {SILVER_300}; }}"
         )
         _outer_hl = QHBoxLayout(self._tab_bar_frame)
         _outer_hl.setContentsMargins(6, 0, 8, 0)
@@ -2586,7 +2593,7 @@ class ProyectoView(QWidget):
         _tab_inner = QWidget()
         _tab_inner.setStyleSheet("background:transparent;")
         self._tab_bar_hl = QHBoxLayout(_tab_inner)
-        self._tab_bar_hl.setContentsMargins(0, 4, 0, 0)
+        self._tab_bar_hl.setContentsMargins(0, 6, 0, 0)
         self._tab_bar_hl.setSpacing(0)
         self._tab_scroll.setWidget(_tab_inner)
         _outer_hl.addWidget(self._tab_scroll, stretch=1)
@@ -2594,23 +2601,33 @@ class ProyectoView(QWidget):
         # Bloque CD fijo en esquina derecha (fuera del scroll)
         sep_cd = QFrame()
         sep_cd.setFrameShape(QFrame.VLine)
-        sep_cd.setFixedHeight(16)
+        sep_cd.setFixedHeight(28)
         sep_cd.setStyleSheet(f"color:{SILVER_300};")
         self._tab_bar_sep_cd  = sep_cd
-        lbl_cd_k = QLabel(tr("CD:"))
-        lbl_cd_k.setStyleSheet(
-            f"color:{SLATE_300}; font-size:10px; font-weight:700; border:none; padding:0 3px;"
-        )
+        # Misma altura y letra que el pie del ACU: nombre arriba, monto abajo.
+        self._lbl_cd_k = QLabel(tr("Costo directo"))
         self.lbl_cd = QLabel("—")
-        self.lbl_cd.setStyleSheet(
-            f"color:{SLATE_700}; font-size:11px; font-weight:700; border:none; padding:0 2px 0 0;"
-        )
-        self._lbl_cd_k = lbl_cd_k
+        caja_cd = QWidget()
+        caja_cd.setStyleSheet("background:transparent;")
+        v_cd = QVBoxLayout(caja_cd)
+        v_cd.setContentsMargins(6, 2, 2, 2)
+        v_cd.setSpacing(0)
+        for lbl, px in ((self._lbl_cd_k, 11), (self.lbl_cd, 13)):
+            lbl.setStyleSheet(
+                f"color:{SLATE_700}; font-size:{px}px; font-weight:700;"
+                " border:none; background:transparent;")
+            lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            v_cd.addWidget(lbl)
         _outer_hl.addWidget(sep_cd)
-        _outer_hl.addWidget(lbl_cd_k)
-        _outer_hl.addWidget(self.lbl_cd)
+        _outer_hl.addWidget(caja_cd)
 
         vl.addWidget(self._tab_bar_frame)
+        # El panel derecho termina en la manija del chat plegado: la misma franja
+        # aquí, para que los dos pies queden a la misma altura.
+        franja = QFrame()
+        franja.setFixedHeight(ALTO_MANIJA_CHAT)
+        franja.setStyleSheet(f"background:{SILVER_300}; border:none;")
+        vl.addWidget(franja)
 
         return frame
 
@@ -2704,7 +2721,7 @@ class ProyectoView(QWidget):
         # El chat vive fuera de las tabs (compartido por todas) y se adapta al
         # modo de la tab activa. Redimensionable; oculto por default.
         self._chat_splitter = QSplitter(Qt.Vertical)
-        self._chat_splitter.setHandleWidth(4)
+        self._chat_splitter.setHandleWidth(ALTO_MANIJA_CHAT)
         self._chat_splitter.setStyleSheet(
             f"QSplitter::handle {{ background:{SILVER_300}; }}"
             "QSplitter::handle:hover { background:#9B59B6; }"
@@ -2937,7 +2954,7 @@ class ProyectoView(QWidget):
         sin ensanchar el panel (pedido de un usuario de Argentina)."""
         sub = QFrame()
         sub.setObjectName("acuPie")
-        sub.setFixedHeight(46)
+        sub.setFixedHeight(ALTO_PIE)
         sub.setStyleSheet(
             f"QFrame#acuPie {{ background:#EEF1F5; border-top:2px solid {SILVER_300}; }}"
         )
@@ -3098,7 +3115,7 @@ class ProyectoView(QWidget):
 
         # Pie: total CD + subtotales MO/MAT/EQ
         pie = QFrame()
-        pie.setFixedHeight(32)
+        pie.setFixedHeight(ALTO_PIE)
         pie.setStyleSheet(f"background:#EEF1F5; border-top:2px solid {SILVER_300};")
         hl2 = QHBoxLayout(pie)
         hl2.setContentsMargins(10, 0, 10, 0)
@@ -3329,7 +3346,7 @@ class ProyectoView(QWidget):
 
         # Total metrado
         pie = QFrame()
-        pie.setFixedHeight(32)
+        pie.setFixedHeight(ALTO_PIE)
         pie.setStyleSheet(f"background:#EEF1F5; border-top:2px solid {SILVER_300};")
         hl2 = QHBoxLayout(pie)
         hl2.setContentsMargins(10, 0, 10, 0)
@@ -12056,7 +12073,7 @@ class ProyectoView(QWidget):
             btn = _SubPptoTab(tab['nombre'], editable=True,
                               borrable=(tid is not None),
                               parent=self._tab_bar_frame)
-            btn.setFixedHeight(26)
+            btn.setFixedHeight(36)
             # Ancho natural según texto, acotado entre 80-220 px. Las que no
             # quepan disparan scroll horizontal en el QScrollArea contenedor.
             btn.setMinimumWidth(80)
