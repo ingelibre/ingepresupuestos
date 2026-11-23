@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -604,6 +604,8 @@ class ModeloBimDialog(_Base):
         self.b_acu = _boton(tr("ACU de la biblioteca…"), self._acu)
         fv.addWidget(self.b_desvincular)
         fv.addWidget(self.b_acu)
+        self.b_mostrar = _boton(tr("Mostrar en IngeTrazo"), self._mostrar)
+        fv.addWidget(self.b_mostrar)
         fv.addStretch(1)
         ld.addLayout(fv)
         sp.addWidget(der)
@@ -691,6 +693,7 @@ class ModeloBimDialog(_Base):
         self.b_crear.setEnabled(e and hay and n > 0)
         self.b_vincular.setEnabled(e and hay and n > 0 and self.partida_id is not None)
         self.b_desvincular.setEnabled(e and self.tv.topLevelItemCount() > 0)
+        self.b_mostrar.setEnabled(n > 0 or self.tv.topLevelItemCount() > 0)
         self.b_acu.setEnabled(e and self.partida_id is not None)
 
     def _pedir_archivo(self):
@@ -877,6 +880,23 @@ class ModeloBimDialog(_Base):
         self._cargar_partidas(ids[0] if ids else None)
         self._cargar_modelos()
 
+    def _mostrar(self):
+        """Ilumina en IngeTrazo los vínculos elegidos; si no hay, lo marcado;
+        si no, todos los de la partida."""
+        items = self.tv.selectedItems()
+        gids = [i.data(0, Qt.UserRole)[1] for i in items] or [e.global_id for e in self.arbol.marcados()]
+        if not gids and self.partida_id:
+            gids = [v['global_id'] for v in bim.vinculos_partida(self.partida_id)]
+        if not gids:
+            return
+        try:
+            from views.ingetrazo_traer import mostrar_en_ingetrazo
+        except ImportError:
+            QMessageBox.information(self, tr("Modelo BIM"),
+                                    tr("Esta versión no trae la conexión con IngeTrazo."))
+            return
+        mostrar_en_ingetrazo(self, gids)
+
     def _acu(self):
         c = get_db()
         try:
@@ -902,3 +922,16 @@ class ModeloBimDialog(_Base):
                     self.cambio = True
             except Exception as e:                    # noqa: BLE001 — al usuario
                 self._error(e)
+
+
+def abrir_takeoff(parent, pid, takeoff: dict):
+    """Entrada de «Traer de IngeTrazo»: abre «Modelo BIM…» con el takeoff ya
+    leído. Desde la vista del proyecto pasa por ella, para que se refresque."""
+    if getattr(parent, 'pid', None) == pid and hasattr(parent, '_abrir_modelo_bim'):
+        return parent._abrir_modelo_bim(takeoff=takeoff)
+    dlg = ModeloBimDialog(pid, parent=parent)
+    QTimer.singleShot(0, lambda: dlg.recibir_takeoff(takeoff))
+    dlg.exec()
+    cambio = dlg.cambio
+    dlg.deleteLater()
+    return cambio

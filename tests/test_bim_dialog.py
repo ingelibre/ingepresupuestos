@@ -195,3 +195,23 @@ def test_los_dialogos_son_de_la_ventana(base):
     pid, part = _proyecto()
     for d in (bv.ModeloBimDialog(pid, part), bv.ImportarBimDialog(bim.leer_takeoff(TAKEOFF))):
         assert d.windowModality() == Qt.WindowModal and isinstance(d, QDialog)
+
+
+def test_puerta_del_mcp_e_iluminar_en_ingetrazo(base, monkeypatch):
+    import types
+    pid, part = _proyecto()
+
+    def _exec(d):
+        _esperar(lambda: d.cambio)
+        return 0
+    monkeypatch.setattr(bv.ModeloBimDialog, 'exec', _exec)
+    assert bv.abrir_takeoff(None, pid, TAKEOFF) is True
+    (m,) = bim.modelos(pid)
+    muros = [e.global_id for e in bim.elementos(m['id']) if e.clase == 'IfcWall']
+    bim.vincular(part, m['id'], muros)
+    doble = types.ModuleType('views.ingetrazo_traer')
+    vistos = []
+    doble.mostrar_en_ingetrazo = lambda parent, gids: vistos.append(sorted(gids))
+    monkeypatch.setitem(sys.modules, 'views.ingetrazo_traer', doble)
+    bv.ModeloBimDialog(pid, part)._mostrar()
+    assert vistos == [sorted(muros)]

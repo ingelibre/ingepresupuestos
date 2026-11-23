@@ -396,5 +396,7 @@
  "Éxito": "Success",
  "Índices": "Indices",
  "Ítem": "Item",
- "…y {n} más.": "…and {n} more."
+ "…y {n} más.": "…and {n} more.",
+ "Mostrar en IngeTrazo": "Show in IngeTrazo",
+ "Esta versión no trae la conexión con IngeTrazo.": "This version does not include the IngeTrazo connection."
 }

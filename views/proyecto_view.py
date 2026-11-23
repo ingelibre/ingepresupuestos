@@ -9920,6 +9920,7 @@ class ProyectoView(QWidget):
             if getattr(self, '_partida_actual_id', None) is not None:
                 self.cargar_acu(self._partida_actual_id)
         dlg.deleteLater()
+        return dlg.cambio
 
     def _guardar_como_plantilla(self):
         """Guarda la estructura del presupuesto (o de un sub-presupuesto) como

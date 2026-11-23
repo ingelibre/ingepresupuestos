@@ -2633,5 +2633,7 @@
  "🧠 memoria": "🧠 memória",
  "🧠 memoria global (el LLM la usará)": "🧠 memória global (o LLM vai usá-la)",
  "🧮 Calc": "🧮 Calc",
- "🧮 Totales": "🧮 Totais"
+ "🧮 Totales": "🧮 Totais",
+ "Mostrar en IngeTrazo": "Mostrar no IngeTrazo",
+ "Esta versión no trae la conexión con IngeTrazo.": "Esta versão não traz a conexão com o IngeTrazo."
 }
