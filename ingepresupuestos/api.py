@@ -52,6 +52,12 @@ def idioma() -> str:
         return 'es'
 
 
+def acero_kg_m(diametro: str) -> float | None:
+    """El kg/m de la tabla del programa («12», «1/2\"»); None si no está. (API 2)"""
+    from core.acero import ACERO_KG_ML, normalizar_diametro
+    return ACERO_KG_ML.get(normalizar_diametro(diametro))
+
+
 # ── Datos del presupuesto (solo lectura, ya calculados) ──────────────────────
 
 @dataclass(frozen=True)
@@ -268,10 +274,38 @@ class Aviso:
 
 
 @dataclass(frozen=True)
+class FilaMetrado:
+    """Una fila para la planilla de una partida. El parcial es el producto de lo
+    que no es None. Con `diametro` es de acero: estructuras × elementos × veces
+    × largo × kg_m. (API 2)"""
+    descripcion: str
+    estructuras: float | None = None
+    elementos: float | None = None
+    veces: float | None = None          # solo acero
+    area: float | None = None
+    largo: float | None = None
+    ancho: float | None = None
+    alto: float | None = None
+    diametro: str = ''
+    kg_m: float = 0.0
+
+
+@dataclass(frozen=True)
+class Metrado:
+    """Filas para una partida que existe (`partida_id`) o para una `nueva`. (API 2)"""
+    filas: Sequence[FilaMetrado] = ()
+    partida_id: int = 0
+    nueva: PartidaNueva | None = None
+
+
+@dataclass(frozen=True)
 class Dato:
     """Un campo de `ctx.pedir_datos`. (API 2)
 
-    tipo: numero | entero | texto | parrafo | opcion | si_no"""
+    tipo: numero | entero | texto | parrafo | opcion | si_no | tabla
+
+    Una tabla lleva `columnas` (otros Dato, sin tablas ni párrafos) y su valor
+    es una lista de {clave: valor}, una por fila."""
     clave: str
     titulo: str
     tipo: str = 'numero'
@@ -282,6 +316,7 @@ class Dato:
     opciones: Sequence[str] = ()
     sufijo: str = ''
     ayuda: str = ''
+    columnas: Sequence['Dato'] = ()
 
 
 @dataclass(frozen=True)
@@ -382,6 +417,13 @@ class Editor:
         """Los totales que saldrían de `fijar_precios`, sin guardar. (API 2)"""
         raise NotImplementedError
 
+    def agregar_metrados(self, metrados: Sequence[Metrado], *,
+                         ajustes: Mapping[str, Any] | None = None) -> None:
+        """Agrega partidas nuevas y filas a las planillas, y guarda `ajustes`, en
+        un solo paso de deshacer. Nunca borra filas: se niega si la partida tiene
+        un metrado a mano, planilla de otra clase o de un modelo BIM. (API 2)"""
+        raise NotImplementedError
+
     def renombrar(self, partida_id: int, descripcion: str) -> None:
         raise NotImplementedError
 
@@ -424,7 +466,7 @@ class Contexto:
         raise NotImplementedError
 
     def guardar_ajustes(self, ajustes: Mapping[str, Any]) -> None:
-        """Reemplaza los ajustes: textos, números y sí/no, hasta 10 KB. Se
+        """Reemplaza los ajustes: textos, números y sí/no, hasta 60 KB. Se
         guardan con el proyecto y se pueden deshacer. (API 2)"""
         raise NotImplementedError
 
@@ -435,7 +477,8 @@ class Contexto:
 
 __all__ = [
     'API_VERSION', 'Aplicacion', 'Aviso', 'Campos', 'Columna', 'Contexto',
-    'Dato', 'Documento', 'Editor', 'ErrorComplemento', 'Fila', 'Insumo', 'InsumoTotal',
-    'LineaMetrado', 'LineaPie', 'Moneda', 'Parrafo', 'Partida', 'PartidaNueva', 'Presupuesto',
-    'SaltoPagina', 'Tabla', 'Titulo', 'Totales', 'idioma', 'redondear',
+    'Dato', 'Documento', 'Editor', 'ErrorComplemento', 'Fila', 'FilaMetrado', 'Insumo', 'InsumoTotal',
+    'LineaMetrado', 'LineaPie', 'Metrado', 'Moneda', 'Parrafo', 'Partida', 'PartidaNueva', 'Presupuesto',
+    'SaltoPagina', 'Tabla', 'Titulo', 'Totales', 'acero_kg_m',
+    'idioma', 'redondear',
 ]

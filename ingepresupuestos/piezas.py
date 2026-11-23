@@ -6,11 +6,13 @@
 
     from ingepresupuestos import api, piezas
 
-Solo cuentas y bloques de reporte: no leen ni escriben nada.
+Cuentas, bloques de reporte y el recorrido de los complementos de metrado.
 """
 from __future__ import annotations
 
+import json
 import math
+from dataclasses import dataclass, field, replace
 
 from ingepresupuestos import api
 
@@ -184,6 +186,160 @@ def impuesto_materiales(p, nombre, tasa) -> api.Documento:
     return api.Documento(t("Impuesto sobre materiales"), bloques, horizontal=True)
 
 
+# ── Complementos de metrado ──────────────────────────────────────────────────
+
+@dataclass
+class Parte:
+    """Una cantidad que puede ir a una partida."""
+    nombre: str
+    unidad: str
+    filas: list                 # api.FilaMetrado
+    cantidad: float
+
+
+@dataclass
+class Calculo:
+    partes: list
+    formulas: list
+    avisos: list = field(default_factory=list)
+    bloques: list = field(default_factory=list)    # tablas para el reporte
+
+
+def _limpio(c, v):
+    """`v` si vale para el campo; si no, su valor inicial."""
+    if c.tipo == "tabla":
+        return [{k.clave: _limpio(k, f.get(k.clave)) for k in c.columnas}
+                for f in v[:200] if isinstance(f, dict)] if isinstance(v, list) \
+            else [dict(f) for f in c.valor or ()]
+    if c.tipo == "si_no":
+        return v if isinstance(v, bool) else c.valor is True
+    if c.tipo in ("numero", "entero"):
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) \
+            and math.isfinite(v) and c.minimo <= v <= c.maximo
+        v = v if ok else (c.valor if c.valor is not None else c.minimo)
+        return int(v) if c.tipo == "entero" else float(v)
+    if c.tipo == "opcion":
+        # Se guarda el número: el texto cambia con el idioma del programa.
+        ok = isinstance(v, int) and not isinstance(v, bool) and 0 <= v < len(c.opciones)
+        return c.opciones[v] if ok else (c.valor or c.opciones[0])
+    return v[:1000] if isinstance(v, str) else (c.valor or "")
+
+
+def _guardable(c, v):
+    if c.tipo == "tabla":
+        return [{k.clave: _guardable(k, f[k.clave]) for k in c.columnas} for f in v]
+    return list(c.opciones).index(v) if c.tipo == "opcion" else v
+
+
+def datos_guardados(ajustes, campos) -> dict | None:
+    """Los datos del formulario guardados en el proyecto, comprobados."""
+    try:
+        d = json.loads(ajustes.get("datos") or "")
+    except (TypeError, ValueError, RecursionError):
+        return None
+    return {c.clave: _limpio(c, d.get(c.clave)) for c in campos} \
+        if isinstance(d, dict) else None
+
+
+def siguiente_item(p) -> str:
+    """El primer ítem de título libre en la raíz («07»)."""
+    raices = [int(x.item) for x in p.partidas
+              if x.item.isascii() and x.item.isdigit()]
+    return f"{max(raices, default=0) + 1:02d}"
+
+
+def metrar(ctx, titulo, campos, calcular, aviso):
+    """Formulario → vista de las cuentas → destino → un solo paso de deshacer.
+    Un error en los datos vuelve al formulario con lo escrito."""
+    inicial = datos_guardados(ctx.ajustes, campos)
+    v = inicial or {c.clave: c.valor for c in campos}
+    while True:
+        r = ctx.pedir_datos(titulo, [replace(c, valor=v[c.clave]) for c in campos],
+                            texto=aviso)
+        if r is None:
+            return
+        v = r
+        try:
+            c = calcular(v)
+        except api.ErrorComplemento as e:
+            ctx.avisar(str(e))
+            continue
+        if ctx.preguntar("\n".join([*c.formulas, "", *(f"• {a}" for a in c.avisos),
+                                    aviso, "", t("¿Continuar?")])):
+            break
+    datos = json.dumps({c_.clave: _guardable(c_, v[c_.clave]) for c_ in campos},
+                       ensure_ascii=False)
+    nada, nueva = t("No agregar"), t("Partida nueva, sin precio")
+    p = ctx.presupuesto
+    opciones = []
+    for n, x in enumerate(c.partes):
+        hay = {f"{h.item}  {h.descripcion[:60]}": h.id for h in p.hojas()
+               if h.unidad.strip().lower() == x.unidad}
+        if len({h.sub_presupuesto for h in p.partidas}) > 1:
+            hay = {f"{h.sub_presupuesto[:20]} · {h.item}  {h.descripcion[:50]}": h.id
+                   for h in p.hojas() if h.unidad.strip().lower() == x.unidad}
+        opciones.append((x, hay))
+    texto = t("Con «No agregar» solo se guardan los datos, para el reporte. Las filas "
+              "se suman a la planilla de la partida que elijas.")
+    if ctx.ajustes.get("datos") == datos and ctx.ajustes.get("agregado") is True:
+        texto += "\n" + t("ATENCIÓN: estos mismos datos ya se agregaron antes; si los "
+                         "agregas otra vez, se contarán dos veces.")
+    r = ctx.pedir_datos(titulo, [api.Dato(
+        f"d{n}", f"{x.nombre} — {x.cantidad:.2f} {x.unidad}", "opcion", nada,
+        opciones=[nada, nueva, *hay]) for n, (x, hay) in enumerate(opciones)],
+        texto=texto)
+    if r is None:
+        return
+    metrados, item = [], siguiente_item(p)
+    for n, (x, hay) in enumerate(opciones):
+        if r[f"d{n}"] == nueva:
+            if not any(m.nueva for m in metrados):
+                metrados.insert(0, api.Metrado(nueva=api.PartidaNueva(
+                    titulo.upper(), es_titulo=True, item=item)))
+            metrados.append(api.Metrado(x.filas, nueva=api.PartidaNueva(
+                x.nombre, x.unidad, padre=item)))
+        elif r[f"d{n}"] in hay:
+            metrados.append(api.Metrado(x.filas, hay[r[f"d{n}"]]))
+    ctx.editar.agregar_metrados(metrados, ajustes={
+        "datos": datos, "agregado": bool(metrados) or (
+            ctx.ajustes.get("datos") == datos
+            and ctx.ajustes.get("agregado") is True)})
+    ctx.avisar(t("Hecho. Se deshace en un solo paso.") if metrados
+               else t("Datos guardados para el reporte."))
+
+
+def _ancho(c):
+    return 1 if c.tipo in ("numero", "entero") else 2
+
+
+def reporte_metrado(p, titulo, campos, calcular, aviso) -> api.Documento:
+    v = datos_guardados(p.ajustes, campos)
+    if v is None:
+        raise api.ErrorComplemento(t("Todavía no hay datos: empieza por la acción de "
+                                     "este complemento."))
+    c = calcular(v)
+    bloques = [api.Parrafo(aviso)]
+    sueltos = [(x.titulo, f"{v[x.clave]} {x.sufijo}".strip()) for x in campos
+               if x.tipo != "tabla"]
+    if sueltos:
+        bloques.append(api.Campos(sueltos))
+    for x in campos:
+        if x.tipo == "tabla" and v[x.clave]:
+            bloques += [api.Titulo(x.titulo, 2), api.Tabla(
+                [api.Columna(k.titulo, 100 * _ancho(k) / sum(map(_ancho, x.columnas)),
+                             "derecha" if _ancho(k) == 1 else "izquierda",
+                             0 if k.tipo == "entero" else k.decimales)
+                 for k in x.columnas],
+                [[f[k.clave] for k in x.columnas] for f in v[x.clave]])]
+    bloques += [api.Titulo(t("Cálculo"), 2), *map(api.Parrafo, c.formulas),
+                *c.bloques, api.Titulo(t("Resultado"), 2),
+                api.Tabla([api.Columna("", 60), api.Columna(t("Und."), 15, "centro"),
+                           api.Columna(t("Cantidad"), 25, "derecha", 2)],
+                          [[x.nombre, x.unidad, x.cantidad] for x in c.partes]),
+                *[api.Parrafo(a, negrita=True) for a in c.avisos]]
+    return api.Documento(titulo, bloques, horizontal=True)
+
+
 _TEXTOS = {'en': {'Impuesto sobre materiales': 'Tax on materials',
         'El presupuesto no tiene partidas.': 'The budget has no items.',
         'TOTAL': 'TOTAL',
@@ -225,7 +381,59 @@ _TEXTOS = {'en': {'Impuesto sobre materiales': 'Tax on materials',
                                                                                                                                    'would '
                                                                                                                                    'charge '
                                                                                                                                    'materials '
-                                                                                                                                   'twice.'},
+                                                                                                                                   'twice.',
+        '¿Continuar?': 'Continue?',
+        'No agregar': 'Do not add',
+        'Partida nueva, sin precio': 'New item, without price',
+        'Con «No agregar» solo se guardan los datos, para el reporte. Las filas se suman a la planilla de la partida que elijas.': 'With '
+                                                                                                                                   '«Do '
+                                                                                                                                   'not '
+                                                                                                                                   'add» '
+                                                                                                                                   'only '
+                                                                                                                                   'the '
+                                                                                                                                   'data '
+                                                                                                                                   'is '
+                                                                                                                                   'saved, '
+                                                                                                                                   'for '
+                                                                                                                                   'the '
+                                                                                                                                   'report. '
+                                                                                                                                   'The '
+                                                                                                                                   'rows '
+                                                                                                                                   'are '
+                                                                                                                                   'added '
+                                                                                                                                   'to '
+                                                                                                                                   'the '
+                                                                                                                                   'sheet '
+                                                                                                                                   'of '
+                                                                                                                                   'the '
+                                                                                                                                   'item '
+                                                                                                                                   'you '
+                                                                                                                                   'choose.',
+        'ATENCIÓN: estos mismos datos ya se agregaron antes; si los agregas otra vez, se contarán dos veces.': 'WARNING: '
+                                                                                                               'this '
+                                                                                                               'same '
+                                                                                                               'data '
+                                                                                                               'was '
+                                                                                                               'already '
+                                                                                                               'added; '
+                                                                                                               'adding '
+                                                                                                               'it '
+                                                                                                               'again '
+                                                                                                               'counts '
+                                                                                                               'it '
+                                                                                                               'twice.',
+        'Hecho. Se deshace en un solo paso.': 'Done. It is undone in one step.',
+        'Datos guardados para el reporte.': 'Data saved for the report.',
+        'Todavía no hay datos: empieza por la acción de este complemento.': 'There is '
+                                                                            'no data '
+                                                                            'yet: '
+                                                                            'start '
+                                                                            'with this '
+                                                                            "add-on's "
+                                                                            'action.',
+        'Cálculo': 'Calculation',
+        'Resultado': 'Result',
+        'Cantidad': 'Quantity'},
  'pt_BR': {'Impuesto sobre materiales': 'Imposto sobre materiais',
            'El presupuesto no tiene partidas.': 'O orçamento não tem itens.',
            'TOTAL': 'TOTAL',
@@ -270,7 +478,59 @@ _TEXTOS = {'en': {'Impuesto sobre materiales': 'Tax on materials',
                                                                                                                                       'vezes '
                                                                                                                                       'sobre '
                                                                                                                                       'os '
-                                                                                                                                      'materiais.'}}
+                                                                                                                                      'materiais.',
+           '¿Continuar?': 'Continuar?',
+           'No agregar': 'Não adicionar',
+           'Partida nueva, sin precio': 'Item novo, sem preço',
+           'Con «No agregar» solo se guardan los datos, para el reporte. Las filas se suman a la planilla de la partida que elijas.': 'Com '
+                                                                                                                                      '«Não '
+                                                                                                                                      'adicionar» '
+                                                                                                                                      'só '
+                                                                                                                                      'se '
+                                                                                                                                      'salvam '
+                                                                                                                                      'os '
+                                                                                                                                      'dados, '
+                                                                                                                                      'para '
+                                                                                                                                      'o '
+                                                                                                                                      'relatório. '
+                                                                                                                                      'As '
+                                                                                                                                      'linhas '
+                                                                                                                                      'são '
+                                                                                                                                      'somadas '
+                                                                                                                                      'à '
+                                                                                                                                      'planilha '
+                                                                                                                                      'do '
+                                                                                                                                      'item '
+                                                                                                                                      'que '
+                                                                                                                                      'você '
+                                                                                                                                      'escolher.',
+           'ATENCIÓN: estos mismos datos ya se agregaron antes; si los agregas otra vez, se contarán dos veces.': 'ATENÇÃO: '
+                                                                                                                  'estes '
+                                                                                                                  'mesmos '
+                                                                                                                  'dados '
+                                                                                                                  'já '
+                                                                                                                  'foram '
+                                                                                                                  'adicionados; '
+                                                                                                                  'se '
+                                                                                                                  'adicioná-los '
+                                                                                                                  'de '
+                                                                                                                  'novo, '
+                                                                                                                  'contarão '
+                                                                                                                  'duas '
+                                                                                                                  'vezes.',
+           'Hecho. Se deshace en un solo paso.': 'Feito. Desfaz-se em um só passo.',
+           'Datos guardados para el reporte.': 'Dados salvos para o relatório.',
+           'Todavía no hay datos: empieza por la acción de este complemento.': 'Ainda '
+                                                                               'não há '
+                                                                               'dados: '
+                                                                               'comece '
+                                                                               'pela '
+                                                                               'ação '
+                                                                               'deste '
+                                                                               'complemento.',
+           'Cálculo': 'Cálculo',
+           'Resultado': 'Resultado',
+           'Cantidad': 'Quantidade'}}
 
 
 def t(s):
