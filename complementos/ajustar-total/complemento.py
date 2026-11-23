@@ -16,12 +16,34 @@ def registrar(app):
                ayuda=t("Escala los precios de este proyecto, con vista previa"))
 
 
-def precios_de(p, tipos):
+def grupos(p):
+    """[(rótulo, ids de partida)] de los títulos, para elegir uno."""
+    varios = len({x.sub_presupuesto for x in p.partidas}) > 1
+    out, hojas = [], p.hojas()
+    for x in p.partidas:
+        ids = {h.id for h in hojas if h.sub_presupuesto == x.sub_presupuesto
+               and h.item.startswith(x.item + ".")} if x.es_titulo else None
+        if ids:
+            rot = f"{x.item} {x.descripcion}"[:70]
+            out.append((f"{x.sub_presupuesto} · {rot}" if varios else rot, ids))
+    return out
+
+
+def compartidos(p, base, ids):
+    """Insumos de `base` que también usa alguna partida de fuera de `ids`."""
+    fuera = {i.recurso_id for h in p.hojas() if h.id not in ids
+             for i in h.acu_abierto if not i.es_subpartida}
+    return [base[r][0] for r in base if r in fuera]
+
+
+def precios_de(p, tipos, ids=None):
     """({recurso_id: (descripcion, precio, cantidad en la obra)}, hay_distintos).
     Sin filas en % ni sub-partidas: su precio sale de los demás."""
     cantidad = {i.recurso_id: i.cantidad for i in p.insumos}
     out, distintos = {}, False
     for x in p.hojas():
+        if ids is not None and x.id not in ids:
+            continue
         for i in x.acu_abierto:
             if (i.tipo not in tipos or i.es_subpartida or i.precio <= 0
                     or i.unidad.strip().startswith("%")):
@@ -89,10 +111,14 @@ def buscar(base, objetivo, dec, simular, fmt=str):
 
 def ajustar(ctx):
     p = ctx.presupuesto
+    todas = t("Todas las partidas")
+    gs = grupos(p)
     r = ctx.pedir_datos(
         t("Ajustar a un total"),
         [api.Dato("objetivo", t("Total objetivo"), valor=p.total, minimo=0.01,
                   decimales=p.decimales, sufijo=p.moneda.simbolo)]
+        + [api.Dato("grupo", t("Partidas"), "opcion", todas,
+                    opciones=[todas, *dict(gs)])]
         + [api.Dato(c, t(n), "si_no", c == "MAT") for c, n in TIPOS],
         texto=t("Total actual: {v}. Marca los insumos cuyos precios se pueden "
                 "escalar.").format(v=p.moneda.formato(p.total, p.decimales)))
@@ -105,7 +131,8 @@ def ajustar(ctx):
     if objetivo == api.redondear(p.total, d):
         ctx.avisar(t("El presupuesto ya tiene ese total."))
         return
-    base, distintos = precios_de(p, tipos)
+    ids = dict(gs).get(r["grupo"])
+    base, distintos = precios_de(p, tipos, ids)
     if not base:
         raise api.ErrorComplemento(t("No hay insumos con precio de esos tipos."))
     def m(v):
@@ -127,6 +154,13 @@ def ajustar(ctx):
                       else t("No se encontró una combinación exacta."))
     lineas += ["", t("Cambian {n} precios de este proyecto; la biblioteca no se "
                      "toca.").format(n=len(cambios))]
+    comunes = compartidos(p, base, ids) if ids is not None else []
+    if comunes:
+        lineas.append(t(
+            "ATENCIÓN: {n} de esos insumos se usan también en partidas de fuera del "
+            "grupo, y allí cambiarán igual: {que}.").format(
+                n=len(comunes), que=", ".join(x[:40] for x in comunes[:6])
+                + ("…" if len(comunes) > 6 else "")))
     if distintos:
         lineas.append(t("Algún insumo tenía precios distintos según la partida: "
                         "quedará con uno solo."))

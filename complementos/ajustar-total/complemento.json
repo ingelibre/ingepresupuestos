@@ -2,10 +2,10 @@
   "esquema": 1,
   "id": "ajustar-total",
   "nombre": "Ajustar a un total",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "autor": "IngePresupuestos (issue #40)",
   "licencia": "GPL-3.0-or-later",
-  "descripcion": "Escala los precios de los tipos de insumo que elijas para llegar a un total. Enseña antes el resultado, cambia solo los precios de este proyecto (nunca la biblioteca) y se deshace de una vez.",
+  "descripcion": "Escala los precios de los tipos de insumo que elijas para llegar a un total. Enseña antes el resultado, cambia solo los precios de este proyecto (nunca la biblioteca) y se deshace de una vez. Se puede limitar a un grupo de partidas; avisa si un insumo se usa también fuera.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/40",
   "api_version": 2,
   "codigo": "complemento.py",
@@ -16,11 +16,11 @@
   "traducciones": {
     "en": {
       "nombre": "Adjust to a total",
-      "descripcion": "Scales the prices of the resource types you choose to reach a total. Shows the result first, changes only this project's prices (never the library) and is undone in one step."
+      "descripcion": "Scales the prices of the resource types you choose to reach a total. Shows the result first, changes only this project's prices (never the library) and is undone in one step. It can be limited to a group of items; it warns if a resource is also used elsewhere."
     },
     "pt_BR": {
       "nombre": "Ajustar a um total",
-      "descripcion": "Escala os preços dos tipos de insumo que você escolher para chegar a um total. Mostra o resultado antes, muda só os preços deste projeto (nunca a biblioteca) e se desfaz de uma vez."
+      "descripcion": "Escala os preços dos tipos de insumo que você escolher para chegar a um total. Mostra o resultado antes, muda só os preços deste projeto (nunca a biblioteca) e se desfaz de uma vez. Pode limitar-se a um grupo de itens; avisa se um insumo também é usado fora."
     }
   }
 }
