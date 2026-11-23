@@ -1,0 +1,12 @@
+{
+  "esquema": 1,
+  "id": "apu-chile",
+  "nombre": "APU formato Chile",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos (issue #31)",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "Análisis de precios unitarios en cuatro bloques (A Materiales, B Equipos, maquinarias y transporte, C Mano de obra, D Varios), sin cuadrilla ni rendimiento, ligado a la cantidad del presupuesto. Montos netos (sin IVA) en pesos enteros. Salen dos variantes: con el precio unitario del presupuesto y con gastos generales y utilidad dentro del precio unitario neto.",
+  "web": "https://github.com/ingelibre/ingepresupuestos/issues/31",
+  "api_version": 1,
+  "codigo": "complemento.py"
+}
