@@ -701,6 +701,8 @@ def init_db():
         # Color «post-it» de la card del dashboard (hex). Vacío = hereda el
         # color de su portafolio; ver utils.theme.color_postit.
         ('proy_color',    "ALTER TABLE proyectos ADD COLUMN color TEXT DEFAULT ''"),
+        # Hash del código de recuperación de la cuenta (issue #32).
+        ('usr_recuperacion', "ALTER TABLE usuarios ADD COLUMN recuperacion_hash TEXT DEFAULT ''"),
         # Corte de los meses en los cronogramas: '' = 30 días desde el inicio,
         # 'cal' = fin de mes calendario (issue #52).
         ('corte_mes',     "ALTER TABLE proyectos ADD COLUMN corte_mes TEXT DEFAULT ''"),
