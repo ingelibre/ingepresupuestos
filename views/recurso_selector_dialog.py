@@ -14,8 +14,8 @@ from PySide6.QtGui import (QColor, QFont, QRegularExpressionValidator,
                           QAction)
 
 from core.config import DB_PATH, TIPOS_RECURSO
-from core.database import (get_db, _rn, _recalcular_pu, _siguiente_codigo_inei,
-                           precio_recurso_en_proyecto, get_decimales_cant_acu,
+from core.database import (get_db, _recalcular_pu, _siguiente_codigo_inei,
+                           precio_recurso_en_proyecto,
                            # Regla crítica del ACU — definición única en
                            # core.database; acá solo se les da el nombre local.
                            recurso_por_hora as _es_por_hora,
@@ -43,26 +43,9 @@ _TIPO_FG  = {'MO': '#856404', 'MAT': '#0F5132', 'EQ':  '#084298',
              'SC': '#6A36B1'}
 
 
-def _cuadrilla_y_cantidad(tipo, unidad, *, cuad, cant, rend, jornada,
-                          es_global) -> tuple[float, float]:
-    """Qué se graba en `acu_items` para un insumo que entra al ACU.
-
-    Devuelve `(cuadrilla, cantidad)`. La regla es la del ACU (helpers de
-    `core.database`): en MO y equipo por hora o por día la cantidad se DERIVA
-    de la cuadrilla; en todo lo demás —y en toda partida global— la cuadrilla
-    no aplica y se graba 0, nunca el «1.000» que trae el campo por defecto.
-
-    Las DOS pestañas del diálogo pasan por aquí. Hasta la 3.0.4 «Crear nuevo
-    recurso» grababa la cuadrilla tal cual para cualquier tipo, así que un
-    material nuevo entraba con cuadrilla 1.0 mientras «Buscar en catálogo» le
-    ponía 0 (reporte de David Ramos, 2 sep 2026).
-    """
-    if es_global or not (_es_por_dia(tipo, unidad) or _es_por_hora(tipo, unidad)):
-        return 0.0, cant
-    if cuad <= 0:
-        return 0.0, cant
-    factor = 1 if _es_por_dia(tipo, unidad) else jornada
-    return cuad, _rn(cuad / (rend or 1) * factor, get_decimales_cant_acu(tipo))
+# La regla vive en core.partidas_ops (también la usa el MCP); acá solo su
+# nombre local.
+from core.partidas_ops import cuadrilla_y_cantidad as _cuadrilla_y_cantidad  # noqa: E402
 
 
 class RecursoSelectorDialog(QDialog):

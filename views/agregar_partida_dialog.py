@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel, QSortFilterProxyModel
 from PySide6.QtGui import QFont, QColor, QCursor
 
-from core.database import get_db, _recalcular_pu, copiar_items_acu
+from core.database import get_db
+from core.partidas_ops import insertar_desde_biblioteca, siguiente_item
 from utils.formatting import fmt, moneda_defecto
 from utils.i18n import N_, tr
 
@@ -847,47 +848,10 @@ class AgregarPartidaDialog(QDialog):
             conn = get_db()
             agregados = 0
             for cu_id in sorted(self._seleccionados):
-                cu = conn.execute(
-                    "SELECT * FROM biblioteca_cu WHERE id=?", (cu_id,)
-                ).fetchone()
-                if not cu:
+                if insertar_desde_biblioteca(
+                        conn, self.pid, cu_id, self._siguiente_item(conn),
+                        self._sub_ppto_id, solo_estructura) is None:
                     continue
-
-                nuevo_item = self._siguiente_item(conn)
-                nivel      = len(nuevo_item.split('.'))
-
-                conn.execute(
-                    """INSERT INTO partidas
-                       (proyecto_id, item, descripcion, unidad,
-                        metrado, precio_unitario, nivel, es_titulo, rendimiento,
-                        sub_presupuesto_id)
-                       VALUES (?,?,?,?,0,?,?,0,?,?)""",
-                    (self.pid, nuevo_item,
-                     cu['descripcion'],
-                     cu['unidad'] or '',
-                     cu['costo_unitario'] or 0,
-                     nivel,
-                     cu['rendimiento'] or 1,
-                     self._sub_ppto_id)
-                )
-                new_part_id = conn.execute(
-                    "SELECT last_insert_rowid()"
-                ).fetchone()[0]
-
-                # Copiar ACU items de biblioteca (si la tabla tiene datos)
-                try:
-                    bib_acus = conn.execute(
-                        "SELECT * FROM biblioteca_acu_items WHERE cu_id=?",
-                        (cu_id,)
-                    ).fetchall()
-                    copiar_items_acu(conn, new_part_id, bib_acus,
-                                     proyecto_id=self.pid,
-                                     solo_estructura=solo_estructura)
-                    if bib_acus:
-                        _recalcular_pu(conn, new_part_id)
-                except Exception:
-                    pass   # Sin ACU items en biblioteca — no es error
-
                 agregados += 1
 
             conn.commit()
@@ -952,10 +916,6 @@ class AgregarPartidaDialog(QDialog):
         - Partida seleccionada "01.02" → hermano siguiente: "01.03"
         - Nada seleccionado          → raíz: "01", "02"…
         """
-        existing = {r[0] for r in conn.execute(
-            "SELECT item FROM partidas WHERE proyecto_id=?", (self.pid,)
-        ).fetchall()}
-
         ctx         = self._contexto_item
         es_titulo   = self._contexto_es_titulo
 
@@ -964,34 +924,7 @@ class AgregarPartidaDialog(QDialog):
             ctx = self._ultimo_titulo(conn)
             es_titulo = bool(ctx)
 
-        if ctx and es_titulo:
-            # Insertar DENTRO del título → como hijo
-            prefijo = ctx
-            for n in range(1, 1000):
-                candidate = f"{prefijo}.{n:02d}"
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
-        elif ctx and not es_titulo:
-            # Insertar DESPUÉS de la partida → hermano al mismo nivel
-            partes = ctx.split('.')
-            for n in range(1, 1000):
-                partes[-1] = f"{n:02d}"
-                candidate  = '.'.join(partes)
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
-        else:
-            # No hay títulos → siguiente en raíz
-            for n in range(1, 1000):
-                candidate = f"{n:02d}"
-                if candidate not in existing:
-                    existing.add(candidate)
-                    return candidate
-
-        return "99"
+        return siguiente_item(conn, self.pid, ctx, es_titulo)
 
     def _ultimo_titulo(self, conn) -> str | None:
         """Código del último título del subpresupuesto activo (orden natural).
