@@ -70,7 +70,6 @@ Para consultas, soporte técnico o para contribuir al proyecto:
 
   Autor:     Ing. Marco Sumari Tellez / Sumari SAC
   Email:     ing.sumari@gmail.com
-  WhatsApp:  +51 998 839 090
   Web:       https://ingepresupuestos.com
   Código:    https://github.com/ingelibre/ingepresupuestos
 

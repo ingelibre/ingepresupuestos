@@ -643,10 +643,13 @@ class ModeloBimDialog(_Base):
         self.b_acu = _boton(tr("ACU de la biblioteca…"), self._acu)
         fv.addWidget(self.b_desvincular)
         fv.addWidget(self.b_acu)
-        self.b_mostrar = _boton(tr("Mostrar en IngeTrazo"), self._mostrar)
-        fv.addWidget(self.b_mostrar)
         fv.addStretch(1)
         ld.addLayout(fv)
+        fi = QHBoxLayout()              # en otra fila: junto a la Vista 3D no cabían
+        self.b_mostrar = _boton(tr("Mostrar en IngeTrazo"), self._mostrar)
+        fi.addWidget(self.b_mostrar)
+        fi.addStretch(1)
+        ld.addLayout(fi)
         sp.addWidget(der)
         sp.setSizes([620, 520])
         self.v.addWidget(sp, 1)
@@ -781,7 +784,9 @@ class ModeloBimDialog(_Base):
             for i in range(3):
                 self._sp.setCollapsible(i, False)
             for i in (0, 1):
-                self._sp.widget(i).setMinimumWidth((290, 510)[i])
+                # Nunca menos de lo que piden sus textos (letra de Windows, idioma).
+                w = self._sp.widget(i)
+                w.setMinimumWidth(max((290, 510)[i], w.minimumSizeHint().width()))
             self.resize(max(self.width(), 1380), self.height())
         self.visor.show()
         self._abrir_3d()

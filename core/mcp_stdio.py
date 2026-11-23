@@ -203,7 +203,7 @@ def main() -> int:
     except OSError:
         return 2
     for linea in sys.stdin:
-        linea = linea.strip()
+        linea = linea.lstrip('\ufeff').strip()   # PowerShell 5.1 antepone un BOM
         if not linea:
             continue
         try:

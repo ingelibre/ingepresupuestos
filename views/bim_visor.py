@@ -271,6 +271,10 @@ class BimVisor(QWidget):
         self._chk_transp.setToolTip(
             tr("Vuelve transparente lo que no está seleccionado"))
         self._chk_transp.toggled.connect(lambda _v: self._pintar())
+        barra.addStretch(1)
+        lay.addLayout(barra)
+        barra = QHBoxLayout()           # segunda fila: en una sola se recortaban
+        barra.setSpacing(6)
         barra.addWidget(self._chk_transp)
         barra.addStretch(1)
         self._leyenda = QLabel()

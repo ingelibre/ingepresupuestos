@@ -177,9 +177,10 @@ def _guardar_libro(wb, buf):
                     continue
                 m = re.search(r'#,##0\.(0+)', c.number_format)
                 texto = f"{c.value:,.{len(m.group(1)) if m else 0}f}"
-                # Ancho en caracteres de la fuente normal (11 pt).
+                # Ancho en caracteres de la fuente normal (Calibri 11). Las
+                # cifras van en Inter, 1.25 veces más anchas (1.33 en negrita).
                 pide = (len(texto) * (c.font.sz or 11) / 11
-                        * (1.12 if c.font.b else 1.0)) + 1.0
+                        * (1.33 if c.font.b else 1.25)) + 1.5
                 dim = ws.column_dimensions[get_column_letter(c.column)]
                 if pide > (dim.width or 8.43):
                     dim.width = round(pide, 1)

@@ -86,7 +86,7 @@ hace falta aceptar el [CLA](CLA.md) una sola vez.
 
 ## Reportar un problema
 
-Bugs y sugerencias a ing.sumari@gmail.com o por WhatsApp al +51 998 839 090.
+Bugs y sugerencias a ing.sumari@gmail.com o en [GitHub](https://github.com/ingelibre/ingepresupuestos/issues).
 
 ## Licencia
 

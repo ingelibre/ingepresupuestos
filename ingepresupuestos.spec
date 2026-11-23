@@ -275,6 +275,28 @@ elif sys.platform == 'darwin':
     if mac_icns.exists():
         icon = str(mac_icns)
 
+# Versión visible en Propiedades ▸ Detalles de los .exe (solo Windows).
+def _version_win(descripcion, archivo):
+    if sys.platform != 'win32':
+        return None
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo,
+        VarStruct, VSVersionInfo)
+    ver = re.search(r'CURRENT_VERSION\s*=\s*"([\d.]+)"',
+                    (ROOT / 'core' / 'update_manager.py').read_text(encoding='utf-8')).group(1)
+    nums = tuple((list(map(int, ver.split('.'))) + [0, 0, 0, 0])[:4])
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=nums, prodvers=nums),
+        kids=[StringFileInfo([StringTable('0C0A04B0', [
+                  StringStruct('CompanyName', 'Marco Sumari'),
+                  StringStruct('FileDescription', descripcion),
+                  StringStruct('FileVersion', ver),
+                  StringStruct('OriginalFilename', archivo),
+                  StringStruct('ProductName', 'IngePresupuestos'),
+                  StringStruct('ProductVersion', ver)])]),
+              VarFileInfo([VarStruct('Translation', [0x0C0A, 1200])])])
+
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -291,6 +313,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon,
+    version=_version_win('IngePresupuestos', 'ingepresupuestos.exe'),
 )
 
 # ── ingepresupuestos-mcp: programa de CONSOLA para los clientes MCP ─────────
@@ -320,6 +343,7 @@ mcp_exe = EXE(
     upx=False,
     console=True,
     icon=icon,
+    version=_version_win('IngePresupuestos (MCP)', 'ingepresupuestos-mcp.exe'),
 )
 
 coll = COLLECT(

@@ -253,3 +253,12 @@ def test_mcp_no_importa_qt_ni_sqlite():
     assert r.returncode == 0 and "PySide6" not in r.stderr
     assert "sqlite3" not in r.stderr
     assert len(json.loads(r.stdout)["result"]["tools"]) == 31
+
+
+def test_acepta_el_bom_de_powershell(tmp_path):
+    entorno = dict(os.environ, XDG_DATA_HOME=str(tmp_path), APPDATA=str(tmp_path))
+    r = subprocess.run(
+        [sys.executable, str(RAIZ / 'scripts' / 'ingepresupuestos_mcp.py')],
+        input=b'\xef\xbb\xbf{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+        capture_output=True, timeout=60, env=entorno)
+    assert b'"result"' in r.stdout, (r.stdout, r.stderr)

@@ -362,8 +362,7 @@ class AcercaView(QWidget):
     # ── Apoya al proyecto ─────────────────────────────────────────────────
     # Espejo de ingepresupuestos.com/apoyar (Marco, 9 sep 2026): es software
     # libre y gratuito; se apoya probándolo y reportando, recomendándolo o
-    # con un aporte por Yape/Plin (QR y número) o Liberapay/PayPal.
-    YAPE_NUMERO = "998 839 090"
+    # con un aporte por Yape/Plin (QR) o Liberapay/PayPal.
     LIBERAPAY_URL = "https://liberapay.com/ingelibre/donate"
     PAYPAL_CORREO = "ing.marco.sumari@gmail.com"
     APOYAR_URL = "https://ingepresupuestos.com/apoyar"
@@ -421,7 +420,7 @@ class AcercaView(QWidget):
                             " border:none;")
         v.addWidget(intro)
 
-        # Yape / Plin: QR + número con botón Copiar
+        # Yape / Plin: solo el QR, sin número
         fila = QWidget()
         fila.setStyleSheet("background:transparent; border:none;")
         fl = QHBoxLayout(fila)
@@ -440,32 +439,8 @@ class AcercaView(QWidget):
         l1.setTextFormat(Qt.RichText)
         l1.setStyleSheet(f"color:{SLATE_700}; font-size:12px; background:transparent; border:none;")
         dv.addWidget(l1)
-        num_w = QWidget()
-        num_w.setStyleSheet("background:transparent; border:none;")
-        nl = QHBoxLayout(num_w)
-        nl.setContentsMargins(0, 0, 0, 0)
-        nl.setSpacing(8)
-        num = QLabel(self.YAPE_NUMERO)
-        num.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        num.setStyleSheet(f"color:{ORANGE_DARK}; font-size:16px; font-weight:700;"
-                          " background:transparent; border:none;")
-        nl.addWidget(num)
-        self.btn_copiar_yape = QPushButton(tr("Copiar"))
-        self.btn_copiar_yape.setCursor(Qt.PointingHandCursor)
-        self.btn_copiar_yape.setFixedHeight(24)
-        self.btn_copiar_yape.setStyleSheet(
-            f"QPushButton {{ background:{WHITE}; color:{SLATE_700};"
-            f" border:1px solid {SILVER_300}; border-radius:5px;"
-            f" padding:0 10px; font-size:11px; }}"
-            f"QPushButton:hover {{ background:{ORANGE_SOFT};"
-            f" border-color:{ORANGE}; color:{ORANGE_DARK}; }}"
-        )
-        self.btn_copiar_yape.clicked.connect(self._copiar_yape)
-        nl.addWidget(self.btn_copiar_yape)
-        nl.addStretch(1)
-        dv.addWidget(num_w)
-        nota = QLabel(tr("A nombre de Marco Sumari. El mismo número recibe Plin "
-                      "desde Interbank, BBVA o Scotiabank."))
+        nota = QLabel(tr("Escanea el código desde tu app. "
+                      "A nombre de Marco Sumari."))
         nota.setWordWrap(True)
         nota.setStyleSheet(f"color:#95A3AB; font-size:10px; background:transparent; border:none;")
         dv.addWidget(nota)
@@ -489,13 +464,6 @@ class AcercaView(QWidget):
         ext.setStyleSheet(f"color:{SLATE_700}; font-size:11px; background:transparent; border:none;")
         v.addWidget(ext)
         return card
-
-    def _copiar_yape(self):
-        from PySide6.QtWidgets import QApplication
-        QApplication.clipboard().setText(self.YAPE_NUMERO.replace(" ", ""))
-        self.btn_copiar_yape.setText(tr("Copiado") + " ✓")
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(1800, lambda: self.btn_copiar_yape.setText(tr("Copiar")))
 
     def _buscar_actualizaciones(self):
         """Chequeo manual de actualizaciones (no silencioso)."""

@@ -33,7 +33,7 @@ def _bd():
         d.init_db()
 
 
-def test_acerca_de_apoya_al_proyecto_con_yape_y_copia_el_numero():
+def test_acerca_de_apoya_al_proyecto_con_yape_sin_publicar_el_telefono():
     from core.config import BASE_DIR
     from views.acerca_view import AcercaView
     _bd()
@@ -46,14 +46,14 @@ def test_acerca_de_apoya_al_proyecto_con_yape_y_copia_el_numero():
     QTimer.singleShot(50, lambda: v._dlg_apoyo.accept())
     v.lbl_apoyo.linkActivated.emit('apoyar')
     assert isinstance(v._dlg_apoyo, QDialog) and v._dlg_apoyo.windowTitle() == 'Apoya al proyecto'
-    v._copiar_yape()
-    assert _app.clipboard().text() == '998839090'
-    assert v.btn_copiar_yape.text().startswith('Copiado')
-    # Mismo número y misma ruta que la web
+    from PySide6.QtWidgets import QLabel
+    textos = ' '.join(q.text() for q in v._dlg_apoyo.findChildren(QLabel))
+    assert 'Yape' in textos and '839' not in textos
+    # Misma ruta que la web
     web = os.path.join(os.path.dirname(__file__), '..', '..', 'web', 'apoyar.html')
     if os.path.exists(web):
         html = open(web, encoding='utf-8').read()
-        assert '998 839 090' in html and AcercaView.LIBERAPAY_URL in html
+        assert AcercaView.LIBERAPAY_URL in html
 
 
 def test_el_qr_de_yape_viaja_en_el_paquete():
