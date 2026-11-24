@@ -1555,7 +1555,7 @@ class FormulaView(QWidget):
         self._sucio = False
         self._render_tabla()
         self._cargar_periodos_ui()
-        self._calcular_k()
+        self._calcular_k(guardar=False)
 
     def _render_tabla(self):
         self.tbl.blockSignals(True)
@@ -1680,6 +1680,8 @@ class FormulaView(QWidget):
         if row >= len(self._monomios):
             return
         m = self._monomios[row]
+        if 1 <= col <= 4:
+            self._sucio = True
         if col == 1:
             m['simbolo'] = item.text().strip()
         elif col == 2:
@@ -2106,9 +2108,10 @@ class FormulaView(QWidget):
             self.inp_reajuste_anio.blockSignals(False)
             self.cmb_area.blockSignals(False)
 
-    def _calcular_k(self):
+    def _calcular_k(self, *_senal, guardar: bool = True):
         """Calcula K con los períodos/área actuales y los monomios guardados.
-        Persiste los períodos para preservarlos entre sesiones."""
+        Persiste los períodos para preservarlos entre sesiones, salvo al abrir
+        la vista: abrir no cambia el proyecto."""
         if not self._monomios:
             self.tbl_k.setRowCount(0)
             self.lbl_k_badge.setText("K = —")
@@ -2126,10 +2129,11 @@ class FormulaView(QWidget):
         area = self.cmb_area.currentData() or '01'
 
         # Persistir períodos
-        try:
-            guardar_periodos(self.pid, oa, om, ra, rm, area)
-        except Exception:
-            pass
+        if guardar:
+            try:
+                guardar_periodos(self.pid, oa, om, ra, rm, area)
+            except Exception:
+                pass
 
         # Calcular
         r = calcular_reajuste_k(

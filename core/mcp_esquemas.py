@@ -57,9 +57,9 @@ REPORTES = ("presupuesto", "resumen", "gastos_generales", "insumos",
             "insumos_sub", "acus", "metrados", "especificaciones",
             "memoria_descriptiva", "presupuesto_cerrado", "cronograma",
             "cronograma_valorizado", "cronograma_adquisiciones",
-            "cronograma_curva_s", "completo")
+            "cronograma_curva_s", "formula_polinomica", "completo")
 REPORTES_XLSX = ("presupuesto", "insumos", "insumos_sub", "acus", "metrados",
-                 "gastos_generales", "completo")
+                 "gastos_generales", "formula_polinomica", "completo")
 REPORTES_DOCX = ("resumen", "especificaciones", "memoria_descriptiva")
 
 HERRAMIENTAS: list[dict] = [
@@ -290,11 +290,12 @@ HERRAMIENTAS: list[dict] = [
      "inputSchema": _obj({"project_id": _PID,
                           "item_ids": {"type": "array", "minItems": 1,
                                        "maxItems": 30, "items": _PART},
-                          "offset": _DESDE, "limit": _LIMITE}, ("project_id",))},
+                          "only_missing": _BOOL, "offset": _DESDE, "limit": _LIMITE}, ("project_id",))},
     {"name": "set_specs", "lee": False, "destruye": True,
      "description": "Escribe especificaciones técnicas en texto plano (sin "
                     "markdown; cada sección con su título en mayúsculas en una "
-                    "línea: «1. DESCRIPCIÓN»). Lee antes get_acu: materiales y "
+                    "línea: «1. DESCRIPCIÓN»; toda línea solo en mayúsculas "
+                    "sale en negrita). Lee antes get_acu: materiales y "
                     "equipos deben ser los de la partida. No pisa un texto "
                     "existente sin `replace: true`.",
      "inputSchema": _obj({"project_id": _PID, "specs": {
@@ -337,10 +338,15 @@ HERRAMIENTAS: list[dict] = [
                          ("project_id",))},
     {"name": "set_formula", "lee": False, "destruye": True,
      "description": "Arma y guarda la fórmula polinómica. Sin `monomials`, "
-                    "agrupa sola según el D.S. 011-79-VC. Con `monomials`, "
+                    "agrupa sola siguiendo el D.S. 011-79-VC (revisa "
+                    "`warnings`). Con `monomials`, "
                     "reparte TODOS los índices de get_formula (menos GU, que se "
                     "agrega solo). Los coeficientes los calcula la app y suman "
-                    "1.000. `preview: true` no guarda.",
+                    "1.000. `preview: true` no guarda (no hay "
+                    "dry_run). Con solo `periods` y sin `replace` cambia los "
+                    "períodos y respeta los monomios; `replace: true` sin "
+                    "`monomials` los rehace. Áreas INEI: get_formula. No se "
+                    "aplica en administración directa.",
      "inputSchema": _obj({"project_id": _PID, "formula_id": _ID, "monomials": {
          "type": "array", "minItems": 1, "maxItems": 8, "items": _obj({
              "symbol": {"type": "string", "minLength": 1, "maxLength": 4},
@@ -356,8 +362,9 @@ HERRAMIENTAS: list[dict] = [
              "area": {"type": "string", "pattern": "[0-9]{2}"}}),
          "replace": _BOOL, "preview": _BOOL}, ("project_id",))},
     {"name": "get_schedule", "lee": True,
-     "description": "Cronograma: duración, predecesoras, inicio y fin (día de "
-                    "obra) y ruta crítica de cada partida.",
+     "description": "Cronograma: duración, predecesoras (por gantt_row), inicio y fin "
+                    "(día calendario de obra) y ruta crítica. La duración va en "
+                    "días laborables.",
      "inputSchema": _obj({"project_id": _PID, "offset": _DESDE,
                           "limit": _LIMITE}, ("project_id",))},
     {"name": "s_curve", "lee": True,
@@ -379,8 +386,8 @@ HERRAMIENTAS: list[dict] = [
                     "ejecución». Fechas aaaa-mm-dd.",
      "inputSchema": _obj({
          "project_id": _PID,
-         "from_date": {"type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"},
-         "to_date": {"type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"}},
+         "from_date": {"type": "string", "maxLength": 10, "description": "aaaa-mm-dd"},
+         "to_date": {"type": "string", "maxLength": 10, "description": "aaaa-mm-dd"}},
          ("project_id", "from_date", "to_date"))},
     {"name": "set_valuation_progress", "lee": False, "destruye": True,
      "description": "Metrado ejecutado en el período por partida (el del "

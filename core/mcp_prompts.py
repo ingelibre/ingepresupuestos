@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 _REGLAS = (" Los números los calcula IngePresupuestos: no los inventes. Antes de "
-           "escribir, usa dry_run: true, enséñame qué cambia y el total antes y "
+           "escribir, usa dry_run: true (preview: true en set_formula), enséñame qué cambia y el total antes y "
            "después, y espera mi visto bueno.")
 
 PROMPTS = {
@@ -68,7 +68,7 @@ PROMPTS = {
         (("proyecto", "Proyecto (por nombre)", True),),
         "Arma la fórmula polinómica del proyecto «{proyecto}». Mira get_formula, "
         "usa set_formula con preview: true y explícame cada monomio, sus "
-        "advertencias y los insumos sin índice. Guárdala solo cuando lo apruebe."),
+        "advertencias y los insumos sin índice (resources_without_index). Guárdala solo cuando lo apruebe."),
 }
 
 
@@ -92,4 +92,5 @@ def obtener(nombre, argumentos) -> dict:
         valores[a] = v or "el IngeTrazo abierto (source=ingetrazo)"
     return {"description": desc, "messages": [{"role": "user", "content": {
         "type": "text", "text": txt.format(**valores) + (
-            "" if nombre == "revisar_presupuesto" else _REGLAS)}}]}
+            "" if nombre in ("revisar_presupuesto", "redactar_especificaciones")
+            else _REGLAS)}}]}

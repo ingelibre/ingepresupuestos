@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -29,6 +30,9 @@ from core.mcp_esquemas import REPORTES_DOCX, REPORTES_XLSX
 NIVEL = {'set_specs': 'specs', 'set_memoria': 'specs', 'set_overhead': 'pie',
          'set_formula': 'pie', 'create_valuation': 'obra',
          'set_valuation_progress': 'obra'}
+
+_NOMBRE_NIVEL = {'specs': 'especificaciones ni memoria',
+                 'pie': 'pie de presupuesto, gastos ni fórmula'}
 
 
 class ErrorMCP(Exception):
@@ -92,7 +96,7 @@ class Operaciones:
         if not puede_editar(estado, nivel):
             raise ErrorMCP(
                 f"el proyecto está «{ESTADOS_PROYECTO_NOMBRE.get(estado, estado)}» "
-                f"y no admite cambios de {nivel}; el usuario puede volverlo a "
+                f"y no admite cambios de {_NOMBRE_NIVEL.get(nivel, nivel)}; el usuario puede volverlo a "
                 "«En elaboración» en la app")
 
     # ── Transacción con copia ────────────────────────────────────────────
@@ -243,6 +247,7 @@ class Operaciones:
         return {
             "project_id": project_id, "name": p['nombre'],
             "client": p.get('cliente') or '',
+            "modality": p.get('modalidad') or '',
             "location": p.get('ubicacion') or '', "state": est,
             "cost_date": p.get('costo_al') or '', "term_days": p.get('plazo'),
             "start_date": p.get('fecha_inicio') or '',
@@ -408,8 +413,10 @@ class Operaciones:
                    (("Gastos generales", 'gf'), ("Utilidad", 'utilidad'),
                     ("Subtotal", 'subtotal'), ("Impuesto", 'igv'))]
         else:
-            pie = [{"name": x['nombre'], "kind": x['tipo'], "pct": x['pct'],
-                    "value": x['valor']} for x in lineas]
+            pie = [{"name": x['nombre'], "kind": x['tipo'], "value": x['valor'],
+                    **({"effective_pct": round(100 * x['valor'] / t['cd'], 2)}
+                       if x['tipo'] == 'rubro' and t['cd'] else
+                       {"pct": x['pct']})} for x in lineas]
         return {"project_id": project_id, "currency": p.get('moneda') or 'Soles',
                 "direct_cost": t['cd'], "footer": pie, "total": t['total'],
                 "titles": [{"item_id": i['partida']['id'],
@@ -1041,7 +1048,8 @@ class Operaciones:
             conn.close()
         return {"project_id": project_id, "configured": guardadas, "lines": [
             {"code": x['codigo'], "name": x['nombre'], "kind": x['tipo'],
-             "pct": x['pct'] or 0, "active": bool(x['activo']),
+             **({} if x['codigo'] in fijos or x['codigo'] in detalle
+               else {"pct": x['pct'] or 0}), "active": bool(x['activo']),
              "show_pct": bool(x['mostrar_pct']),
              **({"amount": fijos[x['codigo']]} if x['codigo'] in fijos else {}),
              "has_detail": x['codigo'] in detalle} for x in lineas]}
@@ -1221,6 +1229,28 @@ class Operaciones:
                               for i in list(tocar)[:500] if i in tareas]}
         return self._escribir('set_schedule', project_id, 'cronograma', cambio)
 
+    def _niveles_de_forzar(self, conn, proy) -> set:
+        """Los permisos que pide lo que de verdad cambiaría al deshacer por
+        encima de ediciones posteriores. Vacío = la regla general, estricta."""
+        from core import historial
+        e = self.pila.ultima()[1]
+        if e['creado']:
+            return set()
+        ahora, antes = mcp_deshacer.volcar(conn, proy['id']), e['antes']
+        (viejo,) = historial._mapa(antes, 'proyectos').values()
+        if viejo.get('estado') != proy.get('estado'):
+            return set()
+        niveles = set()
+        for t, filas in historial.diferencias(ahora, antes).items():
+            if t == 'proyectos' and all(
+                    a and b and {c for c in a if a[c] != b.get(c)}
+                    <= {'memoria_descriptiva', 'modificado_en'}
+                    for a, b in filas.values()):
+                niveles.add('specs')
+            else:
+                niveles.add(historial.nivel_de({t: filas}) or 'obra')
+        return niveles
+
     def undo_last(self, force: bool = False):
         self._puede_escribir()
 
@@ -1229,6 +1259,10 @@ class Operaciones:
             conn = get_db()
             try:
                 proy = self._proyecto(conn, pid)
+                if force and (propios := self._niveles_de_forzar(conn, proy)):
+                    for nivel in sorted(propios):
+                        self._editable(proy, nivel)
+                    return
             finally:
                 conn.close()
             ult = self.pila.resumen() or {}
@@ -1253,7 +1287,7 @@ class Operaciones:
 
     # ── Especificaciones y memoria ───────────────────────────────────────
     def get_specs(self, project_id: int, item_ids: list | None = None,
-                  offset: int = 0, limit: int = 100):
+                  only_missing: bool = False, offset: int = 0, limit: int = 100):
         from core.database import get_db
         from core.textos_spec import a_texto
         conn = get_db()
@@ -1269,11 +1303,13 @@ class Operaciones:
             if malas:
                 raise ErrorMCP(f"no son partidas de este proyecto: {malas}")
             filas = [por_id[i] for i in dict.fromkeys(item_ids)]
-        total = len(filas)
         textos = [a_texto(p['especificaciones']) for p in filas]
         sin = sum(1 for t, n in textos if not t)
+        pares = [x for x in zip(filas, textos)
+                 if not (only_missing and x[1][0])]
+        total = len(pares)
         out = []
-        for p, (t, n) in list(zip(filas, textos))[
+        for p, (t, n) in pares[
                 0 if item_ids else offset:None if item_ids else offset + limit]:
             d = {"item_id": p['id'], "item": p['item'],
                  "description": p['descripcion'], "unit": p['unidad'] or '',
@@ -1288,7 +1324,9 @@ class Operaciones:
         """Lo escrito por el usuario no se pisa sin que lo pida."""
         from core.textos_spec import a_texto
         texto, imagenes = a_texto(anterior)
-        if texto and not replace:
+        resto = re.sub(r'<style.*?</style>|<[^>]*>|\s|&nbsp;', '', anterior or '',
+                       flags=re.S)
+        if (texto or resto) and not replace:
             raise ErrorMCP(f"{donde} ya tiene texto; léelo y pasa replace: true "
                            "para reemplazarlo")
         if imagenes and not discard_images:
@@ -1378,8 +1416,7 @@ class Operaciones:
                 rows.append({"description": f['descripcion'] or '',
                              "unit": f['unidad'] or '',
                              "quantity": f['cantidad'] or 0,
-                             "participation_pct": 100 if f['pct_participacion'] is None
-                             else f['pct_participacion'],
+                             "participation_pct": f['pct_participacion'] or 100,
                              "price": f['precio'] or 0})
             else:
                 rows.append({"group": True, "description": f['descripcion'] or ''})
@@ -1422,6 +1459,9 @@ class Operaciones:
                 if grupo and sobra:
                     raise ErrorMCP(f"rows[{n - 1}]: un grupo solo lleva "
                                    "description")
+                if r.get('participation_pct') == 0:   # el pie lee 0 como «sin dato»
+                    raise ErrorMCP(f"rows[{n - 1}]: con participation_pct 0 no "
+                                   "cuesta nada; quita la fila")
                 if not grupo and not {'quantity', 'price'} <= set(r):
                     raise ErrorMCP(f"rows[{n - 1}]: faltan quantity y price")
                 conn.execute(
@@ -1453,6 +1493,17 @@ class Operaciones:
         if f is None:
             raise ErrorMCP(f"no existe la fórmula {formula_id} (usa get_formula)")
         return f, todas
+
+    #: Monomios sin una fórmula de su proyecto: de versiones de una sola
+    #: fórmula, o de un proyecto duplicado.
+    _HUERFANOS = ("proyecto_id=? AND (formula_id IS NULL OR formula_id NOT IN "
+                  "(SELECT id FROM formulas f WHERE f.proyecto_id=?))")
+
+    @staticmethod
+    def _areas(per):
+        from core.indices_inei import listar_areas, serie_de
+        return [{"code": a['codigo'], "name": a['nombre']} for a in listar_areas(
+            serie=serie_de(per['oferta_anio'], per['oferta_mes']))]
 
     @staticmethod
     def _monomio(m):
@@ -1493,10 +1544,16 @@ class Operaciones:
         finally:
             conn.close()
         aplica, motivo = fp.aplica_formula(project_id)
+        per = fp.cargar_periodos(project_id)
         out = {"applies": aplica, "reason": motivo,
                "formulas": [{"formula_id": x['id'], "number": x['numero'],
                              "name": x['nombre']} for x in todas],
-               "periods": fp.cargar_periodos(project_id), "monomials": [],
+               "periods": {"base_year": per['oferta_anio'],
+                           "base_month": per['oferta_mes'],
+                           "adjust_year": per['reajuste_anio'],
+                           "adjust_month": per['reajuste_mes'],
+                           "area": per['area_inei']},
+               "areas": self._areas(per), "monomials": [],
                "k": None}
         if f is not None:
             comps = fp.cargar_componentes(project_id, formula_id=f['id'])
@@ -1523,6 +1580,20 @@ class Operaciones:
              "incidence": round(i['incidencia'], 6),
              "all_assigned": i['tipo'] == 'GU' or i['asignado']}
             for i in inc['ius']]
+        out["resources_without_index"] = [
+            {"resource_id": x['recurso_id'], "description": x['descripcion'],
+             "assumed_index": x['supuesto'], "amount": round(x['monto'], 2)}
+            for x in sorted(inc.get('sin_asignar') or [],
+                            key=lambda x: -x['monto'])[:20]]
+        if f is None:
+            conn = get_db()
+            try:
+                viejos = [dict(r) for r in conn.execute(
+                    f"SELECT * FROM formula_monomios WHERE {self._HUERFANOS} "
+                    "ORDER BY orden", (project_id, project_id))]
+            finally:
+                conn.close()
+            out["monomials"] = [self._monomio(m) for m in viejos]
         return out
 
     def _armar_formula(self, project_id, formula_id, monomials):
@@ -1587,6 +1658,9 @@ class Operaciones:
             proy = self._proyecto(conn, project_id)
             self._editable(proy, 'pie')
             f, _todas = self._formula_lista(conn, project_id, formula_id)
+            huerfanos = conn.execute(
+                f"SELECT COUNT(*) FROM formula_monomios WHERE {self._HUERFANOS}",
+                (project_id, project_id)).fetchone()[0]
         finally:
             conn.close()
         aplica, motivo = fp.aplica_formula(project_id)
@@ -1596,7 +1670,28 @@ class Operaciones:
         if periods and preview:
             raise ErrorMCP("preview no admite periods: los coeficientes se "
                            "enseñan con los períodos guardados")
-        tiene = bool(f and fp.cargar_monomios(project_id, fid))
+        per = dict(fp.cargar_periodos(project_id))
+        for k, col in (('base_year', 'oferta_anio'), ('base_month', 'oferta_mes'),
+                       ('adjust_year', 'reajuste_anio'),
+                       ('adjust_month', 'reajuste_mes'), ('area', 'area_inei')):
+            if k in (periods or {}):
+                per[col] = periods[k]
+        if periods:
+            if (per['reajuste_anio'], per['reajuste_mes']) < (
+                    per['oferta_anio'], per['oferta_mes']):
+                raise ErrorMCP("el período de reajuste es anterior al base")
+            areas = self._areas(per)
+            if per['area_inei'] not in [a['code'] for a in areas]:
+                raise ErrorMCP("área INEI no válida; hay: " + "; ".join(
+                    f"{a['code']} {a['name']}" for a in areas))
+        tiene = bool(f and fp.cargar_monomios(project_id, fid)) or (
+            f is None and huerfanos > 0)
+        # Cambiar el mes de reajuste no rehace los monomios.
+        if periods and f and tiene and monomials is None and not replace:
+            def solo_periodos():
+                fp.guardar_periodos(project_id, **per)
+                return {"formula_id": fid, "saved": True, "periods_only": True}
+            return self._externa('set_formula', project_id, solo_periodos, 'pie')
         if not preview and tiene and not replace:
             raise ErrorMCP("la fórmula ya tiene monomios; pasa replace: true "
                            "para reemplazarla")
@@ -1613,18 +1708,18 @@ class Operaciones:
         def accion():
             nonlocal fid
             if periods:
-                p = dict(fp.cargar_periodos(project_id))
-                for k, col in (('base_year', 'oferta_anio'),
-                               ('base_month', 'oferta_mes'),
-                               ('adjust_year', 'reajuste_anio'),
-                               ('adjust_month', 'reajuste_mes'),
-                               ('area', 'area_inei')):
-                    if k in periods:
-                        p[col] = periods[k]
-                fp.guardar_periodos(project_id, **p)
+                fp.guardar_periodos(project_id, **per)
             if fid is None:
                 fid = fp.formula_por_defecto(project_id)
             mons, sin, base = self._armar_formula(project_id, fid, monomials)
+            conn = get_db()
+            try:
+                for t in ('formula_monomios', 'formula_monomio_iu'):
+                    conn.execute(f"DELETE FROM {t} WHERE {self._HUERFANOS}",
+                                 (project_id, project_id))
+                conn.commit()
+            finally:
+                conn.close()
             fp.guardar_monomios(project_id, mons, fid)
             return dict(responder(mons, sin, base), saved=True)
         return self._externa('set_formula', project_id, accion, 'pie')
@@ -1674,13 +1769,14 @@ class Operaciones:
                                            'calendar_month': 'mes_cal'}[period])
         return {"period": period, "unit": r['unidad'],
                 "total": r['total_general'], "start_date": r['fecha_inicio'],
-                "rows": [{"label": x['label'], "planned_pct": x['p_eje'],
+                "rows": [{k: round(v, 4) if isinstance(v, float) else v
+                          for k, v in {"label": x['label'], "planned_pct": x['p_eje'],
                           "planned_accum_pct": x['p_acu'],
                           "planned_amount": x['p_mon'],
                           "replanned_accum_pct": x['r_acu'],
                           "real_pct": x['x_eje'], "real_accum_pct": x['x_acu'],
                           "real_amount": x['x_mon'],
-                          "deviation_pct": x['desviacion']}
+                          "deviation_pct": x['desviacion']}.items()}
                          for x in r['filas']]}
 
     # ── Valorizaciones ───────────────────────────────────────────────────
@@ -1697,9 +1793,10 @@ class Operaciones:
 
     @staticmethod
     def _resumen_val(r):
-        return {"base": r['base_val'], "previous": r['ant_val'],
-                "current": r['act_val'], "accumulated": r['acu_val'],
-                "balance": r['sal_val'], "progress_pct": round(r['pct_fisico'], 4)}
+        return {k: round(r[c], 4) for k, c in (
+            ("base", 'base_val'), ("previous", 'ant_val'), ("current", 'act_val'),
+            ("accumulated", 'acu_val'), ("balance", 'sal_val'),
+            ("progress_pct", 'pct_fisico'))}
 
     def list_valuations(self, project_id: int):
         from core import valorizacion as V
@@ -1764,11 +1861,9 @@ class Operaciones:
         finally:
             conn.close()
         for v in V.listar_valorizaciones(project_id):
-            if v['periodo_desde'] and v['periodo_hasta'] \
-                    and v['periodo_desde'] <= to_date \
-                    and v['periodo_hasta'] >= from_date:
-                raise ErrorMCP(f"el período se cruza con la valorización "
-                               f"{v['numero']} ({v['periodo_desde']} a "
+            if (v['periodo_hasta'] or '') >= from_date:
+                raise ErrorMCP(f"el período se cruza o es anterior a la "
+                               f"valorización {v['numero']} ({v['periodo_desde']} a "
                                f"{v['periodo_hasta']})")
 
         def accion():
@@ -1799,9 +1894,11 @@ class Operaciones:
             vistos, exceso = set(), []
             for n, x in enumerate(items):
                 p = por_id.get(x['item_id'])
-                if p is None or p['es_titulo']:
+                if p is None:
                     raise ErrorMCP(f"items[{n}]: {x['item_id']} no es una partida "
                                    "de este proyecto")
+                if p['es_titulo']:
+                    raise ErrorMCP(f"items[{n}]: {p['item']} es un título")
                 if p['id'] in vistos:
                     raise ErrorMCP(f"items[{n}]: la partida se repite")
                 if p['id'] in diario:
@@ -1889,6 +1986,8 @@ class Operaciones:
                       'acus': exporter.exportar_acus,
                       'metrados': exporter.exportar_metrados,
                       'gastos_generales': exporter.exportar_gastos_generales,
+                      'formula_polinomica':
+                          exporter.exportar_formula_polinomica,
                       'completo': exporter.exportar_reporte_completo}[report]
                 Path(tmp).write_bytes(fn(project_id).getvalue())
             tam = os.path.getsize(tmp)

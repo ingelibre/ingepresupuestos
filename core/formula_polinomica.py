@@ -166,11 +166,12 @@ MAX_FORMULAS = 4
 MAX_FORMULAS_DIVERSA = 8
 
 
-def listar_formulas(proyecto_id: int) -> list[dict]:
+def listar_formulas(proyecto_id: int, crear: bool = True) -> list[dict]:
     """Las fórmulas polinómicas del proyecto, con sus subpresupuestos.
 
     Siempre hay al menos una: si el proyecto no tiene ninguna se crea la
-    primera, para que todo lo demás pueda referirse a ella.
+    primera, para que todo lo demás pueda referirse a ella. Con `crear=False`
+    solo se lee (salvo adoptar monomios de antes de que hubiera fórmulas).
     """
     conn = get_db()
     try:
@@ -178,7 +179,9 @@ def listar_formulas(proyecto_id: int) -> list[dict]:
             "SELECT * FROM formulas WHERE proyecto_id=? ORDER BY numero",
             (proyecto_id,)
         ).fetchall()
-        if not rows:
+        if not rows and (crear or conn.execute(
+                "SELECT 1 FROM formula_monomios WHERE proyecto_id=? "
+                "AND formula_id IS NULL", (proyecto_id,)).fetchone()):
             conn.execute(
                 "INSERT INTO formulas (proyecto_id, numero, nombre) "
                 "VALUES (?,1,'Fórmula 01')", (proyecto_id,)
@@ -337,7 +340,7 @@ def reajuste_de_valorizacion(proyecto_id: int, anio: int, mes: int,
     if not ok:
         return {**vacio, 'motivo': motivo}
 
-    formulas = listar_formulas(proyecto_id)
+    formulas = listar_formulas(proyecto_id, crear=False)
     per = cargar_periodos(proyecto_id)
     detalle = []
     total_reajuste = 0.0
@@ -404,7 +407,7 @@ def _subs_de_formula(proyecto_id: int, formula_id: int | None) -> list:
     """
     if formula_id is None:
         return []
-    return [s['id'] for f in listar_formulas(proyecto_id)
+    return [s['id'] for f in listar_formulas(proyecto_id, crear=False)
             if f['id'] == formula_id for s in f['subpresupuestos']]
 
 
@@ -414,8 +417,9 @@ def _partidas_de_formula(conn, proyecto_id: int, subs: list) -> list[int]:
         marcas = ','.join('?' * len(subs))
         filas = conn.execute(
             f"SELECT id FROM partidas_ppto WHERE proyecto_id=? AND es_titulo=0 "
-            f"AND sub_presupuesto_id IN ({marcas})",
-            [proyecto_id, *subs]
+            f"AND (sub_presupuesto_id IN ({marcas}) "
+            f"OR (sub_presupuesto_id IS NULL AND ?))",
+            [proyecto_id, *subs, None in subs]
         ).fetchall()
     else:
         filas = conn.execute(
@@ -557,6 +561,7 @@ def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
 
     acum: dict[str, dict] = {}
     sin_indice = 0.0
+    sin_asignar: list[dict] = []
     for ins in insumos:
         monto = ins.get('parcial_total') or 0
         if not monto:
@@ -567,6 +572,9 @@ def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
         if not asignado:
             cod = INEI_DEFAULT.get(tipo, '39')
             sin_indice += monto
+            sin_asignar.append({'recurso_id': ins['recurso_id'],
+                                'descripcion': ins.get('descripcion') or '',
+                                'supuesto': cod, 'monto': monto})
         a = acum.setdefault(cod, {
             'codigo': cod, 'monto': 0.0, 'n_insumos': 0,
             'por_tipo': {}, 'monto_asignado': 0.0,
@@ -623,6 +631,7 @@ def incidencias_por_iu(proyecto_id: int, serie: str | None = None,
     ius.sort(key=lambda x: -x['monto'])
     return {'ok': True, 'msg': '', 'cd': cd, 'base': base, 'ius': ius,
             'serie': serie, 'gg_utilidad': gg_util,
+            'sin_asignar': sin_asignar,
             'monto_sin_indice': sin_indice}
 
 

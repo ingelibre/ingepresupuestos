@@ -12,13 +12,16 @@ from html.parser import HTMLParser
 
 def es_html(contenido: str) -> bool:
     c = (contenido or '').lstrip()
-    return c.startswith('<') or bool(re.search(r'</|<p\b|<body', c, re.I))
+    return bool(re.match(r'<[a-z!]', c, re.I)
+                or re.search(r'</(p|div|span|body|table|b|li)>', c, re.I))
 
 
 def a_html(texto: str) -> str:
     """Texto plano → HTML del editor: los títulos de sección («1. DESCRIPCIÓN»
     o una línea en mayúsculas) en negrita, lo demás justificado."""
     partes = []
+    # Word y PDF no admiten caracteres de control.
+    texto = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]', '', texto)
     for linea in texto.split('\n'):
         linea = linea.strip()
         escapada = html.escape(linea)
@@ -47,7 +50,9 @@ class _Extractor(HTMLParser):
         self._dentro = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in self._FUERA:
+        if tag == 'body':              # </head> es opcional en HTML
+            self._dentro = 0
+        elif tag in self._FUERA:
             self._dentro += 1
         elif tag == 'br':
             self.out.append('\n')

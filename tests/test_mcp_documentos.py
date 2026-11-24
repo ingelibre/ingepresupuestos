@@ -75,7 +75,7 @@ def test_especificaciones_y_memoria_siguen_el_estado(obra):
     obra.undo_last()
     assert not obra.get_memoria(pid)["text"] and obra.get_specs(pid)["without_spec"] == 3
     estado(pid, 'aprobado')
-    with pytest.raises(ErrorMCP, match="specs"):
+    with pytest.raises(ErrorMCP, match="especificaciones"):
         obra.set_specs(pid, [{"item_id": i["x"], "text": TXT}])
 
 
@@ -217,3 +217,129 @@ def test_word(obra, tmp_path):
     assert any("curado" in p.text for p in Document(f).paragraphs)
     with pytest.raises(ErrorMCP, match="Word"):
         obra.export_report(obra.pid, "acus", str(tmp_path / "a.docx"))
+
+
+# ── Hallazgos de la revisión ─────────────────────────────────────────────────
+def test_leer_valorizaciones_no_escribe_y_se_deshace(obra):
+    pid = obra.pid
+    sql("UPDATE proyectos SET modalidad='Contrata', estado='ejecutado' WHERE id=?", pid)
+    sql("DELETE FROM formulas WHERE proyecto_id=?", pid)
+    v = obra.create_valuation(pid, "2026-01-01", "2026-01-31")["valuation_id"]
+    obra.list_valuations(pid), obra.get_valuation(v), obra.s_curve(pid)
+    obra.set_valuation_progress(v, [{"item_id": obra.i["x"], "quantity": 1}])
+    obra.undo_last()
+    obra.undo_last()
+    assert not obra.list_valuations(pid)["valuations"]
+    assert not sql("SELECT 1 FROM formulas WHERE proyecto_id=?", pid)
+
+
+def test_las_valorizaciones_van_en_orden(obra):
+    estado(obra.pid, 'ejecutado')
+    obra.create_valuation(obra.pid, "2026-02-01", "2026-02-28")
+    with pytest.raises(ErrorMCP, match="anterior"):
+        obra.create_valuation(obra.pid, "2025-12-01", "2025-12-31")
+
+
+def test_forzar_deshacer_pide_lo_que_de_verdad_cambia(obra):
+    pid, i = obra.pid, obra.i
+    estado(pid, 'revision')
+    obra.set_specs(pid, [{"item_id": i["x"], "text": "a"}])
+    sql("UPDATE partidas SET especificaciones='b' WHERE id=?", i["y"])
+    with pytest.raises(ErrorMCP, match="editó después"):
+        obra.undo_last()
+    obra.undo_last(force=True)
+    obra.set_specs(pid, [{"item_id": i["x"], "text": "a"}])
+    sql("UPDATE partidas SET metrado=metrado+1 WHERE id=?", i["y"])
+    with pytest.raises(ErrorMCP, match="presupuesto"):
+        obra.undo_last(force=True)
+    sql("UPDATE partidas SET metrado=metrado-1 WHERE id=?", i["y"])
+    estado(pid, 'ejecutado')                  # no se vuelve el estado atrás
+    with pytest.raises(ErrorMCP):
+        obra.undo_last(force=True)
+
+
+def test_forzar_deshacer_una_valorizacion(obra):
+    estado(obra.pid, 'ejecutado')
+    v = obra.create_valuation(obra.pid, "2026-01-01", "2026-01-31")["valuation_id"]
+    sql("UPDATE valorizaciones SET periodo_hasta='2026-01-30' WHERE id=?", v)
+    obra.undo_last(force=True)
+    assert not obra.list_valuations(obra.pid)["valuations"]
+
+
+def test_cambiar_solo_los_periodos_respeta_los_monomios(ops):
+    inc = [x["code"] for x in con_costos(ops) if x["code"] != "GU"]
+    ops.set_formula(PID, monomials=[{"index_codes": inc, "symbol": "Z"}])
+    g = ops.get_formula(PID)["monomials"]
+    r = ops.set_formula(PID, periods={"adjust_year": 2090, "adjust_month": 9})
+    assert r["periods_only"] and ops.get_formula(PID)["monomials"] == g
+    assert ops.get_formula(PID)["periods"]["adjust_month"] == 9
+    with pytest.raises(ErrorMCP, match="área"):
+        ops.set_formula(PID, periods={"area": "99"})
+    with pytest.raises(ErrorMCP, match="anterior"):
+        ops.set_formula(PID, periods={"adjust_year": 1990})
+
+
+@pytest.mark.parametrize("fid", [None, 999999])
+def test_monomios_sin_formula_no_se_pisan_ni_se_duplican(ops, fid):
+    con_costos(ops)
+    sql("DELETE FROM formulas WHERE proyecto_id=?", PID)
+    sql("INSERT INTO formula_monomios (proyecto_id, formula_id, orden, simbolo, "
+        "descripcion, indice_inei, coeficiente) VALUES (?,?,0,'V','v','47',1)", PID, fid)
+    assert ops.get_formula(PID)["monomials"][0]["symbol"] == "V"
+    with pytest.raises(ErrorMCP, match="replace"):
+        ops.set_formula(PID)
+    ops.set_formula(PID, replace=True)
+    assert abs(sql("SELECT SUM(coeficiente) FROM formula_monomios WHERE "
+                   "proyecto_id=?", PID)[0][0] - 1) < 1e-9
+
+
+def test_insumos_sin_indice(ops):
+    con_costos(ops)
+    sql("UPDATE recursos SET indice_inei='' WHERE tipo='MAT'")
+    r = ops.get_formula(PID)["resources_without_index"]
+    assert r and r[0]["amount"] >= r[-1]["amount"]
+
+
+def test_textos_raros(obra, tmp_path):
+    pid, i = obra.pid, obra.i["x"]
+    obra.set_specs(pid, [{"item_id": i, "text": "a\x0bb\x00c"}])
+    obra.export_report(pid, "especificaciones", str(tmp_path / "e.docx"))
+    for guardado in ("<html><head><meta charset='x'><body><p>hola</p>",
+                     "<style>p{}<p>hola</p>", "Resistencia <p 5 MPa"):
+        sql("UPDATE partidas SET especificaciones=? WHERE id=?", guardado, i)
+        with pytest.raises(ErrorMCP, match="replace"):
+            obra.set_specs(pid, [{"item_id": i, "text": "b"}])
+    assert a_texto("Resistencia <p 5 MPa") == ("Resistencia <p 5 MPa", 0)
+    assert obra.get_specs(pid, only_missing=True)["total"] == 2
+
+
+def test_participacion_cero(obra):
+    obra.set_footer(obra.pid, [
+        {"code": "GG", "name": "GG", "kind": "rubro", "pct": 10}])
+    with pytest.raises(ErrorMCP, match="participation"):
+        obra.set_overhead(obra.pid, [{"description": "a", "quantity": 2, "price": 1,
+                                      "participation_pct": 0}])
+
+
+def test_exportar_la_formula(ops, tmp_path):
+    con_costos(ops)
+    ops.set_formula(PID)
+    for ext in ("pdf", "xlsx"):
+        ops.export_report(PID, "formula_polinomica", str(tmp_path / f"f.{ext}"))
+
+
+def test_la_vista_de_la_formula(ops):
+    """Abrirla no escribe; editar una celda la marca sin guardar."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from views.formula_view import FormulaView
+    con_costos(ops)
+    sql("DELETE FROM formula_periodos WHERE proyecto_id=?", PID)
+    ops.set_formula(PID)
+    h = huella()
+    v = FormulaView(PID)
+    v.cargar()
+    assert huella() == h and not v._sucio
+    v.tbl.item(0, 2).setText("MI TEXTO")
+    assert v._sucio
+    v.deleteLater()
