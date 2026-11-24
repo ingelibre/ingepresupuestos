@@ -262,7 +262,10 @@ def escribir(paq: Paquete, destino: Path) -> None:
 
 def empaquetar(carpeta, destino) -> Path:
     """Carpeta → .zip instalable (reproducible: mismas fechas y orden)."""
-    paq = leer_carpeta(carpeta)
+    return escribir_zip(leer_carpeta(carpeta), destino)
+
+
+def escribir_zip(paq: Paquete, destino) -> Path:
     destino = Path(destino)
     with zipfile.ZipFile(destino, 'w', zipfile.ZIP_DEFLATED) as zf:
         for rel in sorted(paq.archivos):

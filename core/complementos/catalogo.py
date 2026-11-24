@@ -2,27 +2,28 @@
 # Copyright (C) 2026 Marco Sumari
 # This file is part of IngePresupuestos — https://ingepresupuestos.com
 # Software libre bajo la GNU GPL v3 o posterior. Ver el archivo LICENSE.
-"""El catálogo de complementos del repositorio. Sin Qt. Es lo ÚNICO de los
-complementos que usa la red.
+"""El catálogo de complementos que publican los usuarios. Sin Qt. Es lo ÚNICO
+de los complementos que usa la red.
 
     <repositorio>/catalogo.json     {"formato": 1, "complementos": [
-                                       {"id", "version", "sha256", "api"}]}
-    <repositorio>/zips/<id>-<version>.zip
+        {"ficha", "repositorio", "descarga", "sha256", "huella", "revisado"}]}
 
-Sincronizar solo copia los .zip a `complementos/catalogo/` y comprueba su
-huella: no instala, no activa y no ejecuta nada. Se ofrecen en «Explorar» y
-se instalan como cualquier otro, apagados y con el consentimiento de siempre.
-No se envía ningún dato del usuario.
+Es un directorio, no una tienda: cada .zip está en el repositorio de su autor y
+solo se descarga, a `complementos/catalogo/` y comprobando su huella, cuando el
+usuario lo pide. Sincronizar solo trae la lista. Nada se instala, se activa ni se
+ejecuta aquí, y no se envía ningún dato del usuario.
 """
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -33,11 +34,17 @@ from core.complementos.paquete import ErrorPaquete, Paquete
 URL = ('https://raw.githubusercontent.com/ingelibre/'
        'ingepresupuestos-complementos/main/')
 ESPERA = 15
-MAX_CATALOGO = 1_000_000
-MAX_ENTRADAS = 200
-MAX_DESCARGA = 60_000_000        # de una vez; lo que falte, en la siguiente
+MAX_CATALOGO = 4_000_000
+MAX_ENTRADAS = 1000
 HORAS = 24
 _SHA = re.compile(r'[0-9a-f]{64}')
+_HTTPS = re.compile(r'https://[A-Za-z0-9.-]+/[!-~]{1,400}')
+_REPO = re.compile(r'https://github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9._-]{1,100}?)'
+                   r'(?:\.git)?/?')
+#: Lo que hace falta para la tarjeta; lo demás llega con el .zip.
+CAMPOS_FICHA = ('esquema', 'id', 'nombre', 'version', 'autor', 'licencia',
+                'descripcion', 'web', 'api_version', 'codigo', 'categorias',
+                'traducciones')
 
 
 def carpeta() -> Path:
@@ -50,7 +57,7 @@ def disponible() -> bool:
     return not es_msix()
 
 
-def _pedir(ruta: str, tope: int) -> bytes:
+def _pedir(url: str, tope: int) -> bytes:
     import ssl
     try:
         import certifi
@@ -59,16 +66,17 @@ def _pedir(ruta: str, tope: int) -> bytes:
         tls = ssl.create_default_context()
     try:
         with urllib.request.urlopen(
-                urllib.request.Request(URL + ruta, headers={
+                urllib.request.Request(url, headers={
                     'User-Agent': 'IngePresupuestos'}),
                 timeout=ESPERA, context=tls) as r:
             if not r.geturl().startswith('https://'):
                 raise ErrorGestor("la descarga no es segura (https)")
             b = r.read(tope + 1)
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        raise ErrorGestor(f"no se pudo descargar {ruta} ({e})") from None
+    except (urllib.error.URLError, http.client.HTTPException, OSError,
+            ValueError) as e:
+        raise ErrorGestor(f"no se pudo descargar {url} ({e})") from None
     if len(b) > tope:
-        raise ErrorGestor(f"{ruta}: demasiado grande")
+        raise ErrorGestor(f"{url}: demasiado grande")
     return b
 
 
@@ -84,20 +92,26 @@ def leer_catalogo(b: bytes) -> list[dict]:
     from ingepresupuestos.api import API_VERSION
     out = {}
     for x in d['complementos'][:MAX_ENTRADAS]:
-        if not isinstance(x, dict):
+        if not isinstance(x, dict) or not isinstance(x.get('ficha'), dict):
             continue
-        id_, v, sha, pide = (x.get(k) for k in ('id', 'version', 'sha256', 'api'))
-        if (isinstance(id_, str) and esquema.RE_ID.fullmatch(id_)
-                and isinstance(v, str) and re.fullmatch(r'[0-9A-Za-z.+-]{1,32}', v)
-                and isinstance(sha, str) and _SHA.fullmatch(sha)
-                and type(pide) is int and pide <= API_VERSION):
-            out[id_] = {'id': id_, 'version': v, 'sha256': sha, 'api': pide}
+        try:
+            m = esquema.validar({k: x['ficha'][k] for k in CAMPOS_FICHA
+                                 if k in x['ficha']})
+        except esquema.ErrorEsquema:
+            continue
+        if ((m['api_version'] or 1) <= API_VERSION
+                and all(isinstance(x.get(k), str) and r.fullmatch(x[k]) for k, r in (
+                    ('descarga', _HTTPS), ('repositorio', _HTTPS),
+                    ('sha256', _SHA), ('huella', _SHA)))):
+            out[m['id']] = {
+                'ficha': m, 'revisado': x.get('revisado') is True,
+                **{k: x[k] for k in ('descarga', 'repositorio', 'sha256', 'huella')}}
     return list(out.values())
 
 
 def _zip(x: dict) -> Path:
     # La huella va en el nombre: nunca se confunde con otra copia.
-    return carpeta() / f"{x['id']}-{x['sha256'][:16]}.zip"
+    return carpeta() / f"{x['ficha']['id']}-{x['sha256'][:16]}.zip"
 
 
 def _comprobado(x: dict) -> Paquete:
@@ -111,7 +125,8 @@ def _comprobado(x: dict) -> Paquete:
     except OSError as e:
         raise ErrorPaquete(str(e)) from None
     p = paquete.leer_zip(f)
-    if (p.id, p.manifiesto['version']) != (x['id'], x['version']):
+    if p.huella != x['huella'] or any(
+            p.manifiesto[k] != v for k, v in x['ficha'].items() if k in CAMPOS_FICHA):
         raise ErrorPaquete("no es lo que dice el catálogo")
     return p
 
@@ -123,15 +138,45 @@ def _guardadas() -> list[dict]:
         return []
 
 
-def ofrecidos() -> list[tuple[Path, Paquete]]:
-    """Lo ya sincronizado, sin red."""
+def ofrecidos() -> list[tuple[dict, Paquete]]:
+    """La lista ya sincronizada, sin red. Lo que no se ha descargado es un
+    paquete sin archivos: sirve para la tarjeta, no para instalar."""
     out = []
     for x in _guardadas():
         try:
-            out.append((_zip(x), _comprobado(x)))
+            out.append((x, _comprobado(x)))
         except ErrorPaquete:
-            continue
+            out.append((x, Paquete(x['ficha'], {}, x['huella'])))
     return out
+
+
+def revisados() -> set[str]:
+    """Las huellas que leyó alguien del proyecto: de ESE contenido exacto."""
+    return {x['huella'] for x in _guardadas() if x['revisado']}
+
+
+def descargar(x: dict) -> Path:
+    """El .zip de su autor, comprobado. No lo instala."""
+    if not disponible():
+        raise ErrorGestor("los complementos se actualizan con el programa")
+    f = _zip(x)
+    try:
+        _comprobado(x)
+        return f
+    except ErrorPaquete:
+        pass
+    z = _pedir(x['descarga'], paquete.MAX_ZIP)
+    if hashlib.sha256(z).hexdigest() != x['sha256']:
+        raise ErrorGestor("el archivo del autor no es el que se publicó en el "
+                          "catálogo (cambió su huella): no se instala")
+    try:
+        carpeta().mkdir(parents=True, exist_ok=True, mode=0o700)
+        _escribir(f, z)
+        _comprobado(x)
+    except (OSError, ErrorPaquete) as e:
+        f.unlink(missing_ok=True)
+        raise ErrorGestor(str(e)) from None
+    return f
 
 
 def toca() -> bool:
@@ -153,36 +198,15 @@ def _escribir(destino: Path, b: bytes) -> None:
         raise
 
 
-def sincronizar(seguir=lambda: True) -> dict:
-    """{'nuevos': [id], 'fallos': [texto]}. `seguir()` falso = dejarlo."""
+def sincronizar() -> int:
+    """Trae la lista. Cuántos complementos o versiones son nuevos."""
     if not disponible():
         raise ErrorGestor("los complementos se actualizan con el programa")
-    b = _pedir('catalogo.json', MAX_CATALOGO)
+    antes = {x['sha256'] for x in _guardadas()}
+    b = _pedir(URL + 'catalogo.json', MAX_CATALOGO)
     entradas = leer_catalogo(b)
-    res, bajado = {'nuevos': [], 'fallos': []}, 0
     try:
         carpeta().mkdir(parents=True, exist_ok=True, mode=0o700)
-        for x in entradas:
-            if not seguir():
-                return res
-            try:
-                _comprobado(x)
-                continue
-            except ErrorPaquete:
-                pass
-            if bajado > MAX_DESCARGA:
-                break
-            try:
-                z = _pedir(f"zips/{x['id']}-{x['version']}.zip", paquete.MAX_ZIP)
-                bajado += len(z)
-                if hashlib.sha256(z).hexdigest() != x['sha256']:
-                    raise ErrorPaquete("la huella no es la del catálogo")
-                _escribir(_zip(x), z)
-                _comprobado(x)
-                res['nuevos'].append(x['id'])
-            except (ErrorGestor, ErrorPaquete) as e:
-                _zip(x).unlink(missing_ok=True)
-                res['fallos'].append(f"{x['id']}: {e}")
         _escribir(carpeta() / 'catalogo.json', b)
         vigentes = {_zip(x).name for x in entradas}
         for f in carpeta().glob('*.zip'):
@@ -190,34 +214,32 @@ def sincronizar(seguir=lambda: True) -> dict:
                 f.unlink(missing_ok=True)
     except OSError as e:
         raise ErrorGestor(f"no se pudo guardar ({e})") from None
-    return res
+    return len({x['sha256'] for x in entradas} - antes)
 
 
-def publicar(origen, destino) -> int:
-    """Para quien mantiene el repositorio: carpetas de complementos → catálogo."""
-    destino = Path(destino)
-    (destino / 'zips').mkdir(parents=True, exist_ok=True)
-    entradas = []
-    for d in sorted(Path(origen).iterdir()):
-        if not (d / esquema.ARCHIVO).is_file():
-            continue
-        p = paquete.leer_carpeta(d)
-        m = p.manifiesto
-        z = destino / 'zips' / f"{p.id}-{m['version']}.zip"
-        nuevo = destino / 'zips' / f".{p.id}.zip"
-        paquete.empaquetar(d, nuevo)
-        # La misma versión es siempre el mismo contenido.
-        if z.exists() and paquete.leer_zip(z).huella != p.huella:
-            nuevo.unlink()
-            raise ErrorGestor(f"{p.id}: cambió sin subir la versión {m['version']}")
-        if z.exists():
-            nuevo.unlink()
-        else:
-            os.replace(nuevo, z)
-        entradas.append({'id': p.id, 'version': m['version'],
-                         'sha256': hashlib.sha256(z.read_bytes()).hexdigest(),
-                         'api': m['api_version'] or 1})
-    (destino / 'catalogo.json').write_text(
-        json.dumps({'formato': 1, 'complementos': entradas}, ensure_ascii=False,
-                   indent=1) + '\n', encoding='utf-8')
-    return len(entradas)
+# ── Publicar el propio ───────────────────────────────────────────────────────
+
+REPOSITORIO = 'https://github.com/ingelibre/ingepresupuestos-complementos'
+
+
+def publicacion(p: Paquete, repositorio: str, zip_: Path) -> dict:
+    """{'descarga', 'ficha', 'pagina'}: lo que el autor manda al catálogo."""
+    r = _REPO.fullmatch(repositorio.strip())
+    if not r:
+        raise ErrorGestor("la dirección debe ser https://github.com/cuenta/repositorio")
+    cuenta, repo = r.groups()
+    v = p.manifiesto['version']
+    repositorio = f'https://github.com/{cuenta}/{repo}'
+    descarga = f"{repositorio}/releases/download/v{v}/{p.id}-{v}.zip"
+    ficha = "\n".join(f'{k} = "{t}"' for k, t in (
+        ('id', p.id), ('cuenta', cuenta), ('repositorio', repositorio),
+        ('descarga', descarga),
+        ('sha256', hashlib.sha256(zip_.read_bytes()).hexdigest()))) + "\n"
+    if any(x['ficha']['id'] == p.id for x in _guardadas()):
+        pagina = f'{REPOSITORIO}/edit/main/fichas/{p.id}.toml'
+    else:
+        pagina = f'{REPOSITORIO}/new/main/fichas?' + urllib.parse.urlencode(
+            {'filename': f'{p.id}.toml', 'value': ficha})
+    return {'descarga': descarga, 'ficha': ficha, 'pagina': pagina,
+            'version': f"{repositorio}/releases/new?"
+                       + urllib.parse.urlencode({'tag': f'v{v}', 'title': f'v{v}'})}

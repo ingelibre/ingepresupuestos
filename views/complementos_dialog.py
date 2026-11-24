@@ -167,7 +167,7 @@ class DetallesDialog(QDialog):
 class ConsentimientoDialog(QDialog):
     """Antes de activar: quién lo hizo, qué trae y qué puede hacer."""
 
-    def __init__(self, info: gestor.Info, parent=None):
+    def __init__(self, info: gestor.Info, parent=None, revisado=False):
         super().__init__(parent)
         self.info = info
         self.setWindowTitle(tr("Activar «{nombre}»").format(nombre=info.nombre))
@@ -182,6 +182,11 @@ class ConsentimientoDialog(QDialog):
                "mismo que el programa: leer y cambiar todos tus proyectos, tus "
                "archivos y conectarse a internet. Actívalo solo si confías en "
                "su autor. IngePresupuestos no lo ha revisado.")
+            if con_codigo and not revisado else
+            tr("Este complemento contiene código. Al activarlo puede hacer lo "
+               "mismo que el programa: leer y cambiar todos tus proyectos, tus "
+               "archivos y conectarse a internet. Alguien de IngePresupuestos "
+               "leyó este archivo, pero eso no es una garantía.")
             if con_codigo else
             tr("Este complemento solo trae datos: no ejecuta nada."))
         txt.setTextFormat(Qt.PlainText)
@@ -225,6 +230,91 @@ class ConsentimientoDialog(QDialog):
 
     def _listo(self, *_):
         self.btn.setEnabled(all(c.isChecked() for c in self.chks))
+
+
+class PublicarDialog(QDialog):
+    """Guía para publicar el propio. No sube nada: prepara el .zip y la ficha y
+    abre las páginas de GitHub, donde el autor decide."""
+
+    def __init__(self, info: gestor.Info, parent=None):
+        super().__init__(parent)
+        self.p, self._zip = info.paquete, None
+        m = self.p.manifiesto
+        self.setWindowTitle(tr("Publicar «{nombre}»").format(nombre=info.nombre))
+        self.setWindowModality(Qt.WindowModal)
+        self.resize(640, 460)
+        vl = QVBoxLayout(self)
+        vl.setContentsMargins(20, 18, 20, 16)
+        vl.setSpacing(8)
+        v, archivo = m['version'], f"{self.p.id}-{m['version']}.zip"
+
+        def texto(t):
+            w = QLabel(t)
+            w.setTextFormat(Qt.PlainText)
+            w.setWordWrap(True)
+            vl.addWidget(w)
+        texto(tr("Tu complemento se queda en tu propio repositorio. El catálogo solo "
+                 "guarda una ficha con su dirección y su huella. Licencia declarada: "
+                 "{licencia}; tiene que ser libre.").format(licencia=m['licencia']))
+        texto(tr("1. Escribe la dirección de tu repositorio público de GitHub."))
+        self.repo = QLineEdit()
+        self.repo.setPlaceholderText("https://github.com/cuenta/repositorio")
+        self.repo.setStyleSheet(input_default())
+        vl.addWidget(self.repo)
+        texto(tr("2. Guarda el .zip."))
+        self.btn_zip = QPushButton(tr("Guardar {archivo}…").format(archivo=archivo))
+        self.btn_zip.clicked.connect(lambda *_: self._guardar())
+        vl.addWidget(self.btn_zip)
+        texto(tr("3. Crea la versión v{v} en tu repositorio, arrastra ahí el .zip sin "
+                 "cambiarle el nombre y publícala.").format(v=v))
+        self.btn_version = QPushButton(tr("Abrir mi repositorio"))
+        self.btn_version.clicked.connect(lambda *_: self._abrir('version'))
+        vl.addWidget(self.btn_version)
+        texto(tr("4. Propón la ficha en el catálogo: queda copiada y la página se abre "
+                 "lista para «Propose changes». Si ya estaba publicado, sustituye la "
+                 "ficha por la copiada. La primera la aprueba una persona."))
+        self.btn_ficha = QPushButton(tr("Abrir el catálogo"))
+        self.btn_ficha.clicked.connect(lambda *_: self._abrir('pagina'))
+        vl.addWidget(self.btn_ficha)
+        vl.addStretch(1)
+        self.lbl = QLabel('')
+        self.lbl.setTextFormat(Qt.PlainText)
+        self.lbl.setWordWrap(True)
+        vl.addWidget(self.lbl)
+        b = QPushButton(tr("Cerrar"))
+        b.clicked.connect(self.accept)
+        vl.addWidget(b, 0, Qt.AlignRight)
+        for x in (self.btn_zip, self.btn_version, self.btn_ficha, b):
+            x.setStyleSheet(btn_secondary())
+            x.setAutoDefault(False)
+        for x in (self.btn_version, self.btn_ficha):
+            x.setEnabled(False)
+
+    def _guardar(self):
+        from core.complementos import paquete
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, tr("Publicar"), str(Path.home() / (
+                f"{self.p.id}-{self.p.manifiesto['version']}.zip")), "ZIP (*.zip)")
+        if not ruta:
+            return
+        try:
+            self._zip = paquete.escribir_zip(self.p, ruta)
+        except (OSError, ErrorPaquete) as e:
+            _aviso(self, str(e))
+            return
+        for x in (self.btn_version, self.btn_ficha):
+            x.setEnabled(True)
+        self.lbl.setText(tr("Guardado en {ruta}").format(ruta=ruta))
+
+    def _abrir(self, clave):
+        try:
+            d = catalogo.publicacion(self.p, self.repo.text(), self._zip)
+        except (gestor.ErrorGestor, OSError) as e:
+            _aviso(self, str(e))
+            return
+        if clave == 'pagina':
+            QApplication.clipboard().setText(d['ficha'])
+        QDesktopServices.openUrl(QUrl.fromEncoded(d[clave].encode()))
 
 
 # ── Tarjetas ─────────────────────────────────────────────────────────────────
@@ -364,7 +454,8 @@ class Tarjeta(QFrame):
     """`info` es lo que se enseña; `puesto`, lo instalado con ese id (o None);
     `nueva`, la versión incluida si es posterior a la instalada."""
 
-    def __init__(self, dlg, info: gestor.Info, puesto, incluido: bool, nueva: str):
+    def __init__(self, dlg, info: gestor.Info, puesto, incluido: bool, nueva: str,
+                 comunidad: str = ''):
         super().__init__()
         self.setObjectName('tarjeta')
         self.id, self.botones = info.id, {}
@@ -392,6 +483,14 @@ class Tarjeta(QFrame):
         ins = FlowLayout(fila)
         if incluido:
             ins.addWidget(_etiqueta(tr("INCLUIDO"), 'insignia', 'incluido'))
+        if comunidad:
+            w = (_etiqueta(tr("REVISADO"), 'insignia', 'incluido')
+                 if comunidad == 'revisado' else _etiqueta(tr("COMUNIDAD"), 'insignia'))
+            w.setToolTip(tr("Alguien de IngePresupuestos leyó este archivo exacto.")
+                         if comunidad == 'revisado' else
+                         tr("Lo publica un usuario. Pasó una revisión automática; "
+                            "nadie de IngePresupuestos lo leyó a fondo."))
+            ins.addWidget(w)
         if m:
             ins.addWidget(_etiqueta(tr("CÓDIGO"), 'insignia', 'codigo') if m['codigo']
                           else _etiqueta(tr("SOLO DATOS"), 'insignia'))
@@ -523,7 +622,7 @@ class _Pagina(QWidget):
         return max(1, self.sc.viewport().width() // ANCHO_COLUMNA)
 
     def poner(self, datos: list[dict]):
-        """[{info, puesto, incluido, nueva}]. Las tarjetas se hacen de nuevo."""
+        """[{info, puesto, incluido, nueva, comunidad}]. Las tarjetas se hacen de nuevo."""
         foco = self._foco()
         arriba = self.sc.verticalScrollBar().value()
         for t in self.tarjetas.values():
@@ -576,7 +675,8 @@ class _Pagina(QWidget):
         for d in hay:
             if d['info'].id not in self.tarjetas:
                 t = self.tarjetas[d['info'].id] = Tarjeta(
-                    self._dlg, d['info'], d['puesto'], d['incluido'], d['nueva'])
+                    self._dlg, d['info'], d['puesto'], d['incluido'], d['nueva'],
+                    d['comunidad'])
                 t.setParent(self.grid.parentWidget())
         self.contador.setText(tr("{n} de {m}").format(n=len(hay), m=len(self._datos)))
         self.sin_nada.setText(
@@ -612,18 +712,20 @@ class _Pagina(QWidget):
         self.grid.setRowStretch(len(self.visibles) // n + 1, 1)
 
 
-class _Sincronizar(QThread):
-    listo = Signal(object)           # dict, o el texto de un error
+class _Hilo(QThread):
+    """`fn()` fuera de la interfaz; luego, en ella, `luego(resultado)`."""
+    listo = Signal(object, object)           # este hilo; el resultado o un Exception
+
+    def __init__(self, fn, luego, callado=False):
+        super().__init__()
+        self.fn, self.luego, self.callado = fn, luego, callado
 
     def run(self):
         try:
-            r = catalogo.sincronizar(
-                lambda: not self.isInterruptionRequested())
-        except gestor.ErrorGestor as e:
-            r = str(e)
+            r = self.fn()
         except Exception as e:  # noqa: BLE001 — en un hilo no se puede perder
-            r = f"{type(e).__name__}: {e}"
-        self.listo.emit(r)
+            r = e
+        self.listo.emit(self, r)
 
 
 _hilos = set()       # vivos: el diálogo puede cerrarse antes de que acaben
@@ -631,8 +733,6 @@ _hilos = set()       # vivos: el diálogo puede cerrarse antes de que acaben
 
 def esperar_hilos() -> None:
     """Al salir: un QThread vivo al destruirse cierra el programa a las malas."""
-    for h in list(_hilos):
-        h.requestInterruption()
     for h in list(_hilos):
         h.wait()
 
@@ -658,10 +758,10 @@ class ComplementosDialog(QDialog):
         self._boton(fl, tr("Abrir carpeta"), self._abrir_carpeta)
         self.btn_sinc = self._boton(fl, tr("Sincronizar"), self.sincronizar)
         self.btn_sinc.setToolTip(tr(
-            "Busca en el repositorio complementos nuevos y versiones nuevas. No "
-            "instala ni activa nada, y no envía ningún dato tuyo."))
+            "Busca en el catálogo lo que publican los usuarios y las versiones "
+            "nuevas. No instala ni activa nada, y no envía ningún dato tuyo."))
         self.btn_sinc.setVisible(catalogo.disponible())
-        self._hilo = None
+        self._mios, self._bajando = set(), set()
         for b in (self.btn_zip, self.btn_carpeta):
             b.setEnabled(self.puede)
         vl.addWidget(arriba)
@@ -699,7 +799,8 @@ class ComplementosDialog(QDialog):
     def _leer_ofrecidos(self):
         self._ofrecidos = {i.id: (d, i) for d, i in gestor.explorar()}
         self._huellas = {i.paquete.huella for d, i in self._ofrecidos.values()
-                         if i.paquete and d.is_dir()}
+                         if i.paquete and isinstance(d, Path)}
+        self._revisados = catalogo.revisados() if catalogo.disponible() else set()
 
     # ── Repositorio ──────────────────────────────────────────────────────
     def showEvent(self, e):
@@ -709,44 +810,69 @@ class ComplementosDialog(QDialog):
                 and catalogo.disponible() and catalogo.toca():
             self.sincronizar(callado=True)
 
-    def sincronizar(self, callado=False):
+    def _lanzar(self, fn, luego, callado=False):
         _hilos.difference_update([h for h in _hilos if h.isFinished()])
-        if _hilos:
-            return
-        self._callado = callado
-        self.btn_sinc.setEnabled(False)
-        self.btn_sinc.setText(tr("Sincronizando…"))
-        h = self._hilo = _Sincronizar()
+        h = _Hilo(fn, luego, callado)
         _hilos.add(h)
-        h.listo.connect(self._sincronizado)
+        self._mios.add(h)
+        h.listo.connect(self._terminado)
         h.start()
 
-    def _sincronizado(self, r):
-        h, self._hilo = self._hilo, None
+    def _terminado(self, h, r):
+        if h not in self._mios:
+            return
+        self._mios.discard(h)
         h.wait()
         _hilos.discard(h)
-        self.btn_sinc.setEnabled(True)
-        self.btn_sinc.setText(tr("Sincronizar"))
-        if isinstance(r, str):
-            if not self._callado:       # sin internet no se molesta
-                _aviso(self, r)
-            return
-        if r['nuevos']:
-            self._leer_ofrecidos()
-            self._cargar()
-            self.lbl.setText(tr("Novedades del repositorio: {n}.").format(
-                n=len(r['nuevos'])))
-        elif not self._callado:
-            self.lbl.setText(tr("No hay novedades en el repositorio."))
-        if r['fallos'] and not self._callado:
-            _aviso(self, "\n".join(r['fallos'][:10]))
+        h.luego(r, h.callado)
 
     def done(self, r):
-        if self._hilo is not None:
-            h, self._hilo = self._hilo, None
-            h.listo.disconnect(self._sincronizado)
-            h.requestInterruption()
+        for h in self._mios:
+            h.listo.disconnect(self._terminado)
+        self._mios.clear()
         super().done(r)
+
+    def sincronizar(self, callado=False):
+        if not self.btn_sinc.isEnabled():
+            return
+        self.btn_sinc.setEnabled(False)
+        self.btn_sinc.setText(tr("Sincronizando…"))
+        self._lanzar(catalogo.sincronizar, self._sincronizado, callado)
+
+    def _sincronizado(self, r, callado):
+        self.btn_sinc.setEnabled(True)
+        self.btn_sinc.setText(tr("Sincronizar"))
+        if isinstance(r, Exception):
+            if not callado:             # sin internet no se molesta
+                _aviso(self, str(r))
+            return
+        self._leer_ofrecidos()          # también lo que se retiró o se revisó
+        self._cargar()
+        if r:
+            self.lbl.setText(tr("Novedades del catálogo: {n}.").format(n=r))
+        elif not callado:
+            self.lbl.setText(tr("No hay novedades en el catálogo."))
+
+    def _con_archivo(self, id_, luego):
+        """`luego(ruta)` con lo ofrecido; si es del catálogo, lo descarga."""
+        d, i = self._ofrecidos[id_]
+        if isinstance(d, Path):
+            luego(d)
+            return
+        if id_ in self._bajando:
+            return
+        self._bajando.add(id_)
+        self.lbl.setText(tr("Descargando «{nombre}»…").format(nombre=i.nombre))
+
+        def fin(r, _callado):
+            self._bajando.discard(id_)
+            self.lbl.setText('')
+            if isinstance(r, Exception):
+                _aviso(self, str(r))
+                return
+            self._leer_ofrecidos()
+            luego(r)
+        self._lanzar(lambda: catalogo.descargar(d), fin)
 
     @staticmethod
     def _boton(layout, texto, fn, primario=False) -> QPushButton:
@@ -777,15 +903,26 @@ class ComplementosDialog(QDialog):
         infos = ([i for _d, i in self._ofrecidos.values()] if p is self.explorar
                  else list(self.infos.values()))
         p.poner([{'info': i, 'puesto': self.infos.get(i.id),
-                  'incluido': self._es_incluido(i), 'nueva': self._nueva(i.id)}
+                  'incluido': self._es_incluido(i), 'nueva': self._nueva(i.id),
+                  'comunidad': self._comunidad(i)}
                  for i in infos])
 
     def _es_incluido(self, i) -> bool:
         """Por CONTENIDO: uno ajeno con el mismo id no lleva la insignia, ni uno
         del repositorio."""
         o = self._ofrecidos.get(i.id)
-        return bool(o and o[1] is i and o[0].is_dir()
+        return bool(o and o[1] is i and isinstance(o[0], Path)
                     or i.paquete and i.paquete.huella in self._huellas)
+
+    def _comunidad(self, i) -> str:
+        """'revisado' o 'comunidad', si está en el catálogo; si no, ''."""
+        if not i.paquete or self._es_incluido(i):
+            return ''
+        if i.paquete.huella in self._revisados:
+            return 'revisado'
+        o = self._ofrecidos.get(i.id)
+        return ('comunidad' if o and isinstance(o[0], dict)
+                and o[0]['huella'] == i.paquete.huella else '')
 
     def _nueva(self, id_) -> str:
         o, i = self._ofrecidos.get(id_), self.infos.get(id_)
@@ -813,6 +950,8 @@ class ComplementosDialog(QDialog):
             entrada(tr("Recargar"), lambda: self.recargar(i.id), tr(
                 "Vuelve a copiar los archivos desde la carpeta de origen (para "
                 "quien lo está escribiendo)"), self.puede)
+        if i.paquete and catalogo.disponible() and not self._es_incluido(i):
+            entrada(tr("Publicar…"), lambda: PublicarDialog(i, self).exec())
         entrada(tr("Abrir carpeta"), lambda: self._abrir_carpeta(i.id))
         m.addSeparator()
         entrada(tr("Desinstalar"), lambda: self.desinstalar(i.id), puede=self.puede)
@@ -830,6 +969,11 @@ class ComplementosDialog(QDialog):
 
     # ── Acciones ─────────────────────────────────────────────────────────
     def detalles(self, i):
+        """De lo del catálogo se enseñan los archivos: antes se descarga."""
+        if i.paquete is not None and not i.paquete.archivos:
+            self._con_archivo(i.id, lambda _r: DetallesDialog(
+                self._ofrecidos[i.id][1], self).exec())
+            return
         DetallesDialog(i, self).exec()
 
     def _de_zip(self):
@@ -850,7 +994,7 @@ class ComplementosDialog(QDialog):
             self.tabs.setCurrentWidget(self.instalados)
 
     def instalar_incluido(self, id_):
-        self._instalar(self._ofrecidos[id_][0])
+        self._con_archivo(id_, self._instalar)
 
     def _instalar(self, ruta):
         i = self._hacer(lambda: gestor.instalar(ruta))
@@ -861,14 +1005,18 @@ class ComplementosDialog(QDialog):
 
     def actualizar(self, id_):
         estaba = id_ in self.infos and self.infos[id_].activo
-        if self._instalar(self._ofrecidos[id_][0]) is not None and estaba:
-            self.activar(id_)           # otro contenido: se vuelve a pedir
+
+        def luego(ruta):
+            if self._instalar(ruta) is not None and estaba:
+                self.activar(id_)       # otro contenido: se vuelve a pedir
+        self._con_archivo(id_, luego)
 
     def activar(self, id_):
         i = self.infos.get(id_)
         if i is None or i.paquete is None:
             return
-        if ConsentimientoDialog(i, self).exec() != QDialog.Accepted:
+        if ConsentimientoDialog(
+                i, self, i.paquete.huella in self._revisados).exec() != QDialog.Accepted:
             return
         r = self._hacer(lambda: gestor.activar(i.id, i.paquete.huella))
         if r is None:

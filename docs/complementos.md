@@ -9,12 +9,13 @@ temas de reportes, reportes o funciones propias. Hay de dos clases:
 | Qué puede hacer | lo que dice este documento, nada más | **todo lo que puede el programa** |
 | Al activarlo | se avisa si cambia datos que ya existen | hay que aceptar que confías en el autor |
 
-**Sincronizar** copia del repositorio los complementos y versiones nuevos, sin
-esperar a otra versión del programa. Todo se instala **apagado**.
+**Sincronizar** trae la lista de lo que publican los usuarios, sin esperar a otra
+versión del programa. El tuyo también puede estar: [Publicar el tuyo](#publicar-el-tuyo). Todo se instala **apagado**.
 
 - [Instalar y usar](#instalar-y-usar)
 - [Tu primer complemento](#tu-primer-complemento) (5 minutos)
 - [Tu primer tema](#tu-primer-tema)
+- [Publicar el tuyo](#publicar-el-tuyo)
 - [`complemento.json`](#complementojson)
 - [API de Python](#api-de-python)
 - [Seguridad](#seguridad)
@@ -30,11 +31,14 @@ En el proyecto, **Complementos ▾ ▸ Administrar complementos…**; también e
 - **Instalar** (o **Instalar .zip…** / **Instalar carpeta…**) lo deja apagado.
 - **Actualizar** sale cuando el incluido es de una versión posterior. Como cambia
   el contenido, hay que volver a activarlo.
-- **Sincronizar** trae a Explorar lo nuevo del
-  [repositorio](https://github.com/ingelibre/ingepresupuestos-complementos); al
-  abrir la ventana se mira como mucho una vez al día. Cada archivo se comprueba con
-  su SHA-256. No instala, no activa y no envía datos. En la versión de Microsoft
-  Store no está: ahí llegan con el programa.
+- **Sincronizar** trae a Explorar la lista del
+  [catálogo](https://github.com/ingelibre/ingepresupuestos-complementos); al abrir
+  la ventana se mira como mucho una vez al día. El `.zip` se descarga de la página
+  de su autor solo al pulsar Instalar, Actualizar o Detalles, y se comprueba con su
+  SHA-256. No se envían datos tuyos. En la versión de Microsoft Store no está: ahí
+  los complementos nuevos llegan con el programa o con Instalar .zip…
+- **REVISADO**: alguien de IngePresupuestos leyó ese archivo exacto. **COMUNIDAD**:
+  pasó la revisión automática, pero nadie lo leyó a fondo.
 - **Detalles** enseña la ficha y cada archivo; en **⋯** están Importar índice,
   Recargar, Abrir carpeta y Desinstalar.
 - **INCLUIDO** se pone por contenido: un paquete ajeno con el mismo `id` no la lleva.
@@ -207,6 +211,18 @@ textos del pie sin número de página. No toman tipografía, márgenes, bordes,
 columnas ni firmas. El **Gantt y la Curva S** toman encabezado, pie, logo y
 colores de marca; exportados desde la vista del cronograma usan el tema general,
 no el del proyecto. Un reporte con otra estructura se hace con la API.
+
+## Publicar el tuyo
+
+El complemento vive en **tu** repositorio público de GitHub, con licencia libre; en
+el catálogo solo hay una ficha con su dirección y su SHA-256.
+
+En **Instalados ▸ ⋯ ▸ Publicar…**: escribe la dirección de tu repositorio, guarda
+el `.zip`, súbelo a una versión (*release*) y propón la ficha. El programa no sube
+nada: prepara el archivo y abre las páginas. Un robot comprueba la ficha leyendo el
+código, sin ejecutarlo, y la primera la aprueba una persona. Para una **versión
+nueva**, sube el número en `complemento.json` y repite: si la propone la misma cuenta
+y el robot no encuentra nada que leer, se publica sola.
 
 ## `complemento.json`
 

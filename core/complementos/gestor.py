@@ -380,10 +380,10 @@ def incluidos() -> list[Path]:
         return []
 
 
-def explorar() -> list[tuple[Path, Info]]:
-    """Lo que ofrece la pestaña Explorar, instalado o no: los incluidos y los
-    del catálogo ya sincronizado. De cada uno, la versión más nueva; a igual
-    versión, el incluido. El `Info` describe lo OFRECIDO, no lo instalado."""
+def explorar() -> list[tuple[Path | dict, Info]]:
+    """Lo que ofrece la pestaña Explorar, instalado o no: los incluidos
+    (su carpeta) y los del catálogo (su entrada, para `catalogo.descargar`). De
+    cada uno, la versión más nueva; a igual versión, el incluido. El `Info` describe lo OFRECIDO, no lo instalado."""
     out = []
     for d in incluidos():
         try:
@@ -395,8 +395,8 @@ def explorar() -> list[tuple[Path, Info]]:
     if not catalogo.disponible():
         return out
     puesto = {i.id: n for n, (_d, i) in enumerate(out)}
-    for z, p in catalogo.ofrecidos():
-        nuevo = (z, Info(p.id, p, False, 'disponible', '', ''))
+    for x, p in catalogo.ofrecidos():
+        nuevo = (x, Info(p.id, p, False, 'disponible', '', ''))
         n = puesto.get(p.id)
         if n is None:
             out.append(nuevo)
