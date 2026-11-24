@@ -381,8 +381,9 @@ def incluidos() -> list[Path]:
 
 
 def explorar() -> list[tuple[Path, Info]]:
-    """Lo que ofrece la pestaña Explorar, instalado o no: hoy, los incluidos.
-    El `Info` describe lo OFRECIDO, no lo instalado. Otra fuente se añade aquí."""
+    """Lo que ofrece la pestaña Explorar, instalado o no: los incluidos y los
+    del catálogo ya sincronizado. De cada uno, la versión más nueva; a igual
+    versión, el incluido. El `Info` describe lo OFRECIDO, no lo instalado."""
     out = []
     for d in incluidos():
         try:
@@ -390,6 +391,18 @@ def explorar() -> list[tuple[Path, Info]]:
             out.append((d, Info(p.id, p, False, 'disponible', '', '')))
         except ErrorPaquete as e:
             out.append((d, Info(d.name, None, False, 'dañado', str(e), '')))
+    from core.complementos import catalogo
+    if not catalogo.disponible():
+        return out
+    puesto = {i.id: n for n, (_d, i) in enumerate(out)}
+    for z, p in catalogo.ofrecidos():
+        nuevo = (z, Info(p.id, p, False, 'disponible', '', ''))
+        n = puesto.get(p.id)
+        if n is None:
+            out.append(nuevo)
+        elif out[n][1].paquete is None or es_mas_nueva(
+                p.manifiesto['version'], out[n][1].paquete.manifiesto['version']):
+            out[n] = nuevo
     return out
 
 

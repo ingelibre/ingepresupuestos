@@ -921,6 +921,8 @@ def test_la_ia_no_puede_instalar_ni_activar():
 def test_nada_usa_la_red():
     for f in [*RAIZ.glob('core/complementos/*.py'), *RAIZ.glob('ingepresupuestos/*.py'),
               *RAIZ.glob('views/complementos_*.py'), *RAIZ.glob('complementos/*/*.py')]:
+        if f.name == 'catalogo.py':         # el único; no manda datos
+            continue
         t = f.read_text(encoding='utf-8')
         assert not re.search(r'import (urllib|socket|requests|http)\b|QtNetwork', t), f
 

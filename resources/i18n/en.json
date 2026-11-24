@@ -1657,7 +1657,6 @@
  "N.º": "No.",
  "NOVIEMBRE": "NOVEMBER",
  "NUEVO PROYECTO": "NEW PROJECT",
- "Nada se descarga de internet y nada se activa solo. Un complemento con código solo debería instalarse si confías en quien lo hizo.": "Nothing is downloaded from the internet and nothing enables itself. Only install an add-on with code if you trust whoever made it.",
  "Nada seleccionado": "Nothing selected",
  "Nadie ha iniciado sesión.": "Nobody is signed in.",
  "Naranja": "Orange",
@@ -3025,5 +3024,11 @@
  "🧠 memoria": "🧠 memory",
  "🧠 memoria global (el LLM la usará)": "🧠 global memory (the LLM will use it)",
  "🧮 Calc": "🧮 Calc",
- "🧮 Totales": "🧮 Totals"
+ "🧮 Totales": "🧮 Totals",
+ "Sincronizar": "Sync",
+ "Sincronizando…": "Syncing…",
+ "Busca en el repositorio complementos nuevos y versiones nuevas. No instala ni activa nada, y no envía ningún dato tuyo.": "Looks in the repository for new add-ons and new versions. It installs and enables nothing, and sends none of your data.",
+ "Nada se instala ni se activa solo. Un complemento con código solo debería instalarse si confías en quien lo hizo.": "Nothing installs or enables itself. Only install an add-on with code if you trust whoever made it.",
+ "Novedades del repositorio: {n}.": "New from the repository: {n}.",
+ "No hay novedades en el repositorio.": "Nothing new in the repository."
 }

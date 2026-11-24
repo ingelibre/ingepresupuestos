@@ -1656,7 +1656,6 @@
  "N.º": "N.º",
  "NOVIEMBRE": "NOVEMBRO",
  "NUEVO PROYECTO": "NOVO PROJETO",
- "Nada se descarga de internet y nada se activa solo. Un complemento con código solo debería instalarse si confías en quien lo hizo.": "Nada é baixado da internet e nada se ativa sozinho. Um complemento com código só deve ser instalado se você confiar em quem o fez.",
  "Nada seleccionado": "Nada selecionado",
  "Nadie ha iniciado sesión.": "Ninguém iniciou sessão.",
  "Naranja": "Laranja",
@@ -3024,5 +3023,11 @@
  "🧠 memoria": "🧠 memória",
  "🧠 memoria global (el LLM la usará)": "🧠 memória global (o LLM vai usá-la)",
  "🧮 Calc": "🧮 Calc",
- "🧮 Totales": "🧮 Totais"
+ "🧮 Totales": "🧮 Totais",
+ "Sincronizar": "Sincronizar",
+ "Sincronizando…": "Sincronizando…",
+ "Busca en el repositorio complementos nuevos y versiones nuevas. No instala ni activa nada, y no envía ningún dato tuyo.": "Procura no repositório complementos novos e versões novas. Não instala nem ativa nada, e não envia nenhum dado seu.",
+ "Nada se instala ni se activa solo. Un complemento con código solo debería instalarse si confías en quien lo hizo.": "Nada se instala nem se ativa sozinho. Um complemento com código só deve ser instalado se você confiar em quem o fez.",
+ "Novedades del repositorio: {n}.": "Novidades do repositório: {n}.",
+ "No hay novedades en el repositorio.": "Não há novidades no repositório."
 }

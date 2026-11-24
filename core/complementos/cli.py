@@ -8,6 +8,7 @@ código del complemento: lo lee.
     ingepresupuestos --nuevo-complemento "Nombre" [carpeta] [--datos]
     ingepresupuestos --validar-complemento <carpeta o .zip>
     ingepresupuestos --empaquetar-complemento <carpeta> [destino.zip]
+    ingepresupuestos --catalogo-complemento <carpeta> <repositorio>
     ingepresupuestos --textos-de-complemento <palabra>
 """
 from __future__ import annotations
@@ -142,6 +143,14 @@ def main(argv: list[str]) -> int:
             return _validar(destino)
         except (paquete.ErrorPaquete, OSError) as e:
             print("No se pudo empaquetar:", e)
+            return 1
+    if op == '--catalogo-complemento' and len(resto) == 2:
+        from core.complementos import catalogo, gestor
+        try:
+            print(catalogo.publicar(*resto), "complementos en el catálogo")
+            return 0
+        except (paquete.ErrorPaquete, gestor.ErrorGestor, OSError) as e:
+            print("No se pudo publicar:", e)
             return 1
     print(__doc__.strip())
     return 2

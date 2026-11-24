@@ -163,6 +163,13 @@ def _avisos_de_arranque(ventana):
         pass
 
 
+def _esperar_complementos():
+    """Un hilo vivo al salir cerraría el programa a las malas."""
+    m = sys.modules.get('views.complementos_dialog')
+    if m is not None:
+        m.esperar_hilos()
+
+
 def main():
     # Bajo Flatpak, /tmp es privado del sandbox y el LibreOffice/mdbtools del
     # host (invocados vía flatpak-spawn) no lo ven. Redirigir los temporales a
@@ -366,6 +373,7 @@ def main():
         QTimer.singleShot(0, lambda: ventana.set_usuario(sesion))
         QTimer.singleShot(800, lambda: _avisos_de_arranque(ventana))
         app.exec()
+        _esperar_complementos()
         # Si hizo logout dentro de la app → continuar al bucle normal
         if usuario_actual() is not None:
             sys.exit(0)
@@ -394,6 +402,7 @@ def main():
         from PySide6.QtCore import QTimer
         QTimer.singleShot(800, lambda: _avisos_de_arranque(ventana))
         app.exec()
+        _esperar_complementos()
 
         if usuario_actual() is not None:
             break   # cerró ventana sin logout → salir

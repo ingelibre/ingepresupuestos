@@ -13,19 +13,20 @@ import unicodedata
 
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QRectF, QSize, Qt, QUrl
+from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QRectF, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
     QColor, QDesktopServices, QImage, QImageReader, QKeySequence, QPainter,
     QPainterPath, QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
-from core.complementos import cargador, esquema, gestor
+from core.complementos import cargador, catalogo, esquema, gestor
 from core.complementos.paquete import ErrorPaquete
 from utils.i18n import N_, tr
 from utils.theme import (
@@ -611,6 +612,31 @@ class _Pagina(QWidget):
         self.grid.setRowStretch(len(self.visibles) // n + 1, 1)
 
 
+class _Sincronizar(QThread):
+    listo = Signal(object)           # dict, o el texto de un error
+
+    def run(self):
+        try:
+            r = catalogo.sincronizar(
+                lambda: not self.isInterruptionRequested())
+        except gestor.ErrorGestor as e:
+            r = str(e)
+        except Exception as e:  # noqa: BLE001 — en un hilo no se puede perder
+            r = f"{type(e).__name__}: {e}"
+        self.listo.emit(r)
+
+
+_hilos = set()       # vivos: el diálogo puede cerrarse antes de que acaben
+
+
+def esperar_hilos() -> None:
+    """Al salir: un QThread vivo al destruirse cierra el programa a las malas."""
+    for h in list(_hilos):
+        h.requestInterruption()
+    for h in list(_hilos):
+        h.wait()
+
+
 class ComplementosDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -630,12 +656,17 @@ class ComplementosDialog(QDialog):
         self.btn_carpeta = self._boton(fl, tr("Instalar carpeta…"), self._de_carpeta)
         self.btn_crear = self._boton(fl, tr("Crear complemento…"), self._crear)
         self._boton(fl, tr("Abrir carpeta"), self._abrir_carpeta)
+        self.btn_sinc = self._boton(fl, tr("Sincronizar"), self.sincronizar)
+        self.btn_sinc.setToolTip(tr(
+            "Busca en el repositorio complementos nuevos y versiones nuevas. No "
+            "instala ni activa nada, y no envía ningún dato tuyo."))
+        self.btn_sinc.setVisible(catalogo.disponible())
+        self._hilo = None
         for b in (self.btn_zip, self.btn_carpeta):
             b.setEnabled(self.puede)
         vl.addWidget(arriba)
         nota = QLabel(tr(
-            "Nada se descarga de internet y nada se activa solo. Un complemento "
-            "con código solo debería instalarse si confías en quien lo hizo."))
+            "Nada se instala ni se activa solo. Un complemento con código solo debería instalarse si confías en quien lo hizo."))
         nota.setWordWrap(True)
         nota.setStyleSheet(f"color:{SLATE_500};")
         vl.addWidget(nota)
@@ -662,8 +693,60 @@ class ComplementosDialog(QDialog):
                                 "complementos."))
         QShortcut(QKeySequence.Find, self, lambda: self._pagina().buscar.setFocus())
         self._pendiente = set()
-        self._ofrecidos = {i.id: (d, i) for d, i in gestor.explorar()}
+        self._leer_ofrecidos()
         self._cargar()
+
+    def _leer_ofrecidos(self):
+        self._ofrecidos = {i.id: (d, i) for d, i in gestor.explorar()}
+        self._huellas = {i.paquete.huella for d, i in self._ofrecidos.values()
+                         if i.paquete and d.is_dir()}
+
+    # ── Repositorio ──────────────────────────────────────────────────────
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Las pruebas no salen a la red.
+        if QApplication.platformName() != 'offscreen' and self.puede \
+                and catalogo.disponible() and catalogo.toca():
+            self.sincronizar(callado=True)
+
+    def sincronizar(self, callado=False):
+        _hilos.difference_update([h for h in _hilos if h.isFinished()])
+        if _hilos:
+            return
+        self._callado = callado
+        self.btn_sinc.setEnabled(False)
+        self.btn_sinc.setText(tr("Sincronizando…"))
+        h = self._hilo = _Sincronizar()
+        _hilos.add(h)
+        h.listo.connect(self._sincronizado)
+        h.start()
+
+    def _sincronizado(self, r):
+        h, self._hilo = self._hilo, None
+        h.wait()
+        _hilos.discard(h)
+        self.btn_sinc.setEnabled(True)
+        self.btn_sinc.setText(tr("Sincronizar"))
+        if isinstance(r, str):
+            if not self._callado:       # sin internet no se molesta
+                _aviso(self, r)
+            return
+        if r['nuevos']:
+            self._leer_ofrecidos()
+            self._cargar()
+            self.lbl.setText(tr("Novedades del repositorio: {n}.").format(
+                n=len(r['nuevos'])))
+        elif not self._callado:
+            self.lbl.setText(tr("No hay novedades en el repositorio."))
+        if r['fallos'] and not self._callado:
+            _aviso(self, "\n".join(r['fallos'][:10]))
+
+    def done(self, r):
+        if self._hilo is not None:
+            h, self._hilo = self._hilo, None
+            h.listo.disconnect(self._sincronizado)
+            h.requestInterruption()
+        super().done(r)
 
     @staticmethod
     def _boton(layout, texto, fn, primario=False) -> QPushButton:
@@ -698,10 +781,11 @@ class ComplementosDialog(QDialog):
                  for i in infos])
 
     def _es_incluido(self, i) -> bool:
-        """Por CONTENIDO: uno ajeno con el mismo id no lleva la insignia."""
+        """Por CONTENIDO: uno ajeno con el mismo id no lleva la insignia, ni uno
+        del repositorio."""
         o = self._ofrecidos.get(i.id)
-        return bool(o and (o[1] is i or (
-            o[1].paquete and i.paquete and o[1].paquete.huella == i.paquete.huella)))
+        return bool(o and o[1] is i and o[0].is_dir()
+                    or i.paquete and i.paquete.huella in self._huellas)
 
     def _nueva(self, id_) -> str:
         o, i = self._ofrecidos.get(id_), self.infos.get(id_)

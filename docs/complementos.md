@@ -9,7 +9,8 @@ temas de reportes, reportes o funciones propias. Hay de dos clases:
 | Qué puede hacer | lo que dice este documento, nada más | **todo lo que puede el programa** |
 | Al activarlo | se avisa si cambia datos que ya existen | hay que aceptar que confías en el autor |
 
-Nada se descarga de internet. Todo se instala **apagado**.
+**Sincronizar** copia del repositorio los complementos y versiones nuevos, sin
+esperar a otra versión del programa. Todo se instala **apagado**.
 
 - [Instalar y usar](#instalar-y-usar)
 - [Tu primer complemento](#tu-primer-complemento) (5 minutos)
@@ -29,6 +30,11 @@ En el proyecto, **Complementos ▾ ▸ Administrar complementos…**; también e
 - **Instalar** (o **Instalar .zip…** / **Instalar carpeta…**) lo deja apagado.
 - **Actualizar** sale cuando el incluido es de una versión posterior. Como cambia
   el contenido, hay que volver a activarlo.
+- **Sincronizar** trae a Explorar lo nuevo del
+  [repositorio](https://github.com/ingelibre/ingepresupuestos-complementos); al
+  abrir la ventana se mira como mucho una vez al día. Cada archivo se comprueba con
+  su SHA-256. No instala, no activa y no envía datos. En la versión de Microsoft
+  Store no está: ahí llegan con el programa.
 - **Detalles** enseña la ficha y cada archivo; en **⋯** están Importar índice,
   Recargar, Abrir carpeta y Desinstalar.
 - **INCLUIDO** se pone por contenido: un paquete ajeno con el mismo `id` no la lleva.
@@ -409,7 +415,7 @@ Cualquier otro se muestra con la línea del complemento donde ocurrió.
   byte, deja de cargarse hasta que lo actives de nuevo. Solo se ejecutan esos
   bytes, nunca un `.pyc` de la carpeta.
 - Lo activado no va en la base de datos: restaurar una copia o recibir un `.db` no
-  activa nada. El asistente de IA (MCP) no puede instalar ni activar.
+  activa nada. El asistente de IA (MCP) no puede sincronizar, instalar ni activar.
 - Si uno falla al cargar, o el programa se cierra mientras lo carga, queda apagado
   y se explica; el programa arranca igual. Un complemento que se queda en un
   bucle sin fin sí lo bloquea: arranca con `--sin-complementos`.
