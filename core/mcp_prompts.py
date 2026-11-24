@@ -68,7 +68,7 @@ PROMPTS = {
         (("proyecto", "Proyecto (por nombre)", True),),
         "Arma la fórmula polinómica del proyecto «{proyecto}». Mira get_formula, "
         "usa set_formula con preview: true y explícame cada monomio, sus "
-        "advertencias y los insumos sin índice (resources_without_index). Guárdala solo cuando lo apruebe."),
+        "advertencias y los insumos sin índice. Guárdala solo cuando lo apruebe."),
 }
 
 

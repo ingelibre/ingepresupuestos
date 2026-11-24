@@ -258,6 +258,13 @@ def test_forzar_deshacer_pide_lo_que_de_verdad_cambia(obra):
         obra.undo_last(force=True)
 
 
+def test_forzar_no_devuelve_el_estado_del_proyecto(obra):
+    obra.set_specs(obra.pid, [{"item_id": obra.i["x"], "text": "a"}])
+    estado(obra.pid, 'revision')
+    with pytest.raises(ErrorMCP, match="revisión|Revisión"):
+        obra.undo_last(force=True)
+
+
 def test_forzar_deshacer_una_valorizacion(obra):
     estado(obra.pid, 'ejecutado')
     v = obra.create_valuation(obra.pid, "2026-01-01", "2026-01-31")["valuation_id"]
