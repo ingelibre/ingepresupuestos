@@ -71,6 +71,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="3.2.4" date="2026-11-24">
+      <description>
+        <p>Versión pequeña dedicada a los complementos. Nuevo: Sincronizar trae complementos y actualizaciones sin esperar a otra versión del programa, y Publicar guía para compartir el tuyo desde tu repositorio; cada archivo se comprueba con su huella y nada se instala ni se activa solo. Complemento de Venezuela, con análisis de precios e importación de partidas COVENIN, sin precios incluidos. Argentina: subcontrato con dos importes y análisis con el subtotal debajo de cada grupo.</p>
+      </description>
+    </release>
     <release version="3.2.2" date="2026-11-24">
       <description>
         <p>Versión pequeña dedicada a la conexión con asistentes de IA (MCP), gratis e incluida. Nuevo: el asistente puede redactar especificaciones técnicas y la memoria descriptiva, armar la fórmula polinómica (los coeficientes los calcula el programa), detallar los gastos generales, leer el cronograma y la curva S, registrar valorizaciones y exportar a Word. Sigue apagada por defecto y con deshacer. Errores corregidos: editar una celda de la fórmula polinómica no contaba como cambio sin guardar; abrir esa pestaña o leer una valorización escribía en el proyecto; una fórmula con el presupuesto principal asignado salía sin costos.</p>
