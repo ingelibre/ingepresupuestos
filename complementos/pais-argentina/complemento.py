@@ -11,6 +11,8 @@ from .textos import t
 
 def registrar(app):
     app.accion("reparto", t("Reparto de subcontratos…"), configurar)
+    app.reporte("acu", t("Análisis de precios con subtotales"), analisis,
+                ayuda=t("No altera precios ni totales"))
     app.reporte("mat-mo", t("Materiales y mano de obra"), reporte,
                 ayuda=t("No altera precios ni totales"))
 
@@ -41,6 +43,43 @@ def propios(ajustes):
             and 0 <= v <= 100} if isinstance(d, dict) else {}
 
 
+def importes(ajustes):
+    """{clave: (materiales, mano de obra)} escritos en moneda."""
+    try:
+        d = json.loads(ajustes.get("sc_importes") or "{}")
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    out = {}
+    for k, v in d.items() if isinstance(d, dict) else ():
+        if isinstance(v, list) and len(v) == 2 and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool)
+                and 0 <= x <= 1e12 for x in v) and sum(v) > 0:
+            out[k] = tuple(map(float, v))
+    return out
+
+
+def leer_importe(texto, moneda):
+    """None si está vacío. Con los separadores de la moneda del proyecto."""
+    s = re.sub(r"\s", "", texto)
+    if not s:
+        return None
+    if moneda.simbolo and s.startswith(moneda.simbolo):
+        s = s[len(moneda.simbolo):]
+    mil, dec = re.escape(moneda.miles or ""), re.escape(moneda.decimal or ".")
+    entero = rf"([0-9]{{1,3}}(?:{mil}[0-9]{{3}})+|[0-9]{{1,12}})" if mil else r"([0-9]{1,12})"
+    m = re.fullmatch(rf"{entero}(?:{dec}([0-9]{{1,4}}))?", s)
+    if not m or len(re.sub(r"\D", "", m[1])) > 12:
+        raise api.ErrorComplemento(t("«{x}» no es un importe.").format(x=texto[:30]))
+    return float(re.sub(r"\D", "", m[1]) + "." + (m[2] or "0"))
+
+
+def precios(p):
+    """{clave: (recurso_id, precio)} de los subcontratos del proyecto."""
+    return {clave(i): (i.recurso_id, i.precio) for x in p.hojas()
+            for i in x.acu_abierto
+            if i.tipo == "SC" and not i.es_subpartida and not i.es_porcentaje}
+
+
 def leer_pct(texto):
     """None si está vacío (= el general)."""
     s = texto.strip().rstrip("%").strip()
@@ -54,7 +93,11 @@ def leer_pct(texto):
 
 
 def configurar(ctx):
-    a, sc, guardados = ctx.ajustes, subcontratos(ctx.presupuesto), propios(ctx.ajustes)
+    a, p = ctx.ajustes, ctx.presupuesto
+    sc, guardados, dos = subcontratos(p), propios(a), importes(a)
+    # Con el decimal con el que se vuelve a leer.
+    def escribir(v):
+        return f"{v:.4f}".rstrip("0").rstrip(".").replace(".", p.moneda.decimal or ".")
     rotulos = {}                       # rótulo único: clave
     for k, desc in sc.items():
         r, n = desc[:70], 2
@@ -68,14 +111,21 @@ def configurar(ctx):
                  valor=piezas.numero(a, "mat"))]
     if rotulos:
         campos.append(api.Dato(
-            "sc", t("Porcentaje propio de un subcontrato"), "tabla",
-            [{"insumo": r, "pct": f"{guardados[k]:g}" if k in guardados else ""}
+            "sc", t("Porcentaje o importes propios de un subcontrato"), "tabla",
+            [{"insumo": r,
+              "pct": f"{guardados[k]:g}" if k in guardados and k not in dos else "",
+              "mat": escribir(dos[k][0]) if k in dos else "",
+              "mo": escribir(dos[k][1]) if k in dos else ""}
              for r, k in rotulos.items()][:200],
             columnas=[
                 api.Dato("insumo", t("Subcontrato"), "opcion",
                          opciones=tuple(rotulos)),
                 api.Dato("pct", t("% materiales"), "texto",
-                         ayuda=t("Vacío = el general"))]))
+                         ayuda=t("Vacío = el general")),
+                api.Dato("mat", t("Materiales"), "texto",
+                         ayuda=t("Importe por unidad del subcontrato")),
+                api.Dato("mo", t("Mano de obra"), "texto",
+                         ayuda=t("Importe por unidad del subcontrato"))]))
     while True:
         r = ctx.pedir_datos(
             t("Reparto de subcontratos"), campos,
@@ -86,14 +136,28 @@ def configurar(ctx):
         campos = [replace(c, valor=r[c.clave]) for c in campos]
         try:
             nuevos = {k: v for k, v in guardados.items() if k in sc}
+            con_importe = {k: v for k, v in dos.items() if k in sc}
             vistos = set()
             for f in r.pop("sc", ()):
                 k, v = rotulos[f["insumo"]], leer_pct(f["pct"])
+                mm = [leer_importe(f.get(c, ""), p.moneda) for c in ("mat", "mo")]
+                if v is not None and mm != [None, None]:
+                    raise api.ErrorComplemento(t(
+                        "«{x}»: pon el porcentaje o los importes, no los dos.").format(
+                            x=f["insumo"]))
                 if k in vistos:
                     raise api.ErrorComplemento(t(
                         "«{x}» está dos veces.").format(x=f["insumo"]))
                 vistos.add(k)
                 nuevos.pop(k, None)
+                con_importe.pop(k, None)
+                if mm != [None, None]:
+                    mm = [x or 0.0 for x in mm]
+                    if not sum(mm):
+                        raise api.ErrorComplemento(t(
+                            "«{x}» no es un importe.").format(x="0"))
+                    con_importe[k] = mm
+                    v = mm[0] / sum(mm) * 100
                 if v is not None:
                     nuevos[k] = v
         except api.ErrorComplemento as e:
@@ -103,8 +167,34 @@ def configurar(ctx):
         for k in list(rotulos.values())[:200]:
             if k not in vistos:
                 nuevos.pop(k, None)
-        ctx.guardar_ajustes({**r, "sc": json.dumps(nuevos, ensure_ascii=False)})
+                con_importe.pop(k, None)
+        guardar = {**r, "sc": json.dumps(nuevos, ensure_ascii=False)}
+        if con_importe:
+            guardar["sc_importes"] = json.dumps(con_importe, ensure_ascii=False)
+            if {k: tuple(v) for k, v in con_importe.items()} != dos:
+                guardar["repartir"] = True   # recién escritos: que se vean
+        ctx.guardar_ajustes(guardar)
+        ofrecer_precios(ctx, con_importe, sc)
         return
+
+
+def ofrecer_precios(ctx, con_importe, sc):
+    """El precio del subcontrato debe ser la suma de sus dos importes."""
+    p = ctx.presupuesto
+    actuales, cambios, lineas = precios(p), {}, []
+    for k, v in con_importe.items():
+        if k not in actuales:
+            continue
+        rid, antes = actuales[k]
+        suma = api.redondear(sum(v), p.decimales)
+        if abs(suma - antes) > 0.5 * 10 ** -p.decimales:
+            cambios[rid] = suma
+            lineas.append(f"{sc[k][:50]}: {p.moneda.formato(antes, p.decimales)} → "
+                          f"{p.moneda.formato(suma, p.decimales)}")
+    if cambios and ctx.preguntar(t(
+            "Estos subcontratos no cuestan lo que suman sus importes. ¿Cambiar su "
+            "precio en este proyecto?") + "\n" + "\n".join(lineas[:20])):
+        ctx.editar.fijar_precios(cambios)
 
 
 def calcular(p, partida, pct_mat, propios=None):
@@ -173,9 +263,52 @@ def reporte(p):
             notas.append(t("Subcontratos repartidos: {a} materiales y {b} mano de "
                            "obra.").format(a=piezas.pct(p, m),
                                            b=piezas.pct(p, 100 - m)))
+        actuales = precios(p)
+        distintos = [sc[k][:50] for k, v in importes(p.ajustes).items()
+                     if k in sc and k in actuales
+                     and abs(actuales[k][1] - sum(v)) > 0.5 * 10 ** -d]
+        if distintos:
+            notas.append(t("El precio de estos subcontratos no es la suma de sus "
+                           "importes; se reparte en proporción: {que}.").format(
+                               que="; ".join(distintos)))
     elif otros:
         notas.append(t("Los subcontratos y las partidas sin análisis no se reparten."))
     notas.append(t("Reporte informativo: no altera los precios ni el total del "
                    "presupuesto."))
     return api.Documento(t("Materiales y mano de obra"), [
         api.Tabla(cols, filas), *[api.Parrafo(x) for x in notas]], horizontal=True)
+
+
+GRUPOS = (("MO", "MANO DE OBRA"), ("MAT", "MATERIALES"), ("EQ", "EQUIPOS"),
+          ("SC", "SUBCONTRATOS"))
+
+
+def analisis(p):
+    """El subtotal de cada grupo va debajo de sus insumos; el total, al final."""
+    hojas = p.hojas()
+    if not hojas:
+        raise api.ErrorComplemento(t("El presupuesto no tiene partidas."))
+    d = p.decimales
+    cols = [api.Columna(t("Descripción"), 46), api.Columna(t("Und."), 9, "centro"),
+            api.Columna(t("Cantidad"), 13, "derecha", 4),
+            api.Columna(t("P. unitario"), 15, "derecha", d),
+            api.Columna(t("Parcial"), 17, "derecha", d)]
+    bloques = []
+    for x in hojas:
+        filas, suma = [], 0.0
+        for nombre, ins in piezas.bloques_de(x, GRUPOS):
+            filas.append(api.Fila([t(nombre)], "titulo"))
+            filas += [[i.descripcion, i.unidad, i.cantidad, i.precio, i.parcial]
+                      for i in ins]
+            sub = api.redondear(sum(i.parcial for i in ins), d)
+            suma += sub
+            filas.append(api.Fila([t("Subtotal {x}").format(x=t(nombre).lower()),
+                                   None, None, None, sub], "subtotal"))
+        dif = api.redondear(x.precio_unitario - suma, d)
+        if x.acu and dif:
+            filas.append([t("Ajuste de redondeo"), None, None, None, dif])
+        filas.append(api.Fila([t("TOTAL POR UNIDAD"), None, None, None,
+                               x.precio_unitario], "subtotal"))
+        bloques += [api.Titulo(f"{x.item}  {x.descripcion}", 2),
+                    api.Campos([(t("Und."), x.unidad)]), api.Tabla(cols, filas)]
+    return api.Documento(t("Análisis de precios"), bloques)

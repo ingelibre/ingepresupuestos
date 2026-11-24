@@ -20,7 +20,7 @@ NUEVOS = ('apu-mexico', 'ajustar-total', 'impuesto-materiales',
           'presupuesto-con-datos', 'zapatas', 'pais-brasil', 'pu-con-indirectos',
           'pais-espana', 'pais-argentina', 'pais-honduras', 'pais-dominicana',
           'pais-italia', 'acero-facil', 'movimiento-tierras', 'ladrillos',
-          'dosificacion-concreto')
+          'dosificacion-concreto', 'pais-venezuela')
 #: Reportes que van en el idioma del país, no en el del programa.
 EN_SU_IDIOMA = {'pais-brasil', 'pais-italia'}
 

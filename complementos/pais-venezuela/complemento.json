@@ -1,0 +1,27 @@
+{
+  "esquema": 1,
+  "id": "pais-venezuela",
+  "nombre": "Venezuela",
+  "version": "1.0.0",
+  "autor": "IngePresupuestos",
+  "licencia": "GPL-3.0-or-later",
+  "descripcion": "APU de Venezuela: materiales, equipos y mano de obra con rendimiento diario, prestaciones sociales y bono de alimentación a la vista, administración y utilidad en cascada. Importa partidas con código COVENIN desde tu Excel o CSV, con filtro. No trae partidas ni precios, ni cambia los del proyecto.",
+  "api_version": 2,
+  "codigo": "complemento.py",
+  "categorias": [
+    "paises",
+    "reportes",
+    "importar"
+  ],
+  "imagen": "imagen.png",
+  "traducciones": {
+    "en": {
+      "nombre": "Venezuela",
+      "descripcion": "Venezuelan unit price analysis: materials, equipment and labor with daily output, social benefits and meal allowance shown, cascading administration and profit. Imports items with COVENIN code from your Excel or CSV, with a filter. It ships no items or prices and does not change those of the project."
+    },
+    "pt_BR": {
+      "nombre": "Venezuela",
+      "descripcion": "CPU da Venezuela: materiais, equipamentos e mão de obra com produção diária, encargos sociais e vale-alimentação à vista, administração e lucro em cascata. Importa itens com código COVENIN do seu Excel ou CSV, com filtro. Não traz itens nem preços, nem altera os do projeto."
+    }
+  }
+}

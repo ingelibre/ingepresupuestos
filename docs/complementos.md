@@ -51,8 +51,9 @@ Si algo va mal, arranca con `--sin-complementos` (o con la variable
 | Complemento | Clase | Qué trae |
 |---|---|---|
 | `pais-brasil` | código | CNPJ/CPF, pie en portugués, formato de insumos de SINAPI (sin datos), vocabulario, sitio para el INCC, cálculo del BDI (TCU Ac. 2622/2013), «Composição do BDI» y «Planilha orçamentária» con dos formas de redondear. El BDI se copia a mano al pie |
-| `pais-argentina` | código | pesos, CUIT, IVA, «rubro» por «título», el sitio para tu índice CAC (sin valores) y el reporte de materiales / mano de obra: los equipos van en mano de obra y los subcontratos solo se reparten con el % que escribas, uno general y, si quieres, uno propio por insumo |
+| `pais-argentina` | código | pesos, CUIT, IVA, «rubro» por «título», el sitio para tu índice CAC (sin valores) y el reporte de materiales / mano de obra: los equipos van en mano de obra y los subcontratos solo se reparten con el % que escribas, uno general y, si quieres, uno propio por insumo; cada subcontrato con su porcentaje o sus dos importes; y el análisis con el subtotal debajo de cada grupo |
 | `pais-espana` | código | «Presupuesto y mediciones» con IVA editable y «Condiciones generales» |
+| `pais-venezuela` | código | APU con rendimiento diario, prestaciones sociales y bono a la vista, administración y utilidad en cascada (todo en 0 al empezar); importa partidas con código COVENIN de tu Excel o CSV, sin datos incluidos |
 | `pais-honduras` | código | análisis sin cuadrilla, mano de obra en horas o jornales |
 | `pais-dominicana` | código | ITBIS sobre materiales (18 % al empezar) |
 | `pais-italia` | código | EUR, Analisi dei Prezzi, Computo Metrico Estimativo, Elenco Prezzi Unitari, Quadro Economico y sitio para el índice ISTAT |

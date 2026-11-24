@@ -2,10 +2,10 @@
   "esquema": 1,
   "id": "pais-argentina",
   "nombre": "Argentina",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "autor": "IngePresupuestos (issue #22)",
   "licencia": "GPL-3.0-or-later",
-  "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú. Reporte de materiales y mano de obra por partida, que no cambia precios ni totales.",
+  "descripcion": "Argentina: pesos, CUIT, IVA y «rubro» en lugar de «título». El índice CAC viene vacío: se importa con «Importar índice…» desde un CSV (periodo; valor) que consigas tú. Reporte de materiales y mano de obra por partida, que no cambia precios ni totales. Cada subcontrato puede llevar su porcentaje o sus dos importes (materiales y mano de obra). Análisis de precios con el subtotal debajo de cada grupo.",
   "web": "https://github.com/ingelibre/ingepresupuestos/issues/22",
   "paises": [
     {
@@ -51,11 +51,11 @@
   "traducciones": {
     "en": {
       "nombre": "Argentina",
-      "descripcion": "Argentina: pesos, CUIT, IVA and «rubro» instead of «título». The CAC index comes empty: import it with «Import index…» from a CSV (period; value) you obtain yourself. Report of materials and labor per item, which does not change prices or totals."
+      "descripcion": "Argentina: pesos, CUIT, IVA and «rubro» instead of «título». The CAC index comes empty: import it with «Import index…» from a CSV (period; value) you obtain yourself. Report of materials and labor per item, which does not change prices or totals. Each subcontract can have its percentage or its two amounts (materials and labor). Price analysis with the subtotal below each group."
     },
     "pt_BR": {
       "nombre": "Argentina",
-      "descripcion": "Argentina: pesos, CUIT, IVA e «rubro» em vez de «título». O índice CAC vem vazio: é importado com «Importar índice…» de um CSV (período; valor) que você obtiver. Relatório de materiais e mão de obra por item, que não altera preços nem totais."
+      "descripcion": "Argentina: pesos, CUIT, IVA e «rubro» em vez de «título». O índice CAC vem vazio: é importado com «Importar índice…» de um CSV (período; valor) que você obtiver. Relatório de materiais e mão de obra por item, que não altera preços nem totais. Cada subcontrato pode ter seu percentual ou seus dois valores (materiais e mão de obra). Composição com o subtotal abaixo de cada grupo."
     }
   },
   "api_version": 2,

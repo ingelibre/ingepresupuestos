@@ -14,7 +14,7 @@ from tests.test_complementos_incluidos import (  # noqa: F401
 
 TODOS = ('pais-brasil', 'pu-con-indirectos', 'pais-espana', 'pais-argentina',
          'pais-honduras', 'pais-dominicana', 'pais-italia', 'apu-mexico',
-         'apu-chile')
+         'apu-chile', 'pais-venezuela')
 
 
 def _con(p, **aj):
@@ -47,7 +47,8 @@ def test_generan_sin_escribir_y_con_ajustes_raros(nombre, obra, admin, tmp_path)
     antes = contexto.presupuesto(obra[0], admin, nombre)
     claves = ('ac', 'sg', 'modo', 'feito', 'impuesto', 'iva', 'situacion',
               'condiciones', 'mat', 'repartir', 'horas', 'jornales', 'tasa', 'utile',
-              'ribasso', 'sicurezza', 'exacto')
+              'ribasso', 'sicurezza', 'exacto', 'sc_importes', 'fcas', 'bono',
+              'admin', 'utilidad')
     for aj in ({}, *({k: r for k in claves} for r in (
             True, 'x', -5, 1e9, float('nan'), float('inf')))):
         p = _con(antes, **aj)
@@ -292,6 +293,11 @@ class _Ctx:
         return None if r is None else {**{c.clave: c.valor for c in campos}, **r}
 
     def avisar(self, t): self.avisos.append(t)
+
+    def preguntar(self, t):
+        self.avisos.append(t)
+        return True
+
     def guardar_ajustes(self, a): self.ajustes = a
 
 
@@ -306,8 +312,9 @@ def test_argentina_formulario():
                {'sc': [{'insumo': 'YESERO', 'pct': ''},
                        {'insumo': 'PINTOR', 'pct': '12,5 %'}]})
     m.configurar(ctx)
-    assert ctx.campos[0][2].valor == [{'insumo': 'YESERO', 'pct': '30'},
-                                      {'insumo': 'PINTOR', 'pct': ''}]
+    assert ctx.campos[0][2].valor == [
+        {'insumo': 'YESERO', 'pct': '30', 'mat': '', 'mo': ''},
+        {'insumo': 'PINTOR', 'pct': '', 'mat': '', 'mo': ''}]
     assert len(ctx.avisos) == 3 and 'dos veces' in ctx.avisos[1]
     assert ctx.campos[1][2].valor == [{'insumo': 'YESERO', 'pct': 'x'}]
     assert json.loads(ctx.ajustes['sc']) == {B: 12.5}
@@ -421,3 +428,130 @@ def test_auxiliar_que_se_llama_a_si_mismo_no_cuelga():
     x = dataclasses.replace(p.partidas[1], acu=(i,))
     q = dataclasses.replace(p, auxiliares=(aux,), partidas=(p.partidas[0], x))
     assert m.cantidades(q) == {9: 20}
+
+
+def test_argentina_importes_de_un_subcontrato():
+    """Hormigón: 250.000 de mano de obra y 100.000 de materiales."""
+    import json
+    m = _modulo('pais-argentina')
+    pesos = api.Moneda('Pesos Argentinos', '$', '.', ',')
+    for s, v in (('250.000', 250000), ('250000', 250000), ('$ 1.250.000,50', 1250000.5),
+                 ('0', 0), ('', None), ('12,5', 12.5)):
+        assert m.leer_importe(s, pesos) == v, s
+    for s in ('x', '-5', '25.00', '1,2,3', '1e5', 'inf', '٣', '1.000.00'):
+        with pytest.raises(api.ErrorComplemento):
+            m.leer_importe(s, pesos)
+    puestos = []
+    p = dataclasses.replace(_dos_sc(), moneda=pesos)
+    ctx = _Ctx(p, {'sc': [{'insumo': 'YESERO', 'pct': '5', 'mat': '1', 'mo': ''}]},
+               {'sc': [{'insumo': 'YESERO', 'pct': '', 'mat': '0', 'mo': '0'}]},
+               {'sc': [{'insumo': 'YESERO', 'pct': '', 'mat': '100.000',
+                        'mo': '250.000'}]})
+    ctx.editar = type('E', (), {'fijar_precios': lambda s, x: puestos.append(x)})()
+    m.configurar(ctx)
+    assert len(ctx.avisos) == 3 and 'no los dos' in ctx.avisos[0]
+    assert puestos == [{11: 350000}]
+    assert ctx.ajustes['repartir'] is True
+    assert json.loads(ctx.ajustes['sc_importes']) == {A: [100000, 250000]}
+    assert json.loads(ctx.ajustes['sc'])[A] == pytest.approx(100 / 3.5)
+    # Vuelven a salir, y apagar el reparto se respeta.
+    p2 = dataclasses.replace(p, ajustes=ctx.ajustes)
+    ctx2 = _Ctx(p2, {'repartir': False})
+    ctx2.editar = ctx.editar
+    m.configurar(ctx2)
+    f = ctx2.campos[0][2].valor[0]
+    assert (f['pct'], f['mat'], f['mo']) == ('', '100000', '250000')
+    assert ctx2.ajustes['repartir'] is False
+    # El YESERO parcial 10 se reparte 2,86 / 7,14; el precio no cuadra y se dice.
+    doc = _doc('pais-argentina', 'mat-mo', p2)
+    assert 'no es la suma' in _texto(doc)
+    assert m.calcular(p2, p2.hojas()[0], 0.0, m.propios(p2.ajustes)) == {
+        'mat': 52.86, 'mo': 12.14, 'otros': 0}
+
+
+def test_argentina_subtotales_debajo():
+    f = [x for x in _celdas(_doc('pais-argentina', 'acu', presupuesto_ejemplo()))]
+    nombres = [x[0] for x in f]
+    assert nombres == [
+        'MANO DE OBRA', 'OPERARIO', 'Subtotal mano de obra', 'MATERIALES', 'CEMENTO',
+        'Subtotal materiales', 'EQUIPOS', 'HERRAMIENTAS', 'Subtotal equipos',
+        'SUBCONTRATOS', 'FLETE', 'Subtotal subcontratos', 'TOTAL POR UNIDAD']
+    assert [x[4] for x in f if x[0].startswith(('Sub', 'TOT'))] == [
+        10, 50, 0.3, 5, 65.3]
+
+
+# ── Venezuela ────────────────────────────────────────────────────────────────
+
+def _techo(**aj):
+    """El techo de la hoja real: 150 m2/día; mano de obra 745,55/día con 260,06 %
+    de prestaciones y 3,2 trabajadores a 19,25; PU 171,96."""
+    p = presupuesto_ejemplo()
+    I = api.Insumo
+    acu = (I(1, 'M', 'TERMOPANEL', 'MAT', 'm2', 0, 1, 166.27, 166.27),
+           I(2, 'E', 'ANDAMIO', 'EQ', 'día', 1, 1 / 150, 108.73, 0.72),
+           I(3, 'O', 'MONTADOR', 'MO', 'día', 1.2, 1.2 / 150, 400.0, 3.20),
+           I(4, 'A', 'AYUDANTE', 'MO', 'hh', 2, 16 / 150, 16.6, 1.77))
+    x = dataclasses.replace(
+        p.hojas()[0], descripcion='E.392.100.010 Cubierta de techo', unidad='m2',
+        rendimiento=150.0, acu=acu, precio_unitario=171.96, parcial=1719.6)
+    return dataclasses.replace(p, partidas=(p.partidas[0], x), costo_directo=1719.6,
+                               ajustes=aj)
+
+
+def test_venezuela_contra_la_hoja_real():
+    m = _modulo('pais-venezuela')
+    p = _techo(fcas=260.06, bono=19.25, admin=15.0, utilidad=10.0)
+    c = m.calcular(p, p.hojas()[0], m.datos(p.ajustes))
+    # Hoja: 189,95 + 493,99 + 61,60 al día, entre 150 → 1,27 + 3,29 + 0,41
+    assert c['mo'] == {'base': 1.27, 'prestaciones': 3.29, 'bono': 0.41}
+    assert sum(c['sub'].values()) == pytest.approx(171.96)
+    # 15 % = 25,79; 10 % de 197,75 = 19,78; 217,53
+    assert (c['adm'], c['uti'], c['precio']) == (25.79, 19.78, 217.53)
+    doc = _doc('pais-venezuela', 'apu', p)
+    campos = dict(next(b for b in doc.bloques if isinstance(b, api.Campos)).pares)
+    assert campos['Código COVENIN'] == 'E.392.100.010'
+    f = {x[0]: x for x in _celdas(doc)}
+    assert f['AYUDANTE'][1:5] == ['día', 2, pytest.approx(132.8), pytest.approx(265.6)]
+    assert f['PRECIO UNITARIO'][-1] == 217.53
+
+
+def test_venezuela_no_inventa_porcentajes():
+    m = _modulo('pais-venezuela')
+    assert set(m.datos({}).values()) == {0.0}
+    assert m.datos({'fcas': float('nan'), 'bono': -1, 'admin': True}) == m.datos({})
+    nombres = [x[0] for x in _celdas(_doc('pais-venezuela', 'apu', _techo()))]
+    assert 'PRECIO UNITARIO' not in nombres and 'De ello: mano de obra directa' not in nombres
+    # Un bono mayor que la mano de obra no da negativos: se dice.
+    doc = _doc('pais-venezuela', 'apu', _techo(bono=1e6))
+    assert 'El bono no se separó' in _texto(doc)
+
+
+def test_venezuela_importa_partidas(tmp_path):
+    from openpyxl import Workbook
+    m = _modulo('pais-venezuela')
+    wb = Workbook()
+    ws = wb.active
+    for fila in (['TABULADOR'], ['PARTIDA #', 'CÓDIGO', 'DESCRIPCIÓN', 'UNIDAD', 'P.U.'],
+                 [1, 'E.111.110.000', 'OFICINAS,\n CON FRISO', 'M2', 1.5],
+                 [2, 'E.111.110.000', 'OFICINAS, CON FRISO', 'm2', 2],
+                 [3, 'e.321.000.010', 'EXCAVACIÓN A MANO', 'm3', None],
+                 [4, 'TOTAL', 'nada', None, None], [None], [5, 'E.111']):
+        ws.append(fila)
+    wb.save(tmp_path / 'a.xlsx')
+    todas = m.leer(str(tmp_path / 'a.xlsx'))
+    assert todas == [('E.111.110.000', 'OFICINAS, CON FRISO', 'm2'),
+                     ('E.321.000.010', 'EXCAVACIÓN A MANO', 'm3')]
+    (tmp_path / 'a.csv').write_bytes(
+        'Código;Descripción;Unidad\nE.111.110.000;Baño;m2\n'.encode('cp1252'))
+    assert m.leer(str(tmp_path / 'a.csv')) == [('E.111.110.000', 'Baño', 'm2')]
+    (tmp_path / 'b.xlsx').write_bytes(b'no es un excel')
+    with pytest.raises(api.ErrorComplemento):
+        m.leer(str(tmp_path / 'b.xlsx'))
+    ctx = _Ctx(presupuesto_ejemplo(), {'inicio': 'E.9', 'contiene': ''},
+               {'inicio': 'e.3', 'contiene': 'excavacion'})
+    r = m.importar(str(tmp_path / 'a.xlsx'), ctx)
+    assert len(ctx.avisos) == 1
+    assert [(x.descripcion, x.unidad, x.metrado) for x in r] == [
+        ('E.321.000.010 EXCAVACIÓN A MANO', 'm3', None)]
+    ctx = _Ctx(presupuesto_ejemplo(), None)
+    assert m.importar(str(tmp_path / 'a.xlsx'), ctx) == []
