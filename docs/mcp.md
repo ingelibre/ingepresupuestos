@@ -36,6 +36,10 @@ Al cerrar sesión se apaga.
 | `search_library`, `search_resources` | Biblioteca de partidas, catálogo de insumos |
 | `validate` | Partidas sin metrado, sin ACU, con precio cero, etc. |
 | `screenshot` | La vista del proyecto (nunca Configuración, usuarios ni acceso) |
+| `get_specs`, `get_memoria` | Especificaciones técnicas (cuáles faltan y su texto) y memoria descriptiva |
+| `get_overhead`, `get_formula` | Detalle de gastos generales; fórmula polinómica, K e incidencia de cada índice |
+| `get_schedule`, `s_curve` | Cronograma con ruta crítica; curva S programada y real |
+| `list_valuations`, `get_valuation` | Valorizaciones de obra y su detalle |
 | `bim_models`, `bim_diff` | Modelos registrados; qué cambió en el modelo |
 
 | Escribir | |
@@ -45,8 +49,12 @@ Al cerrar sesión se apaga.
 | `create_project`, `add_items` | Proyecto nuevo; títulos y partidas (desde biblioteca, con su ACU) |
 | `set_metrado` | Planilla o cantidad. Si ya hay planilla exige `replace: true` |
 | `set_acu`, `set_price`, `set_schedule` | Análisis, precio del insumo **en ese proyecto**, cronograma |
+| `set_specs`, `set_memoria` | Redactar especificaciones y memoria. No pisan un texto sin `replace: true` ni pierden imágenes sin `discard_images: true` |
+| `set_overhead` | Detalle de gastos generales u otro rubro del pie |
+| `set_formula` | Fórmula polinómica, automática o con los grupos que se le den; los coeficientes los calcula la app. `preview: true` no guarda |
+| `create_valuation`, `set_valuation_progress` | Valorizaciones: solo «En ejecución», nunca una cerrada ni lo que sale del cuaderno de obra |
 | `bim_apply`, `link_elements`, `show_in_model` | Registrar o actualizar el modelo, vincular, señalar en IngeTrazo |
-| `export_report` | PDF, o Excel de los reportes que lo tienen, en una ruta absoluta; no sobrescribe sin `overwrite: true` |
+| `export_report` | PDF, o Excel y Word de los reportes que los tienen, en una ruta absoluta; no sobrescribe sin `overwrite: true` |
 | `undo_last` | Deshace el último cambio hecho por el asistente |
 
 Las partidas con elementos BIM vinculados se miden por el modelo: `set_metrado`
@@ -59,12 +67,14 @@ Gantt con las opciones de la pestaña Cronograma.
 
 Casi todas las escrituras aceptan `dry_run: true`: no se guarda nada y responden
 qué pasaría y el total antes y después. No lo admiten `create_project`,
-`undo_last`, `bim_apply` ni `link_elements` (para el modelo está `bim_diff`).
+`undo_last`, `create_valuation`, `bim_apply` ni `link_elements` (para el modelo
+está `bim_diff`); `set_formula` usa `preview`.
 
 ## Pedidos listos
 
 El cliente los ofrece en su menú: presupuestar el modelo BIM, revisar el
-presupuesto, qué cambió en el modelo y presupuesto desde una descripción.
+presupuesto, qué cambió en el modelo, presupuesto desde una descripción, redactar
+especificaciones y armar la fórmula polinómica.
 
 ## Deshacer
 
@@ -76,8 +86,8 @@ o la ventana de conexión) lo devuelve con los mismos identificadores.
 Si editaste el proyecto después, avisa: deshacer también perdería lo tuyo. Solo
 continúa si lo confirmas tú en la app; el asistente no puede forzarlo.
 
-Mientras escribes en una celda, tienes un diálogo abierto o especificaciones
-sin guardar, los cambios del asistente se rechazan con «ocupado». Las lecturas
+Mientras escribes en una celda, tienes un diálogo abierto o especificaciones,
+memoria o fórmula sin guardar, los cambios del asistente se rechazan con «ocupado». Las lecturas
 sí se atienden.
 
 ## Seguridad
