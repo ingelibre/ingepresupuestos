@@ -5255,6 +5255,7 @@ class ProyectoView(QWidget):
         conn.commit()
         conn.close()
         self._proy['memoria_descriptiva'] = valor
+        self.txt_memoria.document().setModified(False)
         if getattr(self, 'lbl_memoria_estado', None):
             self.lbl_memoria_estado.setText(tr("✓ Guardado"))
             self.lbl_memoria_estado.setStyleSheet("font-size:10px; color:#68B723; border:none;")
@@ -10004,28 +10005,8 @@ class ProyectoView(QWidget):
 
     @staticmethod
     def _plain_to_html_spec(texto: str) -> str:
-        import re, html
-        lineas = texto.split('\n')
-        partes = []
-        for linea in lineas:
-            linea_strip = linea.strip()
-            escaped = html.escape(linea_strip)
-            es_titulo = (
-                re.match(r'^\d+\.\s+[A-ZÁÉÍÓÚÑÜ\s\/\-]+$', linea_strip) or
-                (len(linea_strip) >= 5
-                 and linea_strip == linea_strip.upper()
-                 and re.search(r'[A-ZÁÉÍÓÚÑ]', linea_strip))
-            )
-            if es_titulo:
-                partes.append(
-                    f'<p style="text-align:left;">'
-                    f'<b><span style="color:#000000;">{escaped}</span></b></p>'
-                )
-            elif linea_strip:
-                partes.append(f'<p style="text-align:justify;">{escaped}</p>')
-            else:
-                partes.append('<p></p>')
-        return ''.join(partes)
+        from core.textos_spec import a_html
+        return a_html(texto)
 
     def _insertar_seccion_spec(self, titulo: str):
         cursor = self.txt_spec.textCursor()

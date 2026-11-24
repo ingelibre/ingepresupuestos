@@ -373,6 +373,13 @@ class PuenteMCP(QObject):
             if getattr(v, '_spec_modificada', False):
                 raise Ocupado("ocupado: hay especificaciones técnicas sin "
                               "guardar")
+            memo = getattr(v, 'txt_memoria', None)
+            if memo is not None and memo.document().isModified():
+                raise Ocupado("ocupado: la memoria descriptiva tiene cambios "
+                              "sin guardar")
+            if getattr(getattr(v, '_formula_view', None), '_sucio', False):
+                raise Ocupado("ocupado: la fórmula polinómica tiene cambios "
+                              "sin guardar")
             if foco is not None and v.isAncestorOf(foco) \
                     and foco is not getattr(v, 'inp_buscar', None):
                 celda = any(isinstance(p, QAbstractItemView)
@@ -483,7 +490,10 @@ def refrescar_proyecto_view(v):
         elif est not in vivas:
             est = None
         v.cargar_insumos(est)
-    for nombre in ('_metrados_view', '_cron_view', '_control_view'):
+    if getattr(v, 'txt_memoria', None) is not None:
+        v._memoria_set_texto(v._proy.get('memoria_descriptiva') or '')
+    for nombre in ('_metrados_view', '_cron_view', '_control_view',
+                   '_formula_view'):
         sub = getattr(v, nombre, None)
         if sub is not None and hasattr(sub, 'cargar'):
             if nombre == '_cron_view':

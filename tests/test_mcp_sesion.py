@@ -86,7 +86,7 @@ def test_sesion_completa(app, tmp_path):
     ini = c.rpc("initialize", {"protocolVersion": "2025-06-18"})["result"]
     assert ini["serverInfo"]["name"] == "ingepresupuestos"
     tools = {t["name"]: t for t in c.rpc("tools/list")["result"]["tools"]}
-    assert len(tools) == 31 and "run_python" not in tools
+    assert len(tools) == 45 and "run_python" not in tools
     assert all(t["inputSchema"]["additionalProperties"] is False
                for t in tools.values())
 
@@ -252,7 +252,7 @@ def test_mcp_no_importa_qt_ni_sqlite():
         capture_output=True, text=True, timeout=30)
     assert r.returncode == 0 and "PySide6" not in r.stderr
     assert "sqlite3" not in r.stderr
-    assert len(json.loads(r.stdout)["result"]["tools"]) == 31
+    assert len(json.loads(r.stdout)["result"]["tools"]) == 45
 
 
 def test_acepta_el_bom_de_powershell(tmp_path):

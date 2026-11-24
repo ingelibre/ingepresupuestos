@@ -243,7 +243,11 @@ def test_dry_run_de_cada_escritura_no_deja_rastro(obra):
         "delete_items": (pid, [i["x"]]),
         "edit_acu": (i["x"], [{"resource_id": rid, "quantity": 1}]),
         "update_project": None,
-        "set_footer": (pid, [{"name": "n", "kind": "pct_cd", "pct": 1}])}
+        "set_footer": (pid, [{"name": "n", "kind": "pct_cd", "pct": 1}]),
+        "set_specs": (pid, [{"item_id": i["x"], "text": "t"}]),
+        "set_memoria": (pid, "t"),
+        "set_overhead": (pid, [{"description": "g", "quantity": 1, "price": 2}], "GG"),
+        "set_valuation_progress": None}
     assert set(llamadas) == set(mcp_esquemas.SIMULABLES)
 
     def foto():
@@ -253,13 +257,22 @@ def test_dry_run_de_cada_escritura_no_deja_rastro(obra):
                                         "type='table' AND name NOT LIKE '%fts%'")}
         conn.close()
         return out
+    obra.set_footer(pid, [{"code": "GG", "name": "GG", "kind": "rubro", "pct": 1}])
+    sql("INSERT INTO valorizaciones (id, proyecto_id, numero) VALUES (77,?,1)", pid)
     antes = foto()
     obra.simular = True
     for nombre, a in llamadas.items():
+        if nombre == "set_valuation_progress":
+            continue
         r = (obra.update_project(pid, client="x") if a is None
              else getattr(obra, nombre)(*a))
         assert r["dry_run"], nombre
         assert foto() == antes, nombre
+    sql("UPDATE proyectos SET estado='ejecutado' WHERE id=?", pid)
+    antes = foto()
+    assert obra.set_valuation_progress(
+        77, [{"item_id": i["x"], "quantity": 1}])["dry_run"]
+    assert foto() == antes
 
 
 def test_dry_run_solo_donde_se_ofrece():

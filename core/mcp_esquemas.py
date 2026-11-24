@@ -60,6 +60,7 @@ REPORTES = ("presupuesto", "resumen", "gastos_generales", "insumos",
             "cronograma_curva_s", "completo")
 REPORTES_XLSX = ("presupuesto", "insumos", "insumos_sub", "acus", "metrados",
                  "gastos_generales", "completo")
+REPORTES_DOCX = ("resumen", "especificaciones", "memoria_descriptiva")
 
 HERRAMIENTAS: list[dict] = [
     # ── Lectura ──────────────────────────────────────────────────────────
@@ -282,15 +283,121 @@ HERRAMIENTAS: list[dict] = [
                     "en ese caso solo él puede deshacer, desde la app.",
      "inputSchema": _obj({})},
     # ── Salida ───────────────────────────────────────────────────────────
+    # ── Especificaciones, memoria, gastos, fórmula, obra ─────────────────
+    {"name": "get_specs", "lee": True,
+     "description": "Especificaciones técnicas. Sin item_ids: qué partidas "
+                    "tienen y cuáles no. Con item_ids: su texto.",
+     "inputSchema": _obj({"project_id": _PID,
+                          "item_ids": {"type": "array", "minItems": 1,
+                                       "maxItems": 30, "items": _PART},
+                          "offset": _DESDE, "limit": _LIMITE}, ("project_id",))},
+    {"name": "set_specs", "lee": False, "destruye": True,
+     "description": "Escribe especificaciones técnicas en texto plano (sin "
+                    "markdown; cada sección con su título en mayúsculas en una "
+                    "línea: «1. DESCRIPCIÓN»). Lee antes get_acu: materiales y "
+                    "equipos deben ser los de la partida. No pisa un texto "
+                    "existente sin `replace: true`.",
+     "inputSchema": _obj({"project_id": _PID, "specs": {
+         "type": "array", "minItems": 1, "maxItems": 30, "items": _obj({
+             "item_id": _PART,
+             "text": {"type": "string", "minLength": 1, "maxLength": 20000}},
+             ("item_id", "text"))},
+         "replace": _BOOL, "discard_images": _BOOL}, ("project_id", "specs"))},
+    {"name": "get_memoria", "lee": True,
+     "description": "Memoria descriptiva del proyecto, en texto.",
+     "inputSchema": _obj({"project_id": _PID}, ("project_id",))},
+    {"name": "set_memoria", "lee": False, "destruye": True,
+     "description": "Escribe la memoria descriptiva (texto plano, secciones "
+                    "«1. …» en mayúsculas). No la pisa sin `replace: true`.",
+     "inputSchema": _obj({"project_id": _PID,
+                          "text": {"type": "string", "minLength": 1,
+                                   "maxLength": 100000},
+                          "replace": _BOOL, "discard_images": _BOOL},
+                         ("project_id", "text"))},
+    {"name": "get_overhead", "lee": True,
+     "description": "Detalle de un rubro del pie (por defecto GG, los gastos "
+                    "generales): personal, oficina, seguros…",
+     "inputSchema": _obj({"project_id": _PID, "code": _TXT}, ("project_id",))},
+    {"name": "set_overhead", "lee": False, "destruye": True,
+     "description": "Escribe el detalle completo de un rubro del pie. Cada fila: "
+                    "`group: true` con description, o un gasto con quantity y "
+                    "price (participation_pct 100 si no se da). Monto = "
+                    "cantidad × participación × precio.",
+     "inputSchema": _obj({"project_id": _PID, "code": _TXT, "rows": {
+         "type": "array", "minItems": 1, "maxItems": 200, "items": _obj({
+             "group": _BOOL, "description": dict(_TXT, minLength=1), "unit": _TXT,
+             "quantity": _POS, "price": _POS,
+             "participation_pct": {"type": "number", "minimum": 0,
+                                   "maximum": 100}}, ("description",))},
+         "replace": _BOOL}, ("project_id", "rows"))},
+    {"name": "get_formula", "lee": True,
+     "description": "Fórmula polinómica: monomios guardados, períodos, K, y la "
+                    "incidencia de cada índice unificado en la obra.",
+     "inputSchema": _obj({"project_id": _PID, "formula_id": _ID},
+                         ("project_id",))},
+    {"name": "set_formula", "lee": False, "destruye": True,
+     "description": "Arma y guarda la fórmula polinómica. Sin `monomials`, "
+                    "agrupa sola según el D.S. 011-79-VC. Con `monomials`, "
+                    "reparte TODOS los índices de get_formula (menos GU, que se "
+                    "agrega solo). Los coeficientes los calcula la app y suman "
+                    "1.000. `preview: true` no guarda.",
+     "inputSchema": _obj({"project_id": _PID, "formula_id": _ID, "monomials": {
+         "type": "array", "minItems": 1, "maxItems": 8, "items": _obj({
+             "symbol": {"type": "string", "minLength": 1, "maxLength": 4},
+             "description": _TXT,
+             "index_codes": {"type": "array", "minItems": 1, "maxItems": 80,
+                             "items": {"type": "string", "minLength": 1,
+                                       "maxLength": 4}}}, ("index_codes",))},
+         "periods": _obj({
+             "base_year": {"type": "integer", "minimum": 1990, "maximum": 2100},
+             "base_month": {"type": "integer", "minimum": 1, "maximum": 12},
+             "adjust_year": {"type": "integer", "minimum": 1990, "maximum": 2100},
+             "adjust_month": {"type": "integer", "minimum": 1, "maximum": 12},
+             "area": {"type": "string", "pattern": "[0-9]{2}"}}),
+         "replace": _BOOL, "preview": _BOOL}, ("project_id",))},
+    {"name": "get_schedule", "lee": True,
+     "description": "Cronograma: duración, predecesoras, inicio y fin (día de "
+                    "obra) y ruta crítica de cada partida.",
+     "inputSchema": _obj({"project_id": _PID, "offset": _DESDE,
+                          "limit": _LIMITE}, ("project_id",))},
+    {"name": "s_curve", "lee": True,
+     "description": "Curva S: avance programado, reprogramado y real por período.",
+     "inputSchema": _obj({"project_id": _PID, "period": {
+         "type": "string", "enum": ["month", "week", "calendar_month"]}},
+         ("project_id",))},
+    {"name": "list_valuations", "lee": True,
+     "description": "Valorizaciones de obra con sus montos y avance.",
+     "inputSchema": _obj({"project_id": _PID}, ("project_id",))},
+    {"name": "get_valuation", "lee": True,
+     "description": "Una valorización: metrado contratado, anterior, actual y "
+                    "acumulado por partida, y su reajuste.",
+     "inputSchema": _obj({"valuation_id": _ID, "only_executed": _BOOL,
+                          "offset": _DESDE, "limit": _LIMITE},
+                         ("valuation_id",))},
+    {"name": "create_valuation", "lee": False,
+     "description": "Crea la siguiente valorización. Solo con el proyecto «En "
+                    "ejecución». Fechas aaaa-mm-dd.",
+     "inputSchema": _obj({
+         "project_id": _PID,
+         "from_date": {"type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"},
+         "to_date": {"type": "string", "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"}},
+         ("project_id", "from_date", "to_date"))},
+    {"name": "set_valuation_progress", "lee": False, "destruye": True,
+     "description": "Metrado ejecutado en el período por partida (el del "
+                    "período, no el acumulado). Avisa si pasa del contratado.",
+     "inputSchema": _obj({"valuation_id": _ID, "items": {
+         "type": "array", "minItems": 1, "maxItems": 500, "items": _obj({
+             "item_id": _PART, "quantity": _POS}, ("item_id", "quantity"))}},
+         ("valuation_id", "items"))},
     {"name": "export_report", "lee": True,
-     "description": "Genera un reporte en PDF o Excel en la ruta absoluta "
+     "description": "Genera un reporte en PDF, Excel o Word en la ruta absoluta "
                     "dada. No pisa un archivo existente sin "
                     "`overwrite: true`.",
      "inputSchema": _obj({
          "project_id": _PID,
          "report": {"type": "string", "enum": list(REPORTES)},
          "path": {"type": "string", "minLength": 1, "maxLength": 4096,
-                  "description": "Ruta absoluta terminada en .pdf o .xlsx."},
+                  "description": "Ruta absoluta terminada en .pdf, .xlsx o .docx."},
          "overwrite": _BOOL, "cover": _BOOL},
          ("project_id", "report", "path"))},
     {"name": "screenshot", "lee": True,
@@ -340,7 +447,8 @@ HERRAMIENTAS: list[dict] = [
 #: de esta app, o no tienen qué medir).
 SIMULABLES = ("add_items", "set_metrado", "set_acu", "set_price", "set_schedule",
               "edit_items", "move_item", "copy_item", "delete_items", "edit_acu",
-              "update_project", "set_footer")
+              "update_project", "set_footer", "set_specs", "set_memoria",
+              "set_overhead", "set_valuation_progress")
 for _h in HERRAMIENTAS:
     if _h["name"] in SIMULABLES:
         _h["inputSchema"]["properties"]["dry_run"] = {

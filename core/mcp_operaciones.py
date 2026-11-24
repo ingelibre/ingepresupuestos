@@ -20,7 +20,15 @@ from pathlib import Path
 
 from core import estructura_ops, mcp_deshacer, partidas_ops as ops
 from core.config import ESTADOS_PROYECTO_NOMBRE, puede_editar
-from core.mcp_esquemas import REPORTES_XLSX
+from core.mcp_esquemas import REPORTES_DOCX, REPORTES_XLSX
+
+
+#: Qué permiso pide cada escritura que no es de «presupuesto»/«cronograma».
+#: Deshacerla pide el mismo: en «En revisión» se pueden escribir
+#: especificaciones, y por tanto también deshacerlas.
+NIVEL = {'set_specs': 'specs', 'set_memoria': 'specs', 'set_overhead': 'pie',
+         'set_formula': 'pie', 'create_valuation': 'obra',
+         'set_valuation_progress': 'obra'}
 
 
 class ErrorMCP(Exception):
@@ -76,6 +84,11 @@ class Operaciones:
     def _editable(self, proy: dict, nivel: str = 'presupuesto'):
         self._puede_escribir()
         estado = proy.get('estado') or 'elaboracion'
+        if nivel == 'obra':            # como Control de Obra en la app
+            if estado != 'ejecutado':
+                raise ErrorMCP("las valorizaciones solo se registran con el "
+                               "proyecto «En ejecución»")
+            return
         if not puede_editar(estado, nivel):
             raise ErrorMCP(
                 f"el proyecto está «{ESTADOS_PROYECTO_NOMBRE.get(estado, estado)}» "
@@ -138,14 +151,15 @@ class Operaciones:
                 "note": "no se guardó nada; los ids nuevos no existen",
                 "would_return": res}
 
-    def _externa(self, herramienta: str, pid: int, accion):
+    def _externa(self, herramienta: str, pid: int, accion,
+                 nivel: str = 'presupuesto'):
         """Como `_escribir` para código que abre su propia conexión y hace su
         propio commit (core.bim_modelo). Si falla a medias, se restaura."""
         from core.database import get_db
         conn = get_db()
         try:
             proy = self._proyecto(conn, pid)
-            self._editable(proy)
+            self._editable(proy, nivel)
             antes = mcp_deshacer.volcar(conn, pid)
         finally:
             conn.close()
@@ -1217,7 +1231,9 @@ class Operaciones:
                 proy = self._proyecto(conn, pid)
             finally:
                 conn.close()
-            for nivel in ('presupuesto', 'cronograma'):
+            ult = self.pila.resumen() or {}
+            propio = None if force else NIVEL.get(ult.get('herramienta'))
+            for nivel in ((propio,) if propio else ('presupuesto', 'cronograma')):
                 self._editable(proy, nivel)
         try:
             r = mcp_deshacer.deshacer_ultima(self.pila, forzar=force,
@@ -1235,6 +1251,586 @@ class Operaciones:
             r['project_id'])
         return r
 
+    # ── Especificaciones y memoria ───────────────────────────────────────
+    def get_specs(self, project_id: int, item_ids: list | None = None,
+                  offset: int = 0, limit: int = 100):
+        from core.database import get_db
+        from core.textos_spec import a_texto
+        conn = get_db()
+        try:
+            self._proyecto(conn, project_id)
+            filas = [p for p in ops.partidas_en_orden(conn, project_id)
+                     if not p['es_titulo']]
+        finally:
+            conn.close()
+        if item_ids:
+            por_id = {p['id']: p for p in filas}
+            malas = [i for i in item_ids if i not in por_id]
+            if malas:
+                raise ErrorMCP(f"no son partidas de este proyecto: {malas}")
+            filas = [por_id[i] for i in dict.fromkeys(item_ids)]
+        total = len(filas)
+        textos = [a_texto(p['especificaciones']) for p in filas]
+        sin = sum(1 for t, n in textos if not t)
+        out = []
+        for p, (t, n) in list(zip(filas, textos))[
+                0 if item_ids else offset:None if item_ids else offset + limit]:
+            d = {"item_id": p['id'], "item": p['item'],
+                 "description": p['descripcion'], "unit": p['unidad'] or '',
+                 "chars": len(t), "images": n}
+            if item_ids:
+                d["text"] = t
+            out.append(d)
+        return {"total": total, "without_spec": sin, "items": out}
+
+    @staticmethod
+    def _cuidar_texto(donde, anterior, replace, discard_images):
+        """Lo escrito por el usuario no se pisa sin que lo pida."""
+        from core.textos_spec import a_texto
+        texto, imagenes = a_texto(anterior)
+        if texto and not replace:
+            raise ErrorMCP(f"{donde} ya tiene texto; léelo y pasa replace: true "
+                           "para reemplazarlo")
+        if imagenes and not discard_images:
+            raise ErrorMCP(f"{donde} tiene {imagenes} imagen(es) que se "
+                           "perderían; pasa discard_images: true solo si el "
+                           "usuario lo aprueba")
+
+    def set_specs(self, project_id: int, specs: list, replace: bool = False,
+                  discard_images: bool = False):
+        from core.textos_spec import a_html
+
+        def cambio(conn, proy):
+            por_id = {p['id']: p for p in ops.partidas_en_orden(conn, project_id)}
+            vistos = set()
+            for n, x in enumerate(specs):
+                p = por_id.get(x['item_id'])
+                if p is None:
+                    raise ErrorMCP(f"specs[{n}]: la partida {x['item_id']} no es "
+                                   "de este proyecto")
+                if p['es_titulo']:
+                    raise ErrorMCP(f"specs[{n}]: un título no lleva especificación")
+                if p['id'] in vistos:
+                    raise ErrorMCP(f"specs[{n}]: la partida se repite")
+                vistos.add(p['id'])
+                self._cuidar_texto(f"specs[{n}] ({p['item']})",
+                                   p['especificaciones'], replace, discard_images)
+                conn.execute("UPDATE partidas SET especificaciones=? WHERE id=?",
+                             (a_html(x['text'].strip()), p['id']))
+            return {"updated": sorted(vistos)}
+        return self._escribir('set_specs', project_id, 'specs', cambio)
+
+    def get_memoria(self, project_id: int):
+        from core.database import get_db
+        from core.textos_spec import a_texto
+        conn = get_db()
+        try:
+            p = self._proyecto(conn, project_id)
+        finally:
+            conn.close()
+        texto, n = a_texto(p.get('memoria_descriptiva'))
+        return {"project_id": project_id, "text": texto, "images": n}
+
+    def set_memoria(self, project_id: int, text: str, replace: bool = False,
+                    discard_images: bool = False):
+        from core.textos_spec import a_html
+
+        def cambio(conn, proy):
+            self._cuidar_texto("la memoria", proy.get('memoria_descriptiva'),
+                               replace, discard_images)
+            conn.execute("UPDATE proyectos SET memoria_descriptiva=? WHERE id=?",
+                         (a_html(text.strip()), project_id))
+            return {"project_id": project_id, "chars": len(text.strip())}
+        return self._escribir('set_memoria', project_id, 'specs', cambio)
+
+    # ── Detalle de gastos (generales u otro rubro del pie) ───────────────
+    def _rubro(self, conn, proy, code):
+        lineas, guardadas = self._lineas_pie(conn, proy)
+        ln = next((x for x in lineas if x['codigo'] == code), None)
+        if ln is None:
+            raise ErrorMCP(f"no existe el código {code} (usa get_footer)")
+        return ln, guardadas
+
+    @staticmethod
+    def _filas_gasto(conn, pid, code):
+        return [dict(r) for r in conn.execute(
+            "SELECT tipo, descripcion, unidad, cantidad, pct_participacion, "
+            "precio FROM gastos_generales WHERE proyecto_id=? AND rubro=? "
+            "ORDER BY orden, id", (pid, code))]
+
+    def get_overhead(self, project_id: int, code: str = "GG"):
+        from core import pie
+        from core.database import get_db, calcular_totales
+        conn = get_db()
+        try:
+            proy = self._proyecto(conn, project_id)
+            ln, guardadas = self._rubro(conn, proy, code)
+            filas = self._filas_gasto(conn, project_id, code)
+            cd = calcular_totales(project_id, conn)[1]['cd']
+            lineas, _t = pie.pie_efectivo(conn, project_id, cd)
+        finally:
+            conn.close()
+        rows, fijo = [], None
+        for f in filas:
+            if f['tipo'] == 'manual':
+                fijo = f['precio'] or 0
+            elif f['tipo'] == 'item':
+                rows.append({"description": f['descripcion'] or '',
+                             "unit": f['unidad'] or '',
+                             "quantity": f['cantidad'] or 0,
+                             "participation_pct": 100 if f['pct_participacion'] is None
+                             else f['pct_participacion'],
+                             "price": f['precio'] or 0})
+            else:
+                rows.append({"group": True, "description": f['descripcion'] or ''})
+        return {"code": code, "name": ln['nombre'], "kind": ln['tipo'],
+                "configured": guardadas, "fixed_amount": fijo, "rows": rows,
+                "amount": next((x['valor'] for x in lineas or []
+                                if x['codigo'] == code), 0),
+                "direct_cost": cd}
+
+    def set_overhead(self, project_id: int, rows: list, code: str = "GG",
+                     replace: bool = False):
+        def cambio(conn, proy):
+            from core import pie
+            from core.database import calcular_totales
+            ln, guardadas = self._rubro(conn, proy, code)
+            if not guardadas:
+                raise ErrorMCP("el pie del proyecto aún no está configurado; "
+                               "guárdalo antes con set_footer (get_footer da sus "
+                               "líneas)")
+            if ln['tipo'] != 'rubro':
+                raise ErrorMCP(f"{code} es un porcentaje ({ln['tipo']}); un "
+                               "detalle solo cuenta en kind «rubro»: cámbialo con "
+                               "set_footer")
+            if not any(not r.get('group') for r in rows):
+                raise ErrorMCP("el detalle no tiene ningún gasto")
+            hay = self._filas_gasto(conn, project_id, code)
+            if hay and not replace:
+                que = ("un monto fijo" if any(f['tipo'] == 'manual' for f in hay)
+                       else "un detalle")
+                raise ErrorMCP(f"{code} ya tiene {que}; pasa replace: true para "
+                               "reemplazarlo")
+            conn.execute("DELETE FROM gastos_generales WHERE proyecto_id=? AND "
+                         "rubro=?", (project_id, code))
+            base = conn.execute("SELECT COALESCE(MAX(orden),0) FROM "
+                                "gastos_generales WHERE proyecto_id=?",
+                                (project_id,)).fetchone()[0] or 0
+            for n, r in enumerate(rows, 1):
+                grupo = bool(r.get('group'))
+                sobra = {'unit', 'quantity', 'price', 'participation_pct'} & set(r)
+                if grupo and sobra:
+                    raise ErrorMCP(f"rows[{n - 1}]: un grupo solo lleva "
+                                   "description")
+                if not grupo and not {'quantity', 'price'} <= set(r):
+                    raise ErrorMCP(f"rows[{n - 1}]: faltan quantity y price")
+                conn.execute(
+                    "INSERT INTO gastos_generales (proyecto_id, rubro, tipo, "
+                    "descripcion, unidad, cantidad, pct_participacion, precio, "
+                    "orden) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (project_id, code, 'grupo' if grupo else 'item',
+                     r['description'].strip(), r.get('unit', ''),
+                     None if grupo else r['quantity'],
+                     None if grupo else r.get('participation_pct', 100),
+                     None if grupo else r['price'], base + n))
+            t = calcular_totales(project_id, conn)[1]
+            lineas, _x = pie.pie_efectivo(conn, project_id, t['cd'])
+            return {"code": code, "active": bool(ln['activo']),
+                    "amount": next((x['valor'] for x in lineas or []
+                                    if x['codigo'] == code), 0),
+                    "direct_cost": t['cd'], "total": t['total']}
+        return self._escribir('set_overhead', project_id, 'pie', cambio)
+
+    # ── Fórmula polinómica (los coeficientes los calcula core) ───────────
+    def _formula_lista(self, conn, pid, formula_id):
+        """(fila de la fórmula o None, todas). Sin crear nada al leer."""
+        todas = [dict(r) for r in conn.execute(
+            "SELECT id, numero, nombre FROM formulas WHERE proyecto_id=? "
+            "ORDER BY numero", (pid,))]
+        if formula_id is None:
+            return (todas[0] if todas else None), todas
+        f = next((x for x in todas if x['id'] == formula_id), None)
+        if f is None:
+            raise ErrorMCP(f"no existe la fórmula {formula_id} (usa get_formula)")
+        return f, todas
+
+    @staticmethod
+    def _monomio(m):
+        return {"symbol": m.get('simbolo') or '',
+                "description": m.get('descripcion') or '',
+                "index_code": m.get('indice_inei') or '',
+                "coefficient": m.get('coeficiente') or 0,
+                "indices": [{"code": c['codigo'], "name": c.get('nombre') or ''}
+                            for c in m.get('componentes') or []]}
+
+    @staticmethod
+    def _avisos_formula(monomios, sin_indice, base):
+        from core import formula_polinomica as fp
+        av = []
+        if len(monomios) > fp.MAX_MONOMIOS:
+            av.append(f"hay más de {fp.MAX_MONOMIOS} monomios")
+        for m in monomios:
+            if (m.get('coeficiente') or 0) < fp.MIN_INCIDENCIA:
+                av.append(f"{m.get('simbolo')}: coeficiente menor que "
+                          f"{fp.MIN_INCIDENCIA:g}")
+            if m.get('tipo') not in ('MO', 'GU') \
+                    and len(m.get('componentes') or []) > fp.MAX_IU_POR_INDICE:
+                av.append(f"{m.get('simbolo')}: más de {fp.MAX_IU_POR_INDICE} "
+                          "índices; su índice promedia los de mayor peso")
+        if sin_indice > 0 and base > 0:
+            av.append(f"{sin_indice / base:.1%} del presupuesto son insumos sin "
+                      "índice asignado (se les supone el de su tipo); lo asigna "
+                      "el usuario en la app")
+        return av
+
+    def get_formula(self, project_id: int, formula_id: int | None = None):
+        from core import formula_polinomica as fp
+        from core.database import get_db
+        conn = get_db()
+        try:
+            self._proyecto(conn, project_id)
+            f, todas = self._formula_lista(conn, project_id, formula_id)
+        finally:
+            conn.close()
+        aplica, motivo = fp.aplica_formula(project_id)
+        out = {"applies": aplica, "reason": motivo,
+               "formulas": [{"formula_id": x['id'], "number": x['numero'],
+                             "name": x['nombre']} for x in todas],
+               "periods": fp.cargar_periodos(project_id), "monomials": [],
+               "k": None}
+        if f is not None:
+            comps = fp.cargar_componentes(project_id, formula_id=f['id'])
+            mons = [dict(m, componentes=comps.get(m['orden'], []))
+                    for m in fp.cargar_monomios(project_id, f['id'])]
+            out["formula_id"] = f['id']
+            out["monomials"] = [self._monomio(m) for m in mons]
+            if mons and aplica:
+                k = fp.calcular_reajuste_k(project_id, formula_id=f['id'])
+                completo = k['ok'] and not k['monomios_sin_datos']
+                out["k"] = k['k_total'] if completo else None
+                if not completo:
+                    out["k_missing"] = k.get('msg') or (
+                        f"{k['monomios_sin_datos']} monomio(s) sin valor del "
+                        "INEI en esos períodos")
+        inc = fp.incidencias_por_iu(project_id,
+                                    formula_id=f['id'] if f else None)
+        out["incidences_ok"] = inc['ok']
+        if not inc['ok']:
+            out["message"] = inc['msg']
+        out["incidences"] = [
+            {"code": "GU" if i['tipo'] == 'GU' else i['codigo'],
+             "name": i['nombre'], "type": i['tipo'],
+             "incidence": round(i['incidencia'], 6),
+             "all_assigned": i['tipo'] == 'GU' or i['asignado']}
+            for i in inc['ius']]
+        return out
+
+    def _armar_formula(self, project_id, formula_id, monomials):
+        """Los monomios, sin guardar. Sin `monomials`, el cálculo automático."""
+        from core import formula_polinomica as fp
+        if monomials is None:
+            r = fp.calcular_por_iu(project_id, formula_id=formula_id)
+            if not r['ok']:
+                raise ErrorMCP(r['msg'])
+            return r['monomios'], r['monto_sin_indice'], r['base']
+        inc = fp.incidencias_por_iu(project_id, formula_id=formula_id)
+        if not inc['ok']:
+            raise ErrorMCP(inc['msg'])
+        gu = next((i for i in inc['ius'] if i['tipo'] == 'GU'), None)
+        libres = {i['codigo']: i for i in inc['ius'] if i['tipo'] != 'GU'}
+        mons = []
+        for n, m in enumerate(monomials):
+            comps = []
+            for cod in m['index_codes']:
+                if cod not in libres:
+                    raise ErrorMCP(f"monomials[{n}]: el índice {cod} no está en "
+                                   "la obra o ya se usó (get_formula da las "
+                                   "incidencias; GU va solo)")
+                comps.append(dict(libres.pop(cod)))
+            comps.sort(key=lambda c: -c['monto'])
+            c0 = comps[0]
+            mons.append({'tipo': c0['tipo'], 'indice_inei': c0['codigo'],
+                         'componentes': comps,
+                         'monto': sum(c['monto'] for c in comps),
+                         'descripcion': (m.get('description') or '').strip() or (
+                             c0['nombre'] if len(comps) == 1
+                             else f"{c0['nombre']} y {len(comps) - 1} más")})
+        if libres:
+            raise ErrorMCP("faltan índices por repartir: "
+                           + ", ".join(sorted(libres)))
+        fp._simbolos_unicos(mons)
+        propios = [(m.get('symbol') or '').strip() for m in monomials]
+        for m, s in zip(mons, propios):
+            if s:
+                m['simbolo'] = s
+        if gu:
+            mons.append({'tipo': 'GU', 'simbolo': fp.SIMBOLO_GU,
+                         'descripcion': 'Gastos generales y utilidad',
+                         'indice_inei': fp.IU_GASTOS_GENERALES,
+                         'componentes': [dict(gu)], 'monto': gu['monto']})
+        simbolos = [m['simbolo'] for m in mons]
+        if len(set(simbolos)) != len(simbolos):
+            raise ErrorMCP("los símbolos se repiten: " + ", ".join(simbolos))
+        if len(mons) > fp.MAX_MONOMIOS:
+            raise ErrorMCP(f"son {len(mons)} monomios; el máximo es "
+                           f"{fp.MAX_MONOMIOS} (con gastos generales y utilidad)")
+        fp.recalcular_coeficientes(mons, inc['base'])
+        return mons, inc['monto_sin_indice'], inc['base']
+
+    def set_formula(self, project_id: int, formula_id: int | None = None,
+                    monomials: list | None = None, replace: bool = False,
+                    periods: dict | None = None, preview: bool = False):
+        from core import formula_polinomica as fp
+        from core.database import get_db
+        conn = get_db()
+        try:
+            proy = self._proyecto(conn, project_id)
+            self._editable(proy, 'pie')
+            f, _todas = self._formula_lista(conn, project_id, formula_id)
+        finally:
+            conn.close()
+        aplica, motivo = fp.aplica_formula(project_id)
+        if not aplica:
+            raise ErrorMCP(motivo)
+        fid = f['id'] if f else None
+        if periods and preview:
+            raise ErrorMCP("preview no admite periods: los coeficientes se "
+                           "enseñan con los períodos guardados")
+        tiene = bool(f and fp.cargar_monomios(project_id, fid))
+        if not preview and tiene and not replace:
+            raise ErrorMCP("la fórmula ya tiene monomios; pasa replace: true "
+                           "para reemplazarla")
+
+        def responder(mons, sin, base):
+            return {"formula_id": fid,
+                    "monomials": [self._monomio(m) for m in mons],
+                    "sum": round(sum(m['coeficiente'] for m in mons), 3),
+                    "warnings": self._avisos_formula(mons, sin, base)}
+        if preview:
+            return dict(responder(*self._armar_formula(project_id, fid, monomials)),
+                        preview=True, saved=False)
+
+        def accion():
+            nonlocal fid
+            if periods:
+                p = dict(fp.cargar_periodos(project_id))
+                for k, col in (('base_year', 'oferta_anio'),
+                               ('base_month', 'oferta_mes'),
+                               ('adjust_year', 'reajuste_anio'),
+                               ('adjust_month', 'reajuste_mes'),
+                               ('area', 'area_inei')):
+                    if k in periods:
+                        p[col] = periods[k]
+                fp.guardar_periodos(project_id, **p)
+            if fid is None:
+                fid = fp.formula_por_defecto(project_id)
+            mons, sin, base = self._armar_formula(project_id, fid, monomials)
+            fp.guardar_monomios(project_id, mons, fid)
+            return dict(responder(mons, sin, base), saved=True)
+        return self._externa('set_formula', project_id, accion, 'pie')
+
+    # ── Cronograma (lectura) y curva S ───────────────────────────────────
+    def get_schedule(self, project_id: int, offset: int = 0, limit: int = 200):
+        from core import cronograma as c
+        from core.database import get_db
+        conn = get_db()
+        try:
+            proy = self._proyecto(conn, project_id)
+            partidas = ops.partidas_en_orden(conn, project_id)
+            mapa = c.get_cronograma_map(conn, project_id)
+        finally:
+            conn.close()
+        plazo = proy.get('plazo') or 0
+        tareas = c.cpm(mapa, partidas, plazo, c.dias_no_laborables(proy, plazo + 365))
+        fila = c.numerar_filas(partidas)
+        todas = [p for p in partidas if not p['es_titulo']]
+        out = []
+        for p in todas[offset:offset + limit]:
+            m, t = mapa.get(p['id'], {}), tareas.get(p['id'])
+            out.append({"item_id": p['id'], "item": p['item'],
+                        "description": p['descripcion'],
+                        "gantt_row": fila[p['id']], "scheduled": bool(m),
+                        "duration": m.get('duracion') if m else None,
+                        "predecessors": m.get('predecesoras') or '',
+                        "milestone": bool(m.get('es_hito')),
+                        "start": t['ES'] if t else None,
+                        "finish": t['EF'] if t else None,
+                        "critical": bool(t and t['critical'])})
+        return {"total": len(todas), "term_days": plazo,
+                "start_date": proy.get('fecha_inicio') or '',
+                "programmed_days": max((t['EF'] for t in tareas.values()),
+                                       default=0),
+                "tasks": out}
+
+    def s_curve(self, project_id: int, period: str = "month"):
+        from core.curva_s import curva_s_comparada
+        from core.database import get_db
+        conn = get_db()
+        try:
+            self._proyecto(conn, project_id)
+        finally:
+            conn.close()
+        r = curva_s_comparada(project_id, {'month': 'mes', 'week': 'semana',
+                                           'calendar_month': 'mes_cal'}[period])
+        return {"period": period, "unit": r['unidad'],
+                "total": r['total_general'], "start_date": r['fecha_inicio'],
+                "rows": [{"label": x['label'], "planned_pct": x['p_eje'],
+                          "planned_accum_pct": x['p_acu'],
+                          "planned_amount": x['p_mon'],
+                          "replanned_accum_pct": x['r_acu'],
+                          "real_pct": x['x_eje'], "real_accum_pct": x['x_acu'],
+                          "real_amount": x['x_mon'],
+                          "deviation_pct": x['desviacion']}
+                         for x in r['filas']]}
+
+    # ── Valorizaciones ───────────────────────────────────────────────────
+    def _valorizacion(self, conn, val_id):
+        v = conn.execute("SELECT * FROM valorizaciones WHERE id=?",
+                         (val_id,)).fetchone()
+        if v is not None:
+            try:
+                self._proyecto(conn, v['proyecto_id'])
+                return dict(v)
+            except ErrorMCP:
+                pass
+        raise ErrorMCP(f"no existe la valorización {val_id} (usa list_valuations)")
+
+    @staticmethod
+    def _resumen_val(r):
+        return {"base": r['base_val'], "previous": r['ant_val'],
+                "current": r['act_val'], "accumulated": r['acu_val'],
+                "balance": r['sal_val'], "progress_pct": round(r['pct_fisico'], 4)}
+
+    def list_valuations(self, project_id: int):
+        from core import valorizacion as V
+        from core.database import get_db
+        conn = get_db()
+        try:
+            proy = self._proyecto(conn, project_id)
+        finally:
+            conn.close()
+        return {"project_id": project_id,
+                "can_write": not self.usuario.es_invitado
+                and (proy.get('estado') or '') == 'ejecutado',
+                "valuations": [
+                    {"valuation_id": v['id'], "number": v['numero'],
+                     "from": v['periodo_desde'], "to": v['periodo_hasta'],
+                     "state": v['estado'],
+                     **self._resumen_val(V.get_valorizacion_detalle(v['id'])[1])}
+                    for v in V.listar_valorizaciones(project_id)]}
+
+    def get_valuation(self, valuation_id: int, only_executed: bool = False,
+                      offset: int = 0, limit: int = 200):
+        from core import valorizacion as V
+        from core.database import get_db
+        conn = get_db()
+        try:
+            v = self._valorizacion(conn, valuation_id)
+        finally:
+            conn.close()
+        filas, res = V.get_valorizacion_detalle(valuation_id)
+        filas = [f for f in filas if not f['es_titulo']
+                 and (not only_executed or f['acu_metr'])]
+        return {"valuation_id": valuation_id, "project_id": v['proyecto_id'],
+                "number": v['numero'], "from": v['periodo_desde'],
+                "to": v['periodo_hasta'], "state": v['estado'],
+                **self._resumen_val(res), "adjustment": _plano(res['reajuste']),
+                "total": len(filas),
+                "items": [{"item_id": f['id'], "item": f['item'],
+                           "description": f['descripcion'], "unit": f['unidad'],
+                           "unit_price": f['precio_unitario'],
+                           "contract_qty": f['base_metr'],
+                           "previous_qty": f['ant_metr'],
+                           "current_qty": f['act_metr'],
+                           "current_amount": f['act_val'],
+                           "accumulated_qty": f['acu_metr'],
+                           "progress_pct": round(f['pct'], 4),
+                           "from_daily_report": f['origen'] == 'diario'}
+                          for f in filas[offset:offset + limit]]}
+
+    def create_valuation(self, project_id: int, from_date: str, to_date: str):
+        import datetime as dt
+        from core import valorizacion as V
+        from core.database import get_db
+        try:
+            a, b = dt.date.fromisoformat(from_date), dt.date.fromisoformat(to_date)
+        except ValueError:
+            raise ErrorMCP("las fechas van como aaaa-mm-dd") from None
+        if a > b:
+            raise ErrorMCP("from_date es posterior a to_date")
+        conn = get_db()
+        try:
+            self._proyecto(conn, project_id)
+        finally:
+            conn.close()
+        for v in V.listar_valorizaciones(project_id):
+            if v['periodo_desde'] and v['periodo_hasta'] \
+                    and v['periodo_desde'] <= to_date \
+                    and v['periodo_hasta'] >= from_date:
+                raise ErrorMCP(f"el período se cruza con la valorización "
+                               f"{v['numero']} ({v['periodo_desde']} a "
+                               f"{v['periodo_hasta']})")
+
+        def accion():
+            vid = V.crear_valorizacion(project_id, from_date, to_date)
+            return {"valuation_id": vid,
+                    "number": V.get_valorizacion(vid)['numero']}
+        return self._externa('create_valuation', project_id, accion, 'obra')
+
+    def set_valuation_progress(self, valuation_id: int, items: list):
+        from core import valorizacion as V
+        from core.database import get_db
+        conn = get_db()
+        try:
+            v = self._valorizacion(conn, valuation_id)
+        finally:
+            conn.close()
+        pid = v['proyecto_id']
+
+        def cambio(conn, proy):
+            v = self._valorizacion(conn, valuation_id)
+            if v['estado'] == 'cerrada':
+                raise ErrorMCP("la valorización está cerrada; la reabre el "
+                               "usuario en la app")
+            por_id = {p['id']: p for p in ops.partidas_en_orden(conn, pid)}
+            diario = {r[0] for r in conn.execute(
+                "SELECT partida_id FROM valorizacion_detalle WHERE "
+                "valorizacion_id=? AND origen='diario'", (valuation_id,))}
+            vistos, exceso = set(), []
+            for n, x in enumerate(items):
+                p = por_id.get(x['item_id'])
+                if p is None or p['es_titulo']:
+                    raise ErrorMCP(f"items[{n}]: {x['item_id']} no es una partida "
+                                   "de este proyecto")
+                if p['id'] in vistos:
+                    raise ErrorMCP(f"items[{n}]: la partida se repite")
+                if p['id'] in diario:
+                    raise ErrorMCP(f"items[{n}]: {p['item']} sale del cuaderno de "
+                                   "obra y se cambia allí")
+                vistos.add(p['id'])
+                conn.execute(
+                    "INSERT INTO valorizacion_detalle (valorizacion_id, "
+                    "partida_id, metrado_periodo, origen) VALUES (?,?,?,'manual') "
+                    "ON CONFLICT(valorizacion_id, partida_id) DO UPDATE SET "
+                    "metrado_periodo=excluded.metrado_periodo, origen='manual'",
+                    (valuation_id, p['id'], x['quantity']))
+                acu = conn.execute(
+                    "SELECT SUM(d.metrado_periodo) FROM valorizacion_detalle d "
+                    "JOIN valorizaciones w ON w.id=d.valorizacion_id WHERE "
+                    "w.proyecto_id=? AND d.partida_id=?",
+                    (pid, p['id'])).fetchone()[0] or 0
+                if acu > (p['metrado'] or 0) + 1e-9:
+                    exceso.append({"item_id": p['id'], "item": p['item'],
+                                   "accumulated_qty": acu,
+                                   "contract_qty": p['metrado'] or 0})
+            return {"valuation_id": valuation_id, "updated": len(vistos),
+                    "over_contract": exceso}
+        res = self._escribir('set_valuation_progress', pid, 'obra', cambio)
+        if not self.simular:
+            res = dict(res, **self._resumen_val(
+                V.get_valorizacion_detalle(valuation_id)[1]))
+        return res
+
     # ── Reportes ─────────────────────────────────────────────────────────
     def export_report(self, project_id: int, report: str, path: str,
                       overwrite: bool = False, cover: bool = True):
@@ -1250,8 +1846,10 @@ class Operaciones:
         if not ruta.is_absolute():
             raise ErrorMCP("la ruta debe ser absoluta")
         ext = ruta.suffix.lower()
-        if ext not in ('.pdf', '.xlsx'):
-            raise ErrorMCP("la ruta debe terminar en .pdf o .xlsx")
+        if ext not in ('.pdf', '.xlsx', '.docx'):
+            raise ErrorMCP("la ruta debe terminar en .pdf, .xlsx o .docx")
+        if ext == '.docx' and report not in REPORTES_DOCX:
+            raise ErrorMCP("en Word hay: " + ", ".join(REPORTES_DOCX))
         if ext == '.xlsx' and report not in REPORTES_XLSX:
             raise ErrorMCP("en Excel hay: " + ", ".join(REPORTES_XLSX))
         if not ruta.parent.is_dir():
@@ -1279,6 +1877,9 @@ class Operaciones:
                 from core import pdf_reports
                 pdf_reports.generar_pdf_archivo(report, project_id, tmp,
                                                 with_cover=cover)
+            elif ext == '.docx':
+                from core import word_reports
+                word_reports.generar_word(report, project_id, tmp)
             else:
                 from core import exporter
                 fn = {'presupuesto': exporter.exportar_presupuesto,
